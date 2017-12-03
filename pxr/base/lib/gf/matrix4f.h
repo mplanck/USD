@@ -28,6 +28,12 @@
 #ifndef GF_MATRIX4F_H
 #define GF_MATRIX4F_H
 
+/// \file gf/matrix4f.h
+/// \ingroup group_gf_LinearAlgebra
+
+#include "pxr/pxr.h"
+#include "pxr/base/gf/api.h"
+#include "pxr/base/gf/declare.h"
 #include "pxr/base/gf/matrixData.h"
 #include "pxr/base/gf/vec4f.h"
 #include "pxr/base/gf/traits.h"
@@ -41,22 +47,22 @@
 #include <iosfwd>
 #include <vector>
 
-/// \file matrix4f.h
-/// \ingroup group_gf_LinearAlgebra
-///
+PXR_NAMESPACE_OPEN_SCOPE
 
 template <>
 struct GfIsGfMatrix<class GfMatrix4f> { static const bool value = true; };
 
 class GfMatrix4d;
 class GfMatrix4f;
+class GfRotation;
 class GfMatrix3f;
 
-/// \class GfMatrix4f matrix4f.h "pxr/base/gf/matrix4f.h"
+/// \class GfMatrix4f
 /// \ingroup group_gf_LinearAlgebra
-/// \brief Stores a 4x4 matrix of \c float elements. A basic type.
 ///
-/// Matrices are defined to be in row-major order, so <c>matrix[i][j]</c> 
+/// Stores a 4x4 matrix of \c float elements. A basic type.
+///
+/// Matrices are defined to be in row-major order, so <c>matrix[i][j]</c>
 /// indexes the element in the \e i th row and the \e j th column.
 ///
 /// <h3>3D Transformations</h3>
@@ -86,8 +92,7 @@ public:
     static const size_t numRows = 4;
     static const size_t numColumns = 4;
 
-    /// Default constructor. Leaves the matrix component values
-    /// undefined.
+    /// Default constructor. Leaves the matrix component values undefined.
     GfMatrix4f() {}
 
     /// Constructor. Initializes the matrix from 16 independent
@@ -103,14 +108,14 @@ public:
             m30, m31, m32, m33);
     }
 
-    /// Constructor. Initializes the matrix from a 4x4 array of
-    /// \c float values, specified in row-major order.
+    /// Constructor. Initializes the matrix from a 4x4 array
+    /// of \c float values, specified in row-major order.
     GfMatrix4f(const float m[4][4]) {
         Set(m);
     }
 
-    /// Constructor. Explicitly initializes the matrix to \e s times
-    /// the identity matrix.
+    /// Constructor. Explicitly initializes the matrix to \e s times the
+    /// identity matrix.
     explicit GfMatrix4f(float s) {
         SetDiagonal(s);
     }
@@ -121,20 +126,22 @@ public:
         SetDiagonal(v);
     }
 
-    /// Constructor.  Initialize the matrix from a vector of vectors of double.
-    /// The vector is expected to be 4x4.  If it is too big, only the first
-    /// 4 rows and/or columns will be used.  If it is too small, uninitialized
-    /// elements will be filled in with the corresponding elements from an
-    /// identity matrix.
+    /// Constructor.  Initialize the matrix from a vector of vectors of
+    /// double. The vector is expected to be 4x4. If it is
+    /// too big, only the first 4 rows and/or columns will be used.
+    /// If it is too small, uninitialized elements will be filled in with
+    /// the corresponding elements from an identity matrix.
     ///
+    GF_API
     explicit GfMatrix4f(const std::vector< std::vector<double> >& v);
 
-    /// Constructor.  Initialize the matrix from a vector of vectors of float.
-    /// The vector is expected to be 4x4.  If it is too big, only the first
-    /// 4 rows and/or columns will be used.  If it is too small, uninitialized
-    /// elements will be filled in with the corresponding elements from an
-    /// identity matrix.
+    /// Constructor.  Initialize the matrix from a vector of vectors of
+    /// float. The vector is expected to be 4x4. If it is
+    /// too big, only the first 4 rows and/or columns will be used.
+    /// If it is too small, uninitialized elements will be filled in with
+    /// the corresponding elements from an identity matrix.
     ///
+    GF_API
     explicit GfMatrix4f(const std::vector< std::vector<float> >& v);
 
     /// Constructor.  Initialize the matrix from 4 row vectors of
@@ -143,6 +150,7 @@ public:
     /// uninitialized elements will be filled in with the
     /// corresponding elements from an identity matrix.
     ///
+    GF_API
     explicit GfMatrix4f(const std::vector<double>& r0,
                         const std::vector<double>& r1,
                         const std::vector<double>& r2,
@@ -154,17 +162,25 @@ public:
     /// uninitialized elements will be filled in with the
     /// corresponding elements from an identity matrix.
     ///
+    GF_API
     explicit GfMatrix4f(const std::vector<float>& r0,
                         const std::vector<float>& r1,
                         const std::vector<float>& r2,
                         const std::vector<float>& r3);
 
-    /// Constructor. Initializes a transformation matrix to perform the indicated
-    /// rotation and translation.
+    /// Constructor. Initializes a transformation matrix to perform the
+    /// indicated rotation and translation.
+    GF_API
+    GfMatrix4f(const GfRotation& rotate,
+               const GfVec3f& translate);
+
+    /// Constructor. Initializes a transformation matrix to perform the
+    /// indicated rotation and translation.
+    GF_API
     GfMatrix4f(const GfMatrix3f& rotmx,
                const GfVec3f& translate);
-    //!
-    // This explicit constructor converts a "double" matrix to a "float" matrix.
+    /// This explicit constructor converts a "double" matrix to a "float" matrix.
+    GF_API
     explicit GfMatrix4f(const class GfMatrix4d& m);
 
     /// Sets a row of the matrix from a Vec4.
@@ -193,9 +209,9 @@ public:
         return GfVec4f(_mtx[0][i], _mtx[1][i], _mtx[2][i], _mtx[3][i]);
     }
 
-    /// \brief Sets the matrix from 16 independent \c float values, specified
-    /// in row-major order. For example, parameter \e m10 specifies the
-    /// value in row 1 and column 0.
+    /// Sets the matrix from 16 independent \c float values,
+    /// specified in row-major order. For example, parameter \e m10 specifies
+    /// the value in row 1 and column 0.
     GfMatrix4f& Set(float m00, float m01, float m02, float m03, 
                     float m10, float m11, float m12, float m13, 
                     float m20, float m21, float m22, float m23, 
@@ -207,8 +223,8 @@ public:
         return *this;
     }
 
-    /// \brief Sets the matrix from a 4x4 array of \c float values, specified
-    /// in row-major order.
+    /// Sets the matrix from a 4x4 array of \c float
+    /// values, specified in row-major order.
     GfMatrix4f& Set(const float m[4][4]) {
         _mtx[0][0] = m[0][0];
         _mtx[0][1] = m[0][1];
@@ -240,13 +256,16 @@ public:
     }
 
     /// Sets the matrix to \e s times the identity matrix.
+    GF_API
     GfMatrix4f& SetDiagonal(float s);
 
     /// Sets the matrix to have diagonal (<c>v[0], v[1], v[2], v[3]</c>).
+    GF_API
     GfMatrix4f& SetDiagonal(const GfVec4f&);
 
     /// Fills a 4x4 array of \c float values with the values in
     /// the matrix, specified in row-major order.
+    GF_API
     float* Get(float m[4][4]);
 
     /// Returns vector components as an array of \c float values.
@@ -258,15 +277,15 @@ public:
     const float* GetArray() const {
         return _mtx.GetData();
     }
-    
-    /// Accesses an indexed row \e i of the matrix as an array of 4 \c float
-    /// values so that standard indexing (such as <c>m[0][1]</c>) works
-    /// correctly.
+
+    /// Accesses an indexed row \e i of the matrix as an array of 4 \c
+    /// float values so that standard indexing (such as <c>m[0][1]</c>)
+    /// works correctly.
     float* operator [](int i) { return _mtx[i]; }
 
-    /// Accesses an indexed row \e i of the matrix as an array of 4 \c float
-    /// values so that standard indexing (such as <c>m[0][1]</c>) works
-    /// correctly.
+    /// Accesses an indexed row \e i of the matrix as an array of 4 \c
+    /// float values so that standard indexing (such as <c>m[0][1]</c>)
+    /// works correctly.
     const float* operator [](int i) const { return _mtx[i]; }
 
     /// Hash.
@@ -277,14 +296,16 @@ public:
         while (nElems--)
             boost::hash_combine(h, *p++);
         return h;
-    }        
+    }
 
     /// Tests for element-wise matrix equality. All elements must match
     /// exactly for matrices to be considered equal.
+    GF_API
     bool operator ==(const GfMatrix4d& m) const;
 
     /// Tests for element-wise matrix equality. All elements must match
     /// exactly for matrices to be considered equal.
+    GF_API
     bool operator ==(const GfMatrix4f& m) const;
 
     /// Tests for element-wise matrix inequality. All elements must match
@@ -300,16 +321,19 @@ public:
     }
 
     /// Returns the transpose of the matrix.
+    GF_API
     GfMatrix4f GetTranspose() const;
 
     /// Returns the inverse of the matrix, or FLT_MAX * SetIdentity() if the
-    /// matrix is singular. (FLT_MAX is the largest value a \c float can have, 
-    /// as defined by the system.) The matrix is considered singular if the 
-    /// determinant is less than or equal to the optional parameter \e eps.
-    /// If \e det is non-null, <c>*det</c> is set to the determinant.
+    /// matrix is singular. (FLT_MAX is the largest value a \c float can have,
+    /// as defined by the system.) The matrix is considered singular if the
+    /// determinant is less than or equal to the optional parameter \e eps. If
+    /// \e det is non-null, <c>*det</c> is set to the determinant.
+    GF_API
     GfMatrix4f GetInverse(double* det = NULL, double eps = 0) const;
 
     /// Returns the determinant of the matrix.
+    GF_API
     double GetDeterminant() const;
 
     /// Sets a row of the matrix from a Vec3.
@@ -339,31 +363,34 @@ public:
         // XXX Should add GfAreOrthogonal(v0, v1, v2) (which also
         //     GfRotation::Decompose() could use).
         GfVec3f axis0(GetRow3(0)), axis1(GetRow3(1)), axis2(GetRow3(2));
-	return (GfAbs(GfDot(axis0, axis1)) < GF_MIN_ORTHO_TOLERANCE and
-                GfAbs(GfDot(axis0, axis2)) < GF_MIN_ORTHO_TOLERANCE and
+        return (GfAbs(GfDot(axis0, axis1)) < GF_MIN_ORTHO_TOLERANCE && 
+                GfAbs(GfDot(axis0, axis2)) < GF_MIN_ORTHO_TOLERANCE && 
                 GfAbs(GfDot(axis1, axis2)) < GF_MIN_ORTHO_TOLERANCE);
     }
 
-    /// Makes the matrix orthonormal in place. This is an iterative method that
-    /// is much more stable than the previous cross/cross method.  If the
+    /// Makes the matrix orthonormal in place. This is an iterative method
+    /// that is much more stable than the previous cross/cross method.  If the
     /// iterative method does not converge, a warning is issued.
     ///
     /// Returns true if the iteration converged, false otherwise.  Leaves any
     /// translation part of the matrix unchanged.  If \a issueWarning is true,
     /// this method will issue a warning if the iteration does not converge,
     /// otherwise it will be silent.
+    GF_API
     bool Orthonormalize(bool issueWarning=true);
 
     /// Returns an orthonormalized copy of the matrix.
+    GF_API
     GfMatrix4f GetOrthonormalized(bool issueWarning=true) const;
 
-    /// Returns the sign of the determinant of the upper 3x3 matrix, i.e. 1 for
-    /// a right-handed matrix, -1 for a left-handed matrix, and 0 for a
+    /// Returns the sign of the determinant of the upper 3x3 matrix, i.e. 1
+    /// for a right-handed matrix, -1 for a left-handed matrix, and 0 for a
     /// singular matrix.
+    GF_API
     double GetHandedness() const;
 
-    /// Returns true if the vectors in the upper 3x3 matrix form a right-handed
-    /// coordinate system.
+    /// Returns true if the vectors in the upper 3x3 matrix form a
+    /// right-handed coordinate system.
     bool IsRightHanded() const {
         return GetHandedness() == 1.0;
     }
@@ -375,17 +402,18 @@ public:
     }
 
     /// Post-multiplies matrix \e m into this matrix.
+    GF_API
     GfMatrix4f& operator *=(const GfMatrix4f& m);
 
     /// Multiplies the matrix by a float.
+    GF_API
     GfMatrix4f& operator *=(double);
 
-    ///
-    // Returns the product of a matrix and a float.
+    /// Returns the product of a matrix and a float.
     friend GfMatrix4f operator *(const GfMatrix4f& m1, double d)
     {
-	GfMatrix4f m = m1;
-	return m *= d;
+        GfMatrix4f m = m1;
+        return m *= d;
     }
 
     ///
@@ -396,12 +424,15 @@ public:
     }
 
     /// Adds matrix \e m to this matrix.
+    GF_API
     GfMatrix4f& operator +=(const GfMatrix4f& m);
 
     /// Subtracts matrix \e m from this matrix.
+    GF_API
     GfMatrix4f& operator -=(const GfMatrix4f& m);
 
     /// Returns the unary negation of matrix \e m.
+    GF_API
     friend GfMatrix4f operator -(const GfMatrix4f& m);
 
     /// Adds matrix \e m2 to \e m1
@@ -412,15 +443,15 @@ public:
         return tmp;
     }
 
-    /// Subtracts matrix \e m2 from \e m1
+    /// Subtracts matrix \e m2 from \e m1.
     friend GfMatrix4f operator -(const GfMatrix4f& m1, const GfMatrix4f& m2)
     {
         GfMatrix4f tmp(m1);
         tmp -= m2;
         return tmp;
     }
-    
-    /// Multiplies matrix \e m1 by \e m2
+
+    /// Multiplies matrix \e m1 by \e m2.
     friend GfMatrix4f operator *(const GfMatrix4f& m1, const GfMatrix4f& m2)
     {
         GfMatrix4f tmp(m1);
@@ -451,18 +482,214 @@ public:
     }
 
     /// Sets matrix to specify a uniform scaling by \e scaleFactor.
+    GF_API
     GfMatrix4f& SetScale(float scaleFactor);
 
     /// Returns the matrix with any scaling or shearing removed,
     /// leaving only the rotation and translation.
     /// If the matrix cannot be decomposed, returns the original matrix.
+    GF_API
     GfMatrix4f RemoveScaleShear() const;
 
+    /// \name 3D Transformation Utilities
+    /// @{
+
+    /// Sets the matrix to specify a rotation equivalent to \e rot,
+    /// and clears the translation.
+    GF_API
+    GfMatrix4f& SetRotate(const GfRotation &rot);
+
+    /// Sets the matrix to specify a rotation equivalent to \e rot,
+    /// without clearing the translation.
+    GF_API
+    GfMatrix4f& SetRotateOnly(const GfRotation &rot);
+
+    /// Sets the matrix to specify a rotation equivalent to \e mx,
+    /// and clears the translation.
+    GF_API
+    GfMatrix4f& SetRotate(const GfMatrix3f &mx);
+
+    /// Sets the matrix to specify a rotation equivalent to \e mx,
+    /// without clearing the translation.
+    GF_API
+    GfMatrix4f& SetRotateOnly(const GfMatrix3f &mx);
+
+    /// Sets the matrix to specify a nonuniform scaling in x, y, and z by
+    /// the factors in vector \e scaleFactors.
+    GF_API
+    GfMatrix4f& SetScale(const GfVec3f &scaleFactors);
+
+    /// Sets matrix to specify a translation by the vector \e trans,
+    /// and clears the rotation.
+    GF_API
+    GfMatrix4f& SetTranslate(const GfVec3f &trans);
+
+    /// Sets matrix to specify a translation by the vector \e trans,
+    /// without clearing the rotation.
+    GF_API
+    GfMatrix4f& SetTranslateOnly(const GfVec3f &t);
+
+    /// Sets matrix to specify a rotation by \e rotate and a
+    /// translation by \e translate.
+    GF_API
+    GfMatrix4f& SetTransform(const GfRotation& rotate,
+                             const GfVec3f& translate);
+
+    /// Sets matrix to specify a rotation by \e rotmx and a
+    /// translation by \e translate.
+    GF_API
+    GfMatrix4f& SetTransform(const GfMatrix3f& rotmx,
+                             const GfVec3f& translate);
+
+    /// Sets the matrix to specify a viewing matrix from parameters
+    /// similar to those used by <c>gluLookAt(3G)</c>. \e eyePoint
+    /// represents the eye point in world space. \e centerPoint
+    /// represents the world-space center of attention. \e upDirection
+    /// is a vector indicating which way is up.
+    GF_API
+    GfMatrix4f& SetLookAt(const GfVec3f &eyePoint,
+                          const GfVec3f &centerPoint,
+                          const GfVec3f &upDirection);
+
+    /// Sets the matrix to specify a viewing matrix from a world-space
+    /// \e eyePoint and a world-space rotation that rigidly rotates the
+    /// orientation from its canonical frame, which is defined to be
+    /// looking along the <c>-z</c> axis with the <c>+y</c> axis as the up
+    /// direction.
+    GF_API
+    GfMatrix4f& SetLookAt(const GfVec3f &eyePoint,
+                          const GfRotation &orientation);
+
+    /// Factors the matrix into 5 components:
+    /// \li <c>\e M = r * s * -r * u * t</c>
+    /// where
+    /// \li \e t is a translation.
+    /// \li \e u and \e r are rotations, and \e -r is the transpose
+    ///     (inverse) of \e r. The \e u matrix may contain shear
+    ///     information.
+    /// \li \e s is a scale.
+    /// Any projection information could be returned in matrix \e p,
+    /// but currently p is never modified.
+    ///
+    /// Returns \c false if the matrix is singular (as determined by \e eps).
+    /// In that case, any zero scales in \e s are clamped to \e eps
+    /// to allow computation of \e u.
+    GF_API
+    bool Factor(GfMatrix4f* r, GfVec3f* s, GfMatrix4f* u,
+                GfVec3f* t, GfMatrix4f* p,
+                float eps = 1e-5) const;
+
+    /// Returns the translation part of the matrix, defined as the first three
+    /// elements of the last row.
+    GfVec3f ExtractTranslation() const {
+        return GfVec3f(_mtx[3][0], _mtx[3][1], _mtx[3][2]);
+    }
+
+    /// Returns the rotation corresponding to this matrix. This works well
+    /// only if the matrix represents a rotation.
+    ///
+    /// For good results, consider calling Orthonormalize() before calling
+    /// this method.
+    GF_API
+    GfRotation ExtractRotation() const;
+
+    /// Decompose the rotation corresponding to this matrix about 3 orthogonal
+    /// axes.  If the axes are not orthogonal, warnings will be spewed.
+    ///
+    /// This is a convenience method that is equivalent to calling
+    /// ExtractRotation().Decompose().
+    GF_API
+    GfVec3f DecomposeRotation(const GfVec3f &axis0,
+                              const GfVec3f &axis1,
+                              const GfVec3f &axis2) const;
+
+    /// Returns the rotation corresponding to this matrix. This works well
+    /// only if the matrix represents a rotation.
+    ///
+    /// For good results, consider calling Orthonormalize() before calling
+    /// this method.
+    GF_API
+    GfMatrix3f ExtractRotationMatrix() const;
+
+    /// Transforms the row vector \e vec by the matrix, returning the result.
+    /// This treats the vector as a 4-component vector whose fourth component
+    /// is 1.
+    GfVec3d Transform(const GfVec3d &vec) const {
+        return GfProject(GfVec4d(
+            vec[0] * _mtx[0][0] + vec[1] * _mtx[1][0] + vec[2] * _mtx[2][0] + _mtx[3][0],
+            vec[0] * _mtx[0][1] + vec[1] * _mtx[1][1] + vec[2] * _mtx[2][1] + _mtx[3][1],
+            vec[0] * _mtx[0][2] + vec[1] * _mtx[1][2] + vec[2] * _mtx[2][2] + _mtx[3][2],
+            vec[0] * _mtx[0][3] + vec[1] * _mtx[1][3] + vec[2] * _mtx[2][3] + _mtx[3][3]));
+    }
+
+    /// Transforms the row vector \e vec by the matrix, returning the result.
+    /// This treats the vector as a 4-component vector whose fourth component
+    /// is 1. This is an overloaded method; it differs from the other version
+    /// in that it returns a different value type.
+    GfVec3f Transform(const GfVec3f &vec) const {
+        return (GfProject(GfVec4f(
+            vec[0] * _mtx[0][0] + vec[1] * _mtx[1][0] + vec[2] * _mtx[2][0] + _mtx[3][0],
+            vec[0] * _mtx[0][1] + vec[1] * _mtx[1][1] + vec[2] * _mtx[2][1] + _mtx[3][1],
+            vec[0] * _mtx[0][2] + vec[1] * _mtx[1][2] + vec[2] * _mtx[2][2] + _mtx[3][2],
+            vec[0] * _mtx[0][3] + vec[1] * _mtx[1][3] + vec[2] * _mtx[2][3] + _mtx[3][3])));
+    }
+
+    /// Transforms row vector \e vec by the matrix, returning the result. This
+    /// treats the vector as a direction vector, so the translation
+    /// information in the matrix is ignored. That is, it treats the vector as
+    /// a 4-component vector whose fourth component is 0.
+    GfVec3d TransformDir(const GfVec3d &vec) const {
+        return GfVec3d(
+            vec[0] * _mtx[0][0] + vec[1] * _mtx[1][0] + vec[2] * _mtx[2][0],
+            vec[0] * _mtx[0][1] + vec[1] * _mtx[1][1] + vec[2] * _mtx[2][1],
+            vec[0] * _mtx[0][2] + vec[1] * _mtx[1][2] + vec[2] * _mtx[2][2]);
+    }
+
+    /// Transforms row vector \e vec by the matrix, returning the result. This
+    /// treats the vector as a direction vector, so the translation
+    /// information in the matrix is ignored. That is, it treats the vector as
+    /// a 4-component vector whose fourth component is 0.  This is an
+    /// overloaded method; it differs from the other version in that it
+    /// returns a different value type.
+    GfVec3f TransformDir(const GfVec3f &vec) const {
+        return GfVec3f(
+            vec[0] * _mtx[0][0] + vec[1] * _mtx[1][0] + vec[2] * _mtx[2][0],
+            vec[0] * _mtx[0][1] + vec[1] * _mtx[1][1] + vec[2] * _mtx[2][1],
+            vec[0] * _mtx[0][2] + vec[1] * _mtx[1][2] + vec[2] * _mtx[2][2]);
+    }
+
+    /// Transforms the row vector \e vec by the matrix, returning the result.
+    /// This treats the vector as a 4-component vector whose fourth component
+    /// is 1 and ignores the fourth column of the matrix (i.e. assumes it is
+    /// (0, 0, 0, 1)).
+    GfVec3d TransformAffine(const GfVec3d &vec) const {
+        return GfVec3d(
+            vec[0] * _mtx[0][0] + vec[1] * _mtx[1][0] + vec[2] * _mtx[2][0] + _mtx[3][0],
+            vec[0] * _mtx[0][1] + vec[1] * _mtx[1][1] + vec[2] * _mtx[2][1] + _mtx[3][1],
+            vec[0] * _mtx[0][2] + vec[1] * _mtx[1][2] + vec[2] * _mtx[2][2] + _mtx[3][2]);
+    }
+
+    /// Transforms the row vector \e vec by the matrix, returning the result.
+    /// This treats the vector as a 4-component vector whose fourth component
+    /// is 1 and ignores the fourth column of the matrix (i.e. assumes it is
+    /// (0, 0, 0, 1)).
+    GfVec3f TransformAffine(const GfVec3f &vec) const {
+        return GfVec3f(
+            vec[0] * _mtx[0][0] + vec[1] * _mtx[1][0] + vec[2] * _mtx[2][0] + _mtx[3][0],
+            vec[0] * _mtx[0][1] + vec[1] * _mtx[1][1] + vec[2] * _mtx[2][1] + _mtx[3][1],
+            vec[0] * _mtx[0][2] + vec[1] * _mtx[1][2] + vec[2] * _mtx[2][2] + _mtx[3][2]);
+    }
+    /// @}
+
 private:
-    /// Returns the determinant of the 3x3 submatrix specified by the
-    /// three given row and column indices (0-3 for each).
+    /// Returns the determinant of the 3x3 submatrix specified by the three
+    /// given row and column indices (0-3 for each).
+    GF_API
     double _GetDeterminant3(size_t row1, size_t row2, size_t row3,
        size_t col1, size_t col2, size_t col3) const;
+
+    /// Diagonalizes the upper 3x3 matrix of a matrix known to be symmetric.
+    void _Jacobi3(GfVec3d *eigenvalues, GfVec3d eigenvectors[3]) const;
 
 private:
     /// Matrix storage, in row-major order.
@@ -474,6 +701,8 @@ private:
 
 /// Output a GfMatrix4f
 /// \ingroup group_gf_DebuggingOutput
-std::ostream& operator<<(std::ostream &, GfMatrix4f const &);
+GF_API std::ostream& operator<<(std::ostream &, GfMatrix4f const &);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // GF_MATRIX4F_H

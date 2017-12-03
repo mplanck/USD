@@ -2,7 +2,7 @@
 (
     "This file describes the USD Geometric schemata for code generation."
     subLayers = [
-        @../usd/schema.usda@
+        @usd/schema.usda@
     ]
 )
 
@@ -62,7 +62,7 @@ over "GLOBAL" (
                 UsdGeomImageable::GetOrderedPurposeTokens."""
             }
             dictionary faceSet = {
-                string doc = """This is the namespace prefix used by 
+                string doc = """<Deprecated> This is the namespace prefix used by 
                 UsdGeomFaceSetAPI for authoring faceSet attributes."""
             }
             dictionary collection = {
@@ -73,29 +73,10 @@ over "GLOBAL" (
                 string doc = """Stage-level metadata that encodes a scene's
                 orientation as a token whose value can be "Y" or "Z"."""
             }
-            dictionary edgeOnly = {
-                string doc = """Legacy token representing a deprecated 
-                faceVaryingInterpolateBoundary state. The modern equivalent
-                is UsdGeomTokens->none."""
-            }
-            dictionary edgeAndCorner = {
-                string doc = """Legacy token representing a deprecated 
-                faceVaryingInterpolateBoundary state. The modern equivalent
-                is UsdGeomTokens->cornersPlus1"""
-            }
-            dictionary alwaysSharp = {
-                string doc = """Legacy token representing a deprecated 
-                faceVaryingInterpolateBoundary state. The modern equivalent
-                is UsdGeomTokens->boundaries."""
-            }
-            dictionary bilinear = {
-                string doc = """Legacy token representing a deprecated 
-                faceVaryingInterpolateBoundary state. The modern equivalent
-                is UsdGeomTokens->all."""
-            }
-            dictionary faceVaryingInterpolateBoundary = {
-                string doc = """Legacy token. The modern equivalent
-                is faceVaryingLinearInterpolation."""
+            dictionary inactiveIds = {
+                string doc = """int64listop prim metadata that specifies
+                the PointInstancer ids that should be masked (unrenderable)
+                over all time."""
             }
         }
     }
@@ -105,7 +86,7 @@ over "GLOBAL" (
 
 class "Imageable" (
     inherits = </Typed>
-    doc = """\\brief Base class for all prims that may require rendering or 
+    doc = """Base class for all prims that may require rendering or 
     visualization of some sort. The primary attributes of Imageable 
     are \\em visibility and \\em purpose, which each provide instructions for
     what geometry should be included for processing by rendering and other
@@ -162,10 +143,33 @@ class "Imageable" (
         \\em proxy can be used together to partition a complicated model
         into a lightweight proxy representation for interactive use, and a
         fully realized, potentially quite heavy, representation for rendering.
-        One can also use UsdVariantSets to create proxy representations, but
-        this can potentially lead to an explosion in variants for models that
-        already have several axes of variation.  Purpose provides us with
-        another tool for interactive complexity management."""
+        One can use UsdVariantSets to create proxy representations, but doing
+        so requires that we recompose parts of the UsdStage in order to change
+        to a different runtime level of detail, and that does not interact
+        well with the needs of multithreaded rendering. Purpose provides us with
+        a better tool for dynamic, interactive complexity management."""
+    )
+    rel proxyPrim (
+        doc = """The \\em proxyPrim relationship allows us to link a
+        prim whose \\em purpose is "render" to its (single target)
+        purpose="proxy" prim.  This is entirely optional, but can be
+        useful in several scenarios:
+        
+        \\li In a pipeline that does pruning (for complexity management)
+        by deactivating prims composed from asset references, when we
+        deactivate a purpose="render" prim, we will be able to discover
+        and additionally deactivate its associated purpose="proxy" prim,
+        so that preview renders reflect the pruning accurately.
+        
+        \\li DCC importers may be able to make more aggressive optimizations
+        for interactive processing and display if they can discover the proxy
+        for a given render prim.
+        
+        \\li With a little more work, a Hydra-based application will be able
+        to map a picked proxy prim back to its render geometry for selection.
+
+        \\note It is only valid to author the proxyPrim relationship on
+        prims whose purpose is "render"."""
     )
 }
 
@@ -176,27 +180,13 @@ class "Xformable" (
 #include "pxr/usd/usdGeom/xformOp.h" 
 #include <vector> """
     }
-    doc = """\\brief Base class for all transformable prims, which allows arbitrary
+    doc = """Base class for all transformable prims, which allows arbitrary
     sequences of component affine transformations to be encoded.
 
-    \\anchor usdGeom_linAlgBasics
-    <b>A Note about UsdGeom Linear Algebra</b>
+    \\note 
+    You may find it useful to review \\ref UsdGeom_LinAlgBasics while reading
+    this class description.
     
-    To ensure reliable interchange, we stipulate the following foundational
-    mathematical assumptions:
-    \\li Matrices are laid out and indexed in row-major order, such that, given
-    a \\c GfMatrix4d datum \\em mat, \\em mat[3][1] denotes the second column
-    of the fourth row.
-    \\li GfVec datatypes are row vectors that <b>pre-multiply</b> matrices to 
-    effect transformations, which implies, for example, that it is the fourth 
-    row of a GfMatrix4d that specifies the translation of the transformation.
-    \\li GfQuatf and GfQuatd quaternion objects are laid out with the first 
-    element as the imaginary 3-vector, followed by the real component.
-    \\li All rotation angles are expressed in degrees, not radians.
-    \\li Vector cross-products and rotations intrinsically follow the
-    <A HREF="https://en.wikipedia.org/wiki/Right-hand_rule">right hand rule.</A>
-
-
     <b>Supported Component Transformation Operations</b>
     
     UsdGeomXformable currently supports arbitrary sequences of the following
@@ -246,10 +236,10 @@ class "Xformable" (
     
     \\sa \\ref usdGeom_xformableExamples "Using the Authoring API"
     
-    <b>Data Encoding</b>
+    <b>Data Encoding and Op Ordering</b>
     
     Because there is no "fixed schema" of operations, all of the attributes
-    that encode transform operations are \\em custom, and are scoped in 
+    that encode transform operations are dynamic, and are scoped in 
     the namespace "xformOp". The second component of an attribute's name provides
     the \\em type of operation, as listed above.  An "xformOp" attribute can 
     have additional namespace components derived from the \\em opSuffix argument 
@@ -259,41 +249,68 @@ class "Xformable" (
     "xformOp:translate:maya:pivot", "translate" is the type of operation and
     "maya:pivot" is the suffix.
     
-    For example, the following ordered list of attribute declarations in usda
+    The following ordered list of attribute declarations in usda
     define a basic Scale-Rotate-Translate with XYZ Euler angles, wherein the
-    translation is double-precision, and the remainder of the ops are single.
+    translation is double-precision, and the remainder of the ops are single,
+    in which we will:
+
+    <ol>
+    <li> Scale by 2.0 in each dimension
+    <li> Rotate about the X, Y, and Z axes by 30, 60, and 90 degrees, respectively
+    <li> Translate by 100 units in the Y direction
+    </ol>
+
     \\code
-    double3 xformOp:translate
-    float3 xformOp:rotateXYZ
-    float3 xformOp:scale
+    float3 xformOp:rotateXYZ = (30, 60, 90)
+    float3 xformOp:scale = (2, 2, 2)
+    double3 xformOp:translate = (0, 100, 0)
+    uniform token xformOpOrder = [ "xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale" ]
     \\endcode
+
+    The attributes appear in the dictionary order in which USD, by default,
+    sorts them.  To ensure the ops are recovered and evaluated in the correct
+    order, the schema introduces the **xformOpOrder** attribute, which
+    contains the names of the op attributes, in the precise sequence in which
+    they should be pushed onto a transform stack. **Note** that the order is
+    opposite to what you might expect, given the matrix algebra described in
+    \\ref UsdGeom_LinAlgBasics.  This also dictates order of op creation,
+    since each call to AddXformOp() adds a new op to the end of the
+    \\b xformOpOrder array, as a new "most-local" operation.  See 
+    \\ref usdGeom_xformableExamples "Example 2 below" for C++ code that could
+    have produced this USD.
     
     If it were important for the prim's rotations to be independently 
     overridable, we could equivalently (at some performance cost) encode
     the transformation also like so:
     \\code
-    double3 xformOp:translate
-    float xformOp:rotateZ
-    float xformOp:rotateY
-    float xformOp:rotateX
-    float3 xformOp:scale
+    float xformOp:rotateX = 30
+    float xformOp:rotateY = 60
+    float xformOp:rotateZ = 90
+    float3 xformOp:scale = (2, 2, 2)
+    double3 xformOp:translate = (0, 100, 0)
+    uniform token xformOpOrder = [ "xformOp:translate", "xformOp:rotateZ", "xformOp:rotateY", "xformOp:rotateX", "xformOp:scale" ]
     \\endcode
     
+    Again, note that although we are encoding an XYZ rotation, the three
+    rotations appear in the **xformOpOrder** in the opposite order, with Z,
+    followed, by Y, followed by X.
+
     Were we to add a Maya-style scalePivot to the above example, it might 
     look like the following:
     \\code
-    double3 xformOp:translate
-    float xformOp:rotateXYZ
+    float3 xformOp:rotateXYZ = (30, 60, 90)
+    float3 xformOp:scale = (2, 2, 2)
+    double3 xformOp:translate = (0, 100, 0)
     double3 xformOp:translate:scalePivot
-    float3 xformOp:scale
+    uniform token xformOpOrder = [ "xformOp:translate", "xformOp:rotateXYZ", "xformOp:translate:scalePivot", "xformOp:scale" ]
     \\endcode
 
-    <b>Paired "Inverted" Ops and Op Ordering</b>
+    <b>Paired "Inverted" Ops</b>
 
     We have been claiming that the ordered list of ops serves as a set
     of instructions to a transform stack, but you may have noticed in the last
     example that there is a missing operation - the pivot for the scale op
-    needs to be applied in its inverse-form as a final op!  In the 
+    needs to be applied in its inverse-form as a final (most local) op!  In the 
     AbcGeom::Xform schema, we would have encoded an actual "final" translation
     op whose value was authored by the exporter as the negation of the pivot's
     value.  However, doing so would be brittle in USD, given that each op can
@@ -301,18 +318,13 @@ class "Xformable" (
     maintained as the negation of the other in order for successful
     re-importation of the schema cannot be expressed in USD.
     
-    Our solution leverages the last component of the encoding: we already
-    require a statement of the op ordering (since they are attributes, they
-    will, in general be retrieved in dictionary order using the core API's).
-    We express this as a uniform builtin VtTokenArray attribute
-    \\em xformOpOrder, whose elements contain the full attribute names, 
-    in order, of the UsdGeomXformable transform operations.  It also may
-    contain one of two special tokens that address the paired op and
-    "stack resetting" behavior.
+    Our solution leverages the **xformOpOrder** member of the schema, which,
+    in addition to ordering the ops, may also contain one of two special
+    tokens that address the paired op and "stack resetting" behavior.
 
     The "paired op" behavior is encoded as an "!invert!" prefix in 
-    \\em xformOpOrder, as the result of an AddXformOp(isInverseOp=True) call.  
-    The \\em xformOpOrder for the last example would look like:
+    \\b xformOpOrder, as the result of an AddXformOp(isInverseOp=True) call.  
+    The \\b xformOpOrder for the last example would look like:
     \\code
     uniform token[] xformOpOrder = [ "xformOp:translate", "xformOp:rotateXYZ", "xformOp:translate:scalePivot", "xformOp:scale", "!invert!xformOp:translate:scalePivot" ]
     \\endcode
@@ -347,13 +359,16 @@ class "Xformable" (
     \\anchor usdGeom_xformableExamples
     <b>Using the C++ API</b>
     
-    #1. Writing out a simple transform matrix encoding
+    #1. Creating a simple transform matrix encoding
     \\snippet examples.cpp CreateMatrixWithDefault
     
-    #2. Writing out an SRT with pivot using UsdGeomXformCommonAPI
+    #2. Creating the simple SRT from the example above
+    \\snippet examples.cpp CreateExampleSRT
+    
+    #3. Creating a parameterized SRT with pivot using UsdGeomXformCommonAPI
     \\snippet examples.cpp CreateSRTWithDefaults
     
-    #3. Writing out a rotate-only pivot transform with animated
+    #4. Creating a rotate-only pivot transform with animated
     rotation and translation
     \\snippet examples.cpp CreateAnimatedTransform
     
@@ -390,7 +405,7 @@ class Xform "Xform" (
 
 class "Boundable" (
     inherits = </Xformable>
-    doc = """\\brief Boundable introduces the ability for a prim to persistently
+    doc = """Boundable introduces the ability for a prim to persistently
     cache a rectilinear, local-space, extent.
     
     \\section UsdGeom_Boundable_Extent Why Extent and not Bounds ?
@@ -437,7 +452,7 @@ class "Boundable" (
 
 class "Gprim" ( 
     inherits = </Boundable> 
-    doc = """\\brief Base class for all geometric primitives.  
+    doc = """Base class for all geometric primitives.  
     
     Gprim encodes basic graphical properties such as \\em doubleSided and
     \\em orientation, and provides primvars for "display color" and "display
@@ -487,12 +502,17 @@ class "Gprim" (
     
     uniform token orientation = "rightHanded" (
         allowedTokens = ["rightHanded", "leftHanded"]
-        doc = """See: http://renderman.pixar.com/resources/current/rps/attributes.html#orientation-and-sides""")
+        doc = """Orientation specifies whether the gprim's surface normal 
+        should be computed using the right hand rule, or the left hand rule.
+        Please see \\ref UsdGeom_WindingOrder for a deeper explanation and
+        generalization of orientation to composed scenes with transformation
+        hierarchies."""
+        )
 }
 
 class Cube "Cube" (
     inherits = </Gprim>
-    doc = """\\brief Defines a primitive rectilinear cube centered at the origin.
+    doc = """Defines a primitive rectilinear cube centered at the origin.
     
     The fallback values for Cube, Sphere, Cone, and Cylinder are set so that
     they all pack into the same volume/bounds."""
@@ -513,7 +533,7 @@ class Cube "Cube" (
 
 class Sphere "Sphere" (
     inherits = </Gprim>
-    doc = """\\brief Defines a primitive sphere centered at the origin.
+    doc = """Defines a primitive sphere centered at the origin.
     
     The fallback values for Cube, Sphere, Cone, and Cylinder are set so that
     they all pack into the same volume/bounds."""
@@ -533,7 +553,7 @@ class Sphere "Sphere" (
 
 class Cylinder "Cylinder" (
     inherits = </Gprim>
-    doc = """\\brief Defines a primitive cylinder with closed ends, centered at the 
+    doc = """Defines a primitive cylinder with closed ends, centered at the 
     origin, whose spine is along the specified \\em axis.
     
     The fallback values for Cube, Sphere, Cone, and Cylinder are set so that
@@ -564,7 +584,7 @@ class Cylinder "Cylinder" (
 
 class Capsule "Capsule" (
     inherits = </Gprim>
-    doc = """\\brief Defines a primitive capsule, i.e. a cylinder capped by two half
+    doc = """Defines a primitive capsule, i.e. a cylinder capped by two half
     spheres, centered at the origin, whose spine is along the specified
     \\em axis."""
 ) {
@@ -594,7 +614,7 @@ class Capsule "Capsule" (
 
 class Cone "Cone" (
     inherits = </Gprim>
-    doc = """\\brief Defines a primitive cone, centered at the origin, whose spine
+    doc = """Defines a primitive cone, centered at the origin, whose spine
     is along the specified \\em axis, with the apex of the cone pointing
     in the direction of the positive axis.
     
@@ -625,10 +645,15 @@ class Cone "Cone" (
 }
 
 class "PointBased" (
-    doc = """\\brief Base class for all UsdGeomGprims that possess points,
+    doc = """Base class for all UsdGeomGprims that possess points,
     providing common attributes such as normals and velocities."""
     
     inherits = </Gprim>
+    customData = {
+        dictionary extraPlugInfo = {
+            bool implementsComputeExtent = true
+        }
+    }
 ) {
     # positional
     point3f[] points (
@@ -638,12 +663,17 @@ class "PointBased" (
     
     vector3f[] velocities (
         doc = """If provided, 'velocities' should be used by renderers to 
-        compute motion blur for a given 'points' sample, rather than 
-        interpolating to a neighboring 'points' sample.  This is the only
-        reasonable means of specifying motion blur for topologically
+
+        compute positions between samples for the 'points' attribute, rather
+        than interpolating between neighboring 'points' samples.  This is the
+        only reasonable means of computing motion blur for topologically
         varying PointBased primitives.  It follows that the length of each
         'velocities' sample must match the length of the corresponding
-        'points' sample."""
+        'points' sample.  Velocity is measured in position units per second,
+        as per most simulation software. To convert to position units per
+        UsdTimeCode, divide by UsdStage::GetTimeCodesPerSecond().
+        
+        See also \\ref UsdGeom_VelocityInterpolation .""" 
     )
 
     # shaping
@@ -660,6 +690,10 @@ class "PointBased" (
 
 class Mesh "Mesh" (
     inherits = </PointBased>
+    customData = {
+        string extraIncludes = """
+#include "pxr/usd/usd/timeCode.h" """
+    }
     doc="""Encodes a mesh surface whose definition and feature-set
     will converge with that of OpenSubdiv, http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html. Current exceptions/divergences include:
     
@@ -730,6 +764,14 @@ class Mesh "Mesh" (
 
         See http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html#face-varying-interpolation-rules""")
 
+    token triangleSubdivisionRule = "catmullClark" (
+        allowedTokens = ["catmullClark", "smooth"]
+        doc = """Specifies what weights are used during triangle subdivision for
+        the Catmull-Clark scheme. Valid values are "catmullClark" (the default) 
+        and "smooth".
+
+        See http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html#triangle-subdivision-rule""")
+    
     int[] holeIndices = [] (
         doc = """The face indices (indexing into the 'faceVertexCounts'
         attribute) of all faces that should be made invisible.""")
@@ -767,9 +809,63 @@ class Mesh "Mesh" (
         the creases on a mesh.""")
 }
 
+class GeomSubset "GeomSubset" (
+    inherits = </Typed>
+    doc = """Encodes a subset of a piece of geometry (i.e. a UsdGeomImageable) 
+    as a set of indices. Currently only supports encoding of face-subsets, but 
+    could be extended in the future to support subsets representing edges, 
+    segments, points etc.
+
+    To apply to a geometric prim, a GeomSubset prim must be defined as a 
+    child of it in namespace. This restriction makes it easy and efficient 
+    to discover subsets of a prim. We might want to relax this restriction if 
+    it's common to have multiple <b>families</b> of subsets on a gprim and if 
+    it's useful to be able to organize subsets belonging to a </b>family</b> 
+    under a common scope. See 'familyName' attribute for more info on defining 
+    a family of subsets.
+
+    Note that a GeomSubset isn't an imageable (i.e. doesn't derive from
+    UsdGeomImageable). So, you can't author <b>visibility</b> for it or 
+    override its <b>purpose</b>.
+
+    Materials are bound to GeomSubsets just as they are for regular 
+    geometry using API available in UsdShade (UsdShadeMaterial::Bind).
+"""
+    customData = {
+        string className = "Subset"
+        string extraIncludes = """
+#include "pxr/base/tf/token.h"
+#include "pxr/usd/usdGeom/imageable.h"
+"""
+    }
+)
+{
+    uniform token elementType = "face" (
+        allowedTokens = ["face"]
+        doc = """The type of element that the indices target. Currently only 
+        allows "face" and defaults to it."""
+    )
+    int[] indices = [] (
+        doc = """The set of indices included in this subset. The indices need not 
+        be sorted, but the same index should not appear more than once."""
+    )
+    uniform token familyName = "" (
+        doc = """The name of the family of subsets that this subset belongs to. 
+        This is optional is only useful when there are multiple families of 
+        subsets under a geometric prim.
+        When multiple subsets belonging to a prim have the same familyName, it 
+        is possible to encode whether the subsets in the family form a partition 
+        (i.e. every element of the whole geometry appears exactly once in only 
+        one of the subsets belonging to the family) using the static method
+        UsdGeomSubset::SetFamilyType(). The validity of the partition 
+        can be checked using ValidatePartition(). However, mutual exclusivity 
+        and inclusiveness are not enforced by the authoring APIs."""
+    )
+}
+
 class NurbsPatch "NurbsPatch" (
     inherits = </PointBased>
-    doc = """\\brief Encodes a rational or polynomial non-uniform B-spline
+    doc = """Encodes a rational or polynomial non-uniform B-spline
     surface, with optional trim curves.
     
     The encoding mostly follows that of RiNuPatch and RiTrimCurve: 
@@ -931,9 +1027,18 @@ class NurbsPatch "NurbsPatch" (
 }
 
 class "Curves" (
+    customData = {
+        dictionary extraPlugInfo = {
+            bool implementsComputeExtent = true
+        }
+    }
     inherits = </PointBased>
-    doc = """\\brief Base class for BasisCurves (RiCurves) and NurbsCurves
-    (MayaCurves)."""
+    doc = """Base class for BasisCurves and NurbsCurves.  The BasisCurves
+             schema is designed to be analagous to RenderMan's RiCurves 
+	     and RiBasis, while the NurbsCurve schema is designed to be 
+             analgous to  the NURBS curves found in packages like Maya 
+             and Houdini while retaining their consistency with the 
+             RenderMan specification for NURBS Patches."""
 ) {
     # topology attributes
     int[] curveVertexCounts (
@@ -956,55 +1061,110 @@ class "Curves" (
 
 class BasisCurves "BasisCurves" (
     inherits = </Curves>
-    doc = """Basis curves are analagous to RiCurves.  A basis matrix and vstep 
-    are used to uniformly interpolate the curves.  These curves are often used 
-    to render dense aggregate geometry like hair.
+    doc = """Basis curves are analagous to RiCurves.  A 'basis' matrix and 
+    \\em vstep are used to uniformly interpolate the curves.  These curves are 
+    often used to render dense aggregate geometry like hair.
     
-    A segment is the smoothly interpolated part between vertices.  A curves prim 
-    may have many curves, determined implicitly by the length of the 
-    curveVertexCount vector.  The number of segments an individual curve has is 
-    determined by the number of vertices it has, the wrap (periodicity), and the 
-    vstep of the basis.
+    A curves prim may have many curves, determined implicitly by the length of
+    the 'curveVertexCounts' vector.  An individual curve is composed of one 
+    or more curve segments, the smoothly interpolated part between vertices.
+
+    Curves may have a m'type' of either linear or cubic.  Linear curve 
+    segments are interpolated between two vertices, and cubic curve segments are 
+    interpolated between 4 vertices.  The segment count of a cubic curve  
+    is determined by the vertex count, the 'wrap' (periodicity), and 
+    the vstep of the basis.
     
-    Basis to vstep mapping:
-        [bezier - 3, catmullRom - 1, bspline - 1, hermite - 2, power - 4]
+    cubic basis   | vstep
+    ------------- | -------------
+    bezier        | 3
+    catmullRom    | 1
+    bspline       | 1
+    hermite       | 2
+    power         | 4
     
     The first segment of a cubic curve is always defined by its first 4 points. 
-     The vstep is the increment used to determine what cv determines the 
-    next segment.  For a two segment bspline basis curve (vstep=1), the first 
+    The vstep is the increment used to determine what cv determines the 
+    next segment.  For a two segment bspline basis curve (vstep = 1), the first 
     segment will be defined by interpolating vertices [0, 1, 2, 3] and the 
     second  segment will be defined by [1, 2, 3, 4].  For a two segment bezier 
     basis curve (vstep = 3), the first segment will be defined by interpolating 
     vertices [0, 1, 2, 3] and the second segment will be defined by 
     [3, 4, 5, 6].  If the vstep is not one, then you must take special care
-    to make sure that the number of cvs properly divides by your vstep.
+    to make sure that the number of cvs properly divides by your vstep.  If 
+    the type of a curve is linear, the basis matrix and vstep are unused.
     
-    For a given cubic curve, it holds that:
-        (curveVertexCount - 4) % vstep == 0 [nonperiodic]
-        (curveVertexCount) % vstep == 0 [periodic]
+    When validating curve topology, each entry in the curveVertexCounts vector
+    must pass this check.
+
+    wrap           | cubic vertex count validity
+    -------------- | ---------------------------------------
+    nonperiodic    | (curveVertexCounts[i] - 4) % vstep == 0
+    periodic       | (curveVertexCounts[i]) % vstep == 0
+
         
-    For a given linear curve: 
-        segmentCount = curveVertexCount - 1 [nonperiodic]
-        segmentCount = curveVertexCount [periodic]
-    For a given cubic curve:
-        segmentCount = (curveVertexCount - 4) / vstep + 1 [nonperiodic]
-        segmentCount = curveVertexCount / vstep [periodic]
+    To convert an entry in the curveVertexCounts vector into a segment count 
+    for an individual curve, apply these rules.  Sum up all the results in
+    order to compute how many total segments all curves have.
+
+    wrap          | segment count [linear curves]
+    ------------- | ----------------------------------------
+    nonperiodic   | curveVertexCounts[i] - 1
+    periodic      | curveVertexCounts[i]
+    
+    wrap          | segment count [cubic curves]
+    ------------- | ----------------------------------------
+    nonperiodic   | (curveVertexCounts[i] - 4) / vstep + 1
+    periodic      | curveVertexCounts[i] / vstep 
+
         
-    For cubic curves, data can be either interpolated between vertices or 
-    across segments.  Per vertex data should be the same size as the number
+    For cubic curves, primvar data can be either interpolated cubically between 
+    vertices or linearly across segments.  The corresponding token
+    for cubic interpolation is 'vertex' and for linear interpolation is
+    'varying'.  Per vertex data should be the same size as the number
     of vertices in your curve.  Segment varying data is dependent on the 
-    wrap (periodicity) and number of segments in your curve.
+    wrap (periodicity) and number of segments in your curve.  For linear curves,
+    varying and vertex data would be interpolated the same way.  By convention 
+    varying is the preferred interpolation because of the association of 
+    varying with linear interpolation. 
     
-    For a given curve:
-        segmentVaryingDataSize = segmentCount + 1 [nonperiodic]
-        segmentVaryingDataSize = segmentCount [periodic]    
+    wrap          | expected linear (varying) data size
+    ------------- | ----------------------------------------
+    nonperiodic   | segmentCount + 1
+    periodic      | segmentCount
+
+    Both curve types additionally define 'constant'
+    interpolation for the entire prim and 'uniform' interpolation as per curve 
+    data.
+
+    \\image html USDCurvePrimvars.png
+
+    While not technically UsdGeomPrimvars, the widths and optional normals
+    also have interpolation metadata.  It's common for authored widths to have
+    constant, varying, or vertex interpolation
+    (see UsdGeomCurves::GetWidthsInterpolation()).  It's common for
+    authored normals to have varying interpolation
+    (see UsdGeomPointBased::GetNormalsInterpolation()).
     
     This prim represents two different entries in the RI spec:  RiBasis
     and RiCurves, hence the name "BasisCurves."  If we are interested in
     specifying a custom basis as RenderMan allows you to do, the basis
     enum could be extended with a new "custom" token and with additional 
     attributes vstep and matrix, but for compatability with AbcGeom and the
-    rarity of this use case, it is omitted for now."""
+    rarity of this use case, it is omitted for now.
+
+    Example of deriving per curve segment and varying primvar data counts from
+    the wrap, type, basis, and curveVertexCount.
+
+    wrap          | type    | basis   | curveVertexCount  | curveSegmentCount  | varyingDataCount
+    ------------- | ------- | ------- | ----------------- | ------------------ | -------------------------
+    nonperiodic   | linear  | N/A     | [2 3 2 5]         | [1 2 1 4]          | [2 3 2 5]
+    nonperiodic   | cubic   | bezier  | [4 7 10 4 7]      | [1 2 3 1 2]        | [2 3 4 2 3]
+    nonperiodic   | cubic   | bspline | [5 4 6 7]         | [2 1 3 4]          | [3 2 4 5]
+    periodic      | cubic   | bezier  | [6 9 6]           | [2 3 2]            | [2 3 2]
+    periodic      | linear  | N/A     | [3 7]             | [3 7]              | [3 7]
+
+"""
 ) {
     # interpolation attributes
     uniform token type  = "cubic" (
@@ -1029,40 +1189,59 @@ class BasisCurves "BasisCurves" (
 
 class NurbsCurves "NurbsCurves" (
     inherits = </Curves>
-    doc = """Nurbs curves are analagous to Maya Nurbs Curves,  used for 
-    interchange of rigging and modeling curves.  Unlike Maya Curves, this 
-    curve spec supports batching of multiple curves into a single prim and 
-    widths in the schema.  Unlike maya, we require 
+    doc = """This schema is analagous to NURBS Curves in packages like Maya
+    and Houdini, often used for interchange of rigging and modeling curves.  
+    Unlike Maya, this curve spec supports batching of multiple curves into a 
+    single prim, widths, and normals in the schema.  Additionally, we require 
     'numSegments + 2 * degree + 1' knots (2 more than maya does).  This is to
-    be more consistent with renderman's NURBS specification.  
+    be more consistent with RenderMan's NURBS patch specification.  
     
     To express a periodic curve:
-    knot[0] = knot[1] - (knots[-2] - knots[-3]; 
-    knot[-1] = knot[-2] + (knot[2] - knots[1]);
+    - knot[0] = knot[1] - (knots[-2] - knots[-3]; 
+    - knot[-1] = knot[-2] + (knot[2] - knots[1]);
     
     To express a nonperiodic curve:
-    knot[0] = knot[1];
-    knot[-1] = knot[-2];
+    - knot[0] = knot[1];
+    - knot[-1] = knot[-2];
     
     In spite of these slight differences in the spec, curves generated in Maya
-    should be preserved when roundtripping."""
+    should be preserved when roundtripping.
+    
+    'order' and 'range', when representing a batched NurbsCurve should be
+    authored one value per curve.  'knots' should be the concatentation of
+    all batched curves."""
 ) {
     # topology attributes
     int[] order = [] (
-        doc = """Order is degree + 1.  It must be less than or equal to the 
-        number of cvsPerCurve""")
+        doc = """Order of the curve.  Order must be positive and is
+        equal to the degree of the polynomial basis to be evaluated, plus 1.
+        Its value for the 'i'th curve must be less than or equal to the 
+        number of cvs in the curveVertexCount[i]""")
 
     # interpolation attributes
     double[] knots (
-        doc = """Knot vectors are batched together and define how to interpolate curve segments.""")
+        doc = """Knot vector providing curve parameterization.
+        The length of the slice of the array for the ith curve 
+        must be ( curveVertexCount[i] + order[i] ), and its
+        entries must take on monotonically increasing values.""")
         
     double2[] ranges (
-        doc = """Specifies the parametric range used to evaluate the curve.""")
+        doc = """Provides the minimum and maximum parametric values (as defined
+        by knots) over which the curve is actually defined.  The minimum must 
+        be less than the maximum, and greater than or equal to the value of the 
+        knots['i'th curve slice][order[i]-1]. The maxium must be less 
+        than or equal to the last element's value in knots['i'th curve slice].
+	Range maps to (vmin, vmax) in the RenderMan spec.""")
 }
 
 class Points "Points" (
+    customData = {
+        dictionary extraPlugInfo = {
+            bool implementsComputeExtent = true
+        }
+    }
     inherits = </PointBased>
-    doc = """\\brief Points are analogous to the <A HREF="https://renderman.pixar.com/resources/current/RenderMan/appnote.18.html">RiPoints spec</A>.  
+    doc = """Points are analogous to the <A HREF="https://renderman.pixar.com/resources/current/RenderMan/appnote.18.html">RiPoints spec</A>.  
     
     Points can be an efficient means of storing and rendering particle
     effects comprised of thousands or millions of small particles.  Points
@@ -1086,8 +1265,308 @@ class Points "Points" (
     )
 }
 
+class PointInstancer "PointInstancer" (
+    doc = """Encodes vectorized instancing of multiple, potentially
+    animated, prototypes (object/instance masters), which can be arbitrary
+    prims/subtrees on a UsdStage.
+    
+    PointInstancer is a "multi instancer", as it allows multiple prototypes
+    to be scattered among its "points".  We use a UsdRelationship
+    \\em prototypes to identify and order all of the possible prototypes, by
+    targeting the root prim of each prototype.  The ordering imparted by
+    relationships associates a zero-based integer with each prototype, and
+    it is these integers we use to identify the prototype of each instance,
+    compactly, and allowing prototypes to be swapped out without needing to
+    reauthor all of the per-instance data.
+    
+    The PointInstancer schema is designed to scale to billions of instances,
+    which motivates the choice to split the per-instance transformation into
+    position, (quaternion) orientation, and scales, rather than a
+    4x4 matrix per-instance.  In addition to requiring fewer bytes even if
+    all elements are authored (32 bytes vs 64 for a single-precision 4x4
+    matrix), we can also be selective about which attributes need to animate
+    over time, for substantial data reduction in many cases.
+    
+    Note that PointInstancer is \\em not a Gprim, since it is not a graphical
+    primitive by any stretch of the imagination. It \\em is, however,
+    Boundable, since we will sometimes want to treat the entire PointInstancer
+    similarly to a procedural, from the perspective of inclusion or framing.
+
+    \\section UsdGeomPointInstancer_varyingTopo Varying Instance Identity over Time
+    
+    PointInstancers originating from simulations often have the characteristic
+    that points/instances are "born", move around for some time period, and then
+    die (or leave the area of interest). In such cases, billions of instances
+    may be birthed over time, while at any \\em specific time, only a much
+    smaller number are actually alive.  To encode this situation efficiently,
+    the simulator may re-use indices in the instance arrays, when a particle
+    dies, its index will be taken over by a new particle that may be birthed in
+    a much different location.  This presents challenges both for 
+    identity-tracking, and for motion-blur.
+    
+    We facilitate identity tracking by providing an optional, animatable
+    \\em ids attribute, that specifies the 64 bit integer ID of the particle
+    at each index, at each point in time.  If the simulator keeps monotonically
+    increasing a particle-count each time a new particle is birthed, it will
+    serve perfectly as particle \\em ids.
+    
+    We facilitate motion blur for varying-topology particle streams by
+    optionally allowing per-instance \\em velocities and \\em angularVelocities
+    to be authored.  If instance transforms are requested at a time between
+    samples and either of the velocity attributes is authored, then we will
+    not attempt to interpolate samples of \\em positions or \\em orientations.
+    If not authored, and the bracketing samples have the same length, then we
+    will interpolate.
+
+    \\section UsdGeomPointInstancer_transform Computing an Instance Transform
+    
+    Each instance's transformation is a combination of the SRT affine transform
+    described by its scale, orientation, and position, applied \\em after
+    (i.e. less locally) than the transformation computed at the root of the
+    prototype it is instancing.  In other words, to put an instance of a 
+    PointInstancer into the space of the PointInstancer's parent prim:
+    
+    1. Apply (most locally) the authored transformation for 
+    <em>prototypes[protoIndices[i]]</em>
+    2. If *scales* is authored, next apply the scaling matrix from *scales[i]*
+    3. If *orientations* is authored: **if *angularVelocities* is authored**, 
+    first multiply *orientations[i]* by the unit quaternion derived by scaling 
+    *angularVelocities[i]* by the \\ref UsdGeom_PITimeScaling "time differential" 
+    from the left-bracketing timeSample for *orientation* to the requested 
+    evaluation time *t*, storing the result in *R*, **else** assign *R* 
+    directly from *orientations[i]*.  Apply the rotation matrix derived 
+    from *R*.
+    4. Apply the translation derived from *positions[i]*. If *velocities* is 
+    authored, apply the translation deriving from *velocities[i]* scaled by 
+    the time differential from the left-bracketing timeSample for *positions* 
+    to the requested evaluation time *t*.
+    5. Least locally, apply the transformation authored on the PointInstancer 
+    prim itself (or the UsdGeomImageable::ComputeLocalToWorldTransform() of the 
+    PointInstancer to put the instance directly into world space)
+
+    \\anchor UsdGeom_PITimeScaling
+    <b>Scaling Velocities for Interpolation</b>
+    
+    When computing time-differentials by which to apply velocity or
+    angularVelocity to positions or orientations, we must scale by
+    ( 1.0 / UsdStage::GetTimeCodesPerSecond() ), because velocities are recorded
+    in units/second, while we are interpolating in UsdTimeCode ordinates.
+    
+    We provide both high and low-level API's for dealing with the
+    transformation as a matrix, both will compute the instance matrices using
+    multiple threads; the low-level API allows the client to cache unvarying
+    inputs so that they need not be read duplicately when computing over
+    time.
+
+    
+    \\section UsdGeomPointInstancer_masking Masking Instances: "Deactivating" and Invising
+
+    Often a PointInstancer is created "upstream" in a graphics pipeline, and
+    the needs of "downstream" clients necessitate eliminating some of the 
+    instances from further consideration.  Accomplishing this pruning by 
+    re-authoring all of the per-instance attributes is not very attractive,
+    since it may mean destructively editing a large quantity of data.  We
+    therefore provide means of "masking" instances by ID, such that the 
+    instance data is unmolested, but per-instance transform and primvar data
+    can be retrieved with the no-longer-desired instances eliminated from the
+    (smaller) arrays.  PointInstancer allows two independent means of masking
+    instances by ID, each with different features that meet the needs of
+    various clients in a pipeline.  Both pruning features' lists of ID's are
+    combined to produce the mask returned by ComputeMaskAtTime().
+    
+    \\note If a PointInstancer has no authored \\em ids attribute, the masking
+    features will still be available, with the integers specifying element
+    position in the \\em protoIndices array rather than ID.
+
+    \\subsection UsdGeomPointInstancer_inactiveIds InactiveIds: List-edited, Unvarying Masking
+
+    The first masking feature encodes a list of IDs in a list-editable metadatum
+    called \\em inactiveIds, which, although it does not have any similar 
+    impact to stage poopulation as \\ref UsdPrim::SetActive() "prim activation",
+    it shares with that feature that its application is uniform over all time.
+    Because it is list-editable, we can \\em sparsely add and remove instances
+    from it in many layers.
+    
+    This sparse application pattern makes \\em inactiveIds a good choice when
+    further downstream clients may need to reverse masking decisions made
+    upstream, in a manner that is robust to many kinds of future changes to
+    the upstream data.
+    
+    See ActivateId(), ActivateIds(), DeactivateId(), DeactivateIds(), 
+    ActivateAllIds()
+
+    \\subsection UsdGeomPointInstancer_invisibleIds invisibleIds: Animatable Masking
+
+    The second masking feature encodes a list of IDs in a time-varying
+    Int64Array-valued UsdAttribute called \\em invisibleIds , since it shares
+    with \\ref UsdGeomImageable::GetVisibilityAttr() "Imageable visibility"
+    the ability to animate object visibility.
+    
+    Unlike \\em inactiveIds, overriding a set of opinions for \\em invisibleIds
+    is not at all straightforward, because one will, in general need to
+    reauthor (in the overriding layer) **all** timeSamples for the attribute
+    just to change one Id's visibility state, so it cannot be authored
+    sparsely.  But it can be a very useful tool for situations like encoding
+    pre-computed camera-frustum culling of geometry when either or both of
+    the instances or the camera is animated.
+    
+    See VisId(), VisIds(), InvisId(), InvisIds(), VisAllIds()
+     
+    \\section UsdGeomPointInstancer_protoProcessing Processing and Not Processing Prototypes
+    
+    Any prim in the scenegraph can be targetted as a prototype by the
+    \\em prototypes relationship.  We do not, however, provide a specific
+    mechanism for identifying prototypes as geometry that should not be drawn
+    (or processed) in their own, local spaces in the scenegraph.  We
+    encourage organizing all prototypes as children of the PointInstancer
+    prim that consumes them, and pruning "raw" processing and drawing
+    traversals when they encounter a PointInstancer prim; this is what the
+    UsdGeomBBoxCache and UsdImaging engines do.
+    
+    There \\em is a pattern one can deploy for organizing the prototypes
+    such that they will automatically be skipped by basic UsdPrim::GetChildren()
+    or UsdPrimRange traversals.  Usd prims each have a 
+    \\ref Usd_PrimSpecifiers "specifier" of "def", "over", or "class".  The
+    default traversals skip over prims that are "pure overs" or classes.  So
+    to protect prototypes from all generic traversals and processing, place
+    them under a prim that is just an "over".  For example,
+    \\code
+    01 def PointInstancer "Crowd_Mid"
+    02 {
+    03     rel prototypes = [ </Crowd_Mid/Prototypes/MaleThin_Business>, </Crowd_Mid/Prototypes/MaleTine_Casual> ]
+    04     
+    05     over "Prototypes" 
+    06     {
+    07          def "MaleThin_Business" (
+    08              references = [@MaleGroupA/usd/MaleGroupA.usd@</MaleGroupA>]
+    09              variants = {
+    10                  string modelingVariant = "Thin"
+    11                  string costumeVariant = "BusinessAttire"
+    12              }
+    13          )
+    14          { ... }
+    15          
+    16          def "MaleThin_Casual"
+    17          ...
+    18     }
+    19 }
+    \\endcode
+    
+    \\section UsdGeomPointInstancer_primvars Primvars on PointInstancer
+    
+    \\ref UsdGeomPrimvar "Primvars" authored on a PointInstancer prim should
+    always be applied to each instance with \\em constant interpolation at
+    the root of the instance.  When you are authoring primvars on a 
+    PointInstancer, think about it as if you were authoring them on a 
+    point-cloud (e.g. a UsdGeomPoints gprim).  The same 
+    <A HREF="http://renderman.pixar.com/resources/current/rps/appnote.22.html#classSpecifiers">interpolation rules for points</A> apply here, substituting
+    "instance" for "point".
+    
+    In other words, the (constant) value extracted for each instance
+    from the authored primvar value depends on the authored \\em interpolation
+    and \\em elementSize of the primvar, as follows:
+    \\li <b>constant</b> or <b>uniform</b> : the entire authored value of the
+    primvar should be applied exactly to each instance.
+    \\li <b>varying</b>, <b>vertex</b>, or <b>faceVarying</b>: the first
+    \\em elementSize elements of the authored primvar array should be assigned to
+    instance zero, the second \\em elementSize elements should be assigned to
+    instance one, and so forth."""
+
+    inherits = </Boundable>
+) {
+  rel prototypes (
+      doc = """<b>Required property</b>. Orders and targets the prototype root 
+      prims, which can be located anywhere in the scenegraph that is convenient,
+      although we promote organizing prototypes as children of the 
+      PointInstancer.  The position of a prototype in this relationship defines
+      the value an instance would specify in the \\em protoIndices attribute to 
+      instance that prototype. Since relationships are uniform, this property
+      cannot be animated."""
+  ) 
+
+  int[] protoIndices (
+      doc = """<b>Required property</b>. Per-instance index into 
+      \\em prototypes relationship that identifies what geometry should be 
+      drawn for each instance.  <b>Topology attribute</b> - can be animated, 
+      but at a potential performance impact for streaming."""
+  )
+
+  int64[] ids (
+      doc = """Ids are optional; if authored, the ids array should be the same
+      length as the \\em protoIndices array, specifying (at each timeSample if
+      instance identities are changing) the id of each instance. The
+      type is signed intentionally, so that clients can encode some
+      binary state on Id'd instances without adding a separate primvar.
+      See also \\ref UsdGeomPointInstancer_varyingTopo"""
+  )
+
+  point3f[] positions (
+      doc = """<b>Required property</b>. Per-instance position.  See also 
+      \\ref UsdGeomPointInstancer_transform ."""
+  )
+
+  quath[] orientations (
+      doc="""If authored, per-instance orientation of each instance about its 
+      prototype's origin, represented as a unit length quaternion, which
+      allows us to encode it with sufficient precision in a compact GfQuath.
+      
+      It is client's responsibility to ensure that authored quaternions are
+      unit length; the convenience API below for authoring orientations from
+      rotation matrices will ensure that quaternions are unit length, though
+      it will not make any attempt to select the "better (for interpolation
+      with respect to neighboring samples)" of the two possible quaternions
+      that encode the rotation. 
+      
+      See also \\ref UsdGeomPointInstancer_transform ."""  )
+
+  float3[] scales (
+      doc="""If authored, per-instance scale to be applied to 
+      each instance, before any rotation is applied.
+      
+      See also \\ref UsdGeomPointInstancer_transform ."""
+  )
+
+  vector3f[] velocities (
+       doc = """If provided, per-instance 'velocities' will be used to 
+       compute positions between samples for the 'positions' attribute,
+       rather than interpolating between neighboring 'positions' samples.
+       Velocities should be considered mandatory if both \\em protoIndices
+       and \\em positions are animated.  Velocity is measured in position
+       units per second, as per most simulation software. To convert to
+       position units per UsdTimeCode, divide by
+       UsdStage::GetTimeCodesPerSecond().
+
+       See also \\ref UsdGeomPointInstancer_transform, 
+       \\ref UsdGeom_VelocityInterpolation ."""
+  )
+
+  vector3f[] angularVelocities (
+      doc="""If authored, per-instance angular velocity vector to be used for
+      interoplating orientations.  Angular velocities should be considered
+      mandatory if both \\em protoIndices and \\em orientations are animated.
+      Angular velocity is measured in <b>degrees</b> per second. To convert
+      to degrees per UsdTimeCode, divide by
+      UsdStage::GetTimeCodesPerSecond().
+      
+      See also \\ref UsdGeomPointInstancer_transform ."""
+  )
+  
+  int64[] invisibleIds (
+      doc="""A list of id's to make invisible at the evaluation time.
+      See \\ref UsdGeomPointInstancer_invisibleIds ."""
+  )
+  
+  uniform token prototypeDrawMode (
+      allowedTokens = ["point", "card", "fullGeom"]
+      doc = """Draw modes that host applications can use as a hint for how each
+      instance of each prototype should be represented.  This hint should only
+      affect interactive/preview representations and is optional."""
+  )
+}
+
+
 class Camera "Camera" (
-    doc = """\\brief Transformable camera.
+    doc = """Transformable camera.
     
     Describes optical properties of a camera via a common set of attributes
     that provide control over the camera's frustum as well as its depth of
@@ -1111,7 +1590,7 @@ class Camera "Camera" (
     will transform the world such that the camera is at the origin, looking 
     down the -Z axis, with Y as the up axis.
     
-    \\sa \\ref usdGeom_linAlgBasics "UsdGeom Linear Algebra Basic Assumptions"
+    \\sa \\ref UsdGeom_LinAlgBasics
      """
     inherits = </Xformable>
     customData = {
@@ -1160,4 +1639,74 @@ class Camera "Camera" (
         allowedTokens = ["mono", "left", "right"]
         doc = """If different from mono, the camera is intended to be the left
                  or right camera of a stereo setup.""")
+
+    # Parameters for motion blur
+    double shutter:open = 0.0 (
+        doc = """Frame relative shutter open time in UsdTimeCode units (negative
+                 value indicates that the shutter opens before the current
+                 frame time). Used for motion blur."""
+    )
+    double shutter:close = 0.0 (
+        doc = """Frame relative shutter close time, analogous comments from
+                 shutter:open apply. A value greater or equal to shutter:open
+                 should be authored, otherwise there is no exposure and a
+                 renderer should produce a black image."""
+    )
+}
+
+class "GeomModelAPI"
+(
+    customData = {
+         string className = "ModelAPI"
+         string extraIncludes = """
+#include "pxr/usd/usdGeom/bboxCache.h"
+#include "pxr/usd/usdGeom/constraintTarget.h"
+#include "pxr/usd/usdGeom/imageable.h" """
+    }
+    doc = """UsdGeomModelAPI extends the generic UsdModelAPI schema with
+    geometry specific concepts such as cached extents for the entire model,
+    constraint targets, and geometry-inspired extensions to the payload
+    lofting process.
+   
+    As described in GetExtentsHint() below, it is useful to cache extents
+    at the model level.  UsdGeomModelAPI provides schema for computing and storing
+    these cached extents, which can be consumed by UsdGeomBBoxCache to provide
+    fast access to precomputed extents that will be used as the model's bounds
+    (see UsdGeomBBoxCache::UsdGeomBBoxCache() ).
+   
+    \\todo CreatePayload() """
+    inherits = </ModelAPI>
+)
+{
+}
+
+class "MotionAPI"
+(
+    doc = """UsdGeomMotionAPI encodes data that can live on any prim that
+    may affect computations involving:
+    - computed motion for motion blur
+    - sampling for motion blur
+    
+    For example, UsdGeomMotionAPI provides *velocityScale* 
+    (GetVelocityScaleAttr()) for controlling how motion-blur samples should
+    be computed by velocity-consuming schemas."""
+)
+{
+    float motion:velocityScale = 1.0 (
+        customData = {
+            string apiName = "velocityScale"
+        }
+        doc = """VelocityScale is an **inherited** float attribute that
+        velocity-based schemas (e.g. PointBased, PointInstancer) can consume
+        to compute interpolated positions and orientations by applying
+        velocity and angularVelocity, which is required for interpolating 
+        between samples when topology is varying over time.  Although these 
+        quantities are generally physically computed by a simulator, sometimes 
+        we require more or less motion-blur to achieve the desired look.  
+        VelocityScale allows artists to dial-in, as a post-sim correction, 
+        a scale factor to be applied to the velocity prior to computing 
+        interpolated positions from it.
+        
+        See also ComputeVelocityScale()"""
+    )
 }

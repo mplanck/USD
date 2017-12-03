@@ -28,6 +28,10 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+{% if useExportAPI %}
+{{ namespaceOpen }}
+
+{% endif %}
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
@@ -35,9 +39,11 @@ TF_REGISTRY_FUNCTION(TfType)
         TfType::Bases< {{ cls.parentCppClassName }} > >();
     
 {% if cls.isConcrete == "true" %}
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("{{ cls.usdPrimTypeName }}") to find
-    // TfType<{{ cls.cppClassName }}>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("{{ cls.usdPrimTypeName }}")
+    // to find TfType<{{ cls.cppClassName }}>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, {{ cls.cppClassName }}>("{{ cls.usdPrimTypeName }}");
 {% endif %}
 }
@@ -51,7 +57,7 @@ TF_REGISTRY_FUNCTION(TfType)
 {{ cls.cppClassName }}
 {{ cls.cppClassName }}::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return {{ cls.cppClassName }}();
     }
@@ -65,7 +71,7 @@ TF_REGISTRY_FUNCTION(TfType)
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("{{ cls.usdPrimTypeName }}");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return {{ cls.cppClassName }}();
     }
@@ -174,9 +180,18 @@ const TfTokenVector&
         return localNames;
 }
 
+{% if useExportAPI %}
+{{ namespaceClose }}
+
+{% endif %}
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+{% if useExportAPI %}
+//
+// Just remember to wrap code in the appropriate delimiters:
+// '{{ namespaceOpen }}', '{{ namespaceClose }}'.
+{% endif %}
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 

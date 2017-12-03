@@ -24,6 +24,7 @@
 #ifndef HDX_UNIT_TEST_DRAWING_GL
 #define HDX_UNIT_TEST_DRAWING_GL
 
+#include "pxr/pxr.h"
 #include "pxr/base/gf/frustum.h"
 #include "pxr/base/gf/matrix4d.h"
 #include "pxr/base/gf/vec2i.h"
@@ -31,8 +32,13 @@
 
 #include <string>
 
-class Hdx_UnitTestDrawingQGLWidget;
+PXR_NAMESPACE_OPEN_SCOPE
 
+
+class Hdx_UnitTestWindow;
+
+/// \class Hdx_UnitTestGLDrawing
+///
 /// A helper class for unit tests which need to perform GL drawing.
 ///
 class Hdx_UnitTestGLDrawing {
@@ -49,9 +55,9 @@ public:
     virtual void DrawTest() = 0;        // interactive mode
     virtual void OffscreenTest() = 0;   // offscreen mode (automated test)
 
-    virtual void MousePress(int button, int x, int y);
-    virtual void MouseRelease(int button, int x, int y);
-    virtual void MouseMove(int x, int y);
+    virtual void MousePress(int button, int x, int y, int modKeys);
+    virtual void MouseRelease(int button, int x, int y, int modKeys);
+    virtual void MouseMove(int x, int y, int modKeys);
     virtual void KeyRelease(int key);
 
     virtual void Idle();
@@ -78,12 +84,15 @@ protected:
     GfVec2i GetMousePos() const { return GfVec2i(_mousePos[0], _mousePos[1]); }
 
 private:
-    Hdx_UnitTestDrawingQGLWidget *_widget;
+    Hdx_UnitTestWindow *_widget;
     float _rotate[2];
     GfVec3f _translate;
 
     int _mousePos[2];
     bool _mouseButton[3];
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // HDX_UNIT_TEST_DRAWING_GL

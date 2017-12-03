@@ -21,6 +21,9 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/pathUtils.h"
@@ -39,8 +42,14 @@
 #include <limits>
 #include <utility>
 #include <vector>
-#include <double-conversion/double-conversion.h>
-#include <double-conversion/utils.h>
+#include <memory>
+
+#include "pxrDoubleConversion/double-conversion.h"
+#include "pxrDoubleConversion/utils.h"
+
+#if defined(ARCH_OS_WINDOWS)
+#include <Shlwapi.h>
+#endif
 
 using std::list;
 using std::make_pair;
@@ -49,6 +58,7 @@ using std::set;
 using std::string;
 using std::vector;
 
+PXR_NAMESPACE_OPEN_SCOPE
 
 string
 TfVStringPrintf(const std::string& fmt, va_list ap)
@@ -75,14 +85,14 @@ TfStringPrintf(const char *fmt, ...)
 double
 TfStringToDouble(const char *ptr)
 {
-    double_conversion::StringToDoubleConverter
-        strToDouble(double_conversion::DoubleToStringConverter::NO_FLAGS,
+    pxr_double_conversion::StringToDoubleConverter
+        strToDouble(pxr_double_conversion::DoubleToStringConverter::NO_FLAGS,
                     /* empty_string_value */ 0,
                     /* junk_string_value */ 0,
                     /* infinity symbol */ "inf",
                     /* nan symbol */ "nan");
     int numDigits_unused;
-    return strToDouble.StringToDouble(ptr, strlen(ptr), &numDigits_unused);
+    return strToDouble.StringToDouble(ptr, static_cast<int>(strlen(ptr)), &numDigits_unused);
 }
 
 double
@@ -104,7 +114,7 @@ _StringToNegative(const char *p, bool *outOfRange)
 {
     const Int M = std::numeric_limits<Int>::min();
     Int result = 0;
-    while (*p >= '0' and *p <= '9') {
+    while (*p >= '0' && *p <= '9') {
         int digit = (*p++ - '0');
         // If the new digit would exceed the range, bail.  The expression below
         // is equivalent to 'result < (M + digit) / 10', but it avoids division.
@@ -131,7 +141,7 @@ _StringToPositive(const char *p, bool *outOfRange)
 {
     const Int M = std::numeric_limits<Int>::max();
     Int result = 0;
-    while (*p >= '0' and *p <= '9') {
+    while (*p >= '0' && *p <= '9') {
         int digit = (*p++ - '0');
         // If the new digit would exceed the range, bail.  The expression below
         // is equivalent to 'result > (M - digit) / 10', but it avoids division.
@@ -302,21 +312,31 @@ TfGetBaseName(const string& fileName)
 {
     if (fileName.empty())
         return fileName;
-    else if (fileName[fileName.size()-1] == '/')    // ends in /
-        return TfGetBaseName(fileName.substr(0, fileName.size() - 1));
-    else {
-        size_t i = fileName.rfind("/");
-        if (i == string::npos)                      // no / in name
-            return fileName;
-        else
-            return fileName.substr(i+1);
-    }
+#if defined(ARCH_OS_WINDOWS)
+    const string::size_type i = fileName.find_last_of("\\/");
+#else
+    const string::size_type i = fileName.rfind("/");
+#endif
+    if (i == fileName.size() - 1)    // ends in directory delimiter
+        return TfGetBaseName(fileName.substr(0, i));
+#if defined(ARCH_OS_WINDOWS)
+    return PathFindFileName(fileName.c_str());
+#else
+    if (i == string::npos)                      // no / in name
+        return fileName;
+    else
+        return fileName.substr(i+1);
+#endif
 }
 
 string
 TfGetPathName(const string& fileName)
 {
+#if defined(ARCH_OS_WINDOWS)
+    size_t i = fileName.find_last_of("\\/:");
+#else
     size_t i = fileName.rfind("/");
+#endif
     if (i == string::npos)                          // no / in name
         return "";
     else
@@ -347,7 +367,7 @@ TfStringTrim(const string &s, const char* trimChars)
 string
 TfStringReplace(const string& source, const string& from, const string& to)
 {
-    if (from.empty() or from == to) {
+    if (from.empty() || from == to) {
         return source;
     }
 
@@ -509,7 +529,7 @@ TfQuotedStringTokenize(const string &source, const char *delimiters,
         quote.erase();
         token.erase();
 
-        while ((quoteIndex = ::_FindFirstOfNotEscaped(source, quotes, i)) <
+        while ((quoteIndex = _FindFirstOfNotEscaped(source, quotes, i)) <
                (delimIndex = source.find_first_of(delimiters, i))) {
 
             // Push the token from 'i' until the first quote.
@@ -520,7 +540,7 @@ TfQuotedStringTokenize(const string &source, const char *delimiters,
             // escaped with a preceding backslash.
             j = quoteIndex;
             quote = source[j];
-            j = ::_FindFirstOfNotEscaped(source, quote.c_str(), j + 1);
+            j = _FindFirstOfNotEscaped(source, quote.c_str(), j + 1);
             
             // If we've reached the end of the string, then we are
             // missing an end-quote.
@@ -675,8 +695,8 @@ TfMatchedStringTokenize(const string& source,
 
 namespace { // helpers for DictionaryLess
 
-inline bool IsDigit(char ch) { return '0' <= ch and ch <= '9'; }
-inline char Lower(char ch) { return ('A' <= ch and ch <= 'Z') ? ch | 32 : ch; }
+inline bool IsDigit(char ch) { return '0' <= ch && ch <= '9'; }
+inline char Lower(char ch) { return ('A' <= ch && ch <= 'Z') ? ch | 32 : ch; }
 
 inline long
 AtoL(char const * &s)
@@ -696,15 +716,15 @@ DictionaryLess(char const *l, char const *r)
     int caseCmp = 0;
     int leadingZerosCmp = 0;
 
-    while (*l and *r) {
-        if (ARCH_UNLIKELY(IsDigit(*l) and IsDigit(*r))) {
+    while (*l && *r) {
+        if (ARCH_UNLIKELY(IsDigit(*l) && IsDigit(*r))) {
             char const *oldL = l, *oldR = r;
             long lval = AtoL(l), rval = AtoL(r);
             if (lval != rval)
                 return lval < rval;
             // Leading zeros difference only, record for later use.
-            if (not leadingZerosCmp)
-                leadingZerosCmp = (l-oldL) - (r-oldR);
+            if (!leadingZerosCmp)
+                leadingZerosCmp = static_cast<int>((l-oldL) - (r-oldR));
             continue;
         }
 
@@ -714,7 +734,7 @@ DictionaryLess(char const *l, char const *r)
                 return lowL < lowR;
 
             // Case difference only, record that for later use.
-            if (not caseCmp)
+            if (!caseCmp)
                 caseCmp = (lowL != *l) ? -1 : 1;
         }
 
@@ -723,12 +743,12 @@ DictionaryLess(char const *l, char const *r)
 
     // We are at the end of either one or both strings.  If not both, the
     // shorter is considered less.
-    if (*l or *r)
-        return not *l;
+    if (*l || *r)
+        return !*l;
 
     // Otherwise we look to differences in case or leading zeros, preferring
     // leading zeros.
-    return (leadingZerosCmp < 0) or (caseCmp < 0);
+    return (leadingZerosCmp < 0) || (caseCmp < 0);
 }
 
 bool
@@ -749,46 +769,78 @@ TfStringify(std::string const& s)
     return s;
 }
 
-std::string
-TfStringify(float val)
+static
+const
+pxr_double_conversion::DoubleToStringConverter& 
+Tf_GetDoubleToStringConverter()
 {
-    double_conversion::DoubleToStringConverter conv(
-        double_conversion::DoubleToStringConverter::NO_FLAGS,
+    static const pxr_double_conversion::DoubleToStringConverter conv(
+        pxr_double_conversion::DoubleToStringConverter::NO_FLAGS,
         "inf", 
         "nan",
         'e',
         /* decimal_in_shortest_low */ -6,
-        /* deciaml_in_shortest_high */ 21,
+        /* decimal_in_shortest_high */ 15,
         /* max_leading_padding_zeroes_in_precision_mode */ 0,
         /* max_trailing_padding_zeroes_in_precision_mode */ 0);
-    static const int bufSize = 128;
-    char buf[bufSize];
-    double_conversion::StringBuilder builder(buf, bufSize);
+
+    return conv;
+}
+
+void
+Tf_ApplyDoubleToStringConverter(float val, char* buffer, int bufferSize)
+{
+    const auto& conv = Tf_GetDoubleToStringConverter();
+    pxr_double_conversion::StringBuilder builder(buffer, bufferSize);
     // This should only fail if we provide an insufficient buffer.
-    TF_VERIFY( conv.ToShortestSingle(val, &builder),
-               "double_conversion failed");
-    return std::string(builder.Finalize());
+    TF_VERIFY(conv.ToShortestSingle(val, &builder),
+              "double_conversion failed");
+}
+
+void
+Tf_ApplyDoubleToStringConverter(double val, char* buffer, int bufferSize)
+{
+    const auto& conv = Tf_GetDoubleToStringConverter();
+    pxr_double_conversion::StringBuilder builder(buffer, bufferSize);
+    // This should only fail if we provide an insufficient buffer.
+    TF_VERIFY(conv.ToShortest(val, &builder),
+              "double_conversion failed");
+}
+
+std::string
+TfStringify(float val)
+{
+    constexpr int bufferSize = 128;
+    char buffer[bufferSize];
+    Tf_ApplyDoubleToStringConverter(val, buffer, bufferSize);
+    return std::string(buffer);
 }
 
 std::string
 TfStringify(double val)
 {
-    double_conversion::DoubleToStringConverter conv(
-        double_conversion::DoubleToStringConverter::NO_FLAGS,
-        "inf", 
-        "nan",
-        'e',
-        /* decimal_in_shortest_low */ -6,
-        /* deciaml_in_shortest_high */ 21,
-        /* max_leading_padding_zeroes_in_precision_mode */ 0,
-        /* max_trailing_padding_zeroes_in_precision_mode */ 0);
-    static const int bufSize = 128;
-    char buf[bufSize];
-    double_conversion::StringBuilder builder(buf, bufSize);
-    // This should only fail if we provide an insufficient buffer.
-    TF_VERIFY( conv.ToShortest(val, &builder),
-               "double_conversion failed");
-    return std::string(builder.Finalize());
+    constexpr int bufferSize = 128;
+    char buffer[bufferSize];
+    Tf_ApplyDoubleToStringConverter(val, buffer, bufferSize);
+    return std::string(buffer);
+}
+
+std::ostream& 
+operator<<(std::ostream& o, TfStreamFloat t)
+{
+    constexpr int bufferSize = 128;
+    char buffer[bufferSize];
+    Tf_ApplyDoubleToStringConverter(t.value, buffer, bufferSize);
+    return o << buffer;
+}
+
+std::ostream& 
+operator<<(std::ostream& o, TfStreamDouble t)
+{
+    constexpr int bufferSize = 128;
+    char buffer[bufferSize];
+    Tf_ApplyDoubleToStringConverter(t.value, buffer, bufferSize);
+    return o << buffer;
 }
 
 template <>
@@ -865,7 +917,7 @@ TfEscapeStringReplaceChar(const char** c, char** out)
             char n(0);
             size_t nd(0);
             for (nd = 0; isxdigit(*++(*c)); ++nd)
-                n = ((n * 16) + ::_HexToDecimal(**c));
+                n = ((n * 16) + _HexToDecimal(**c));
             --(*c);
             *(*out)++ = n;
             break;
@@ -875,8 +927,8 @@ TfEscapeStringReplaceChar(const char** c, char** out)
         {
             char n(0);
             size_t nd(0);
-            for (nd = 0; ((nd < 3) && ::_IsOctalDigit(**c)); ++nd)
-                n = ((n * 8) + ::_OctalToDecimal(*(*c)++));
+            for (nd = 0; ((nd < 3) && _IsOctalDigit(**c)); ++nd)
+                n = ((n * 8) + _OctalToDecimal(*(*c)++));
             --(*c);
             *(*out)++ = n;
             break;
@@ -887,8 +939,12 @@ TfEscapeStringReplaceChar(const char** c, char** out)
 std::string
 TfEscapeString(const std::string &in)
 {
-    char out[in.size()+1];
-    char *outp = out;
+    // We use type char and a deleter for char[] instead of just using
+    // type char[] due to a (now fixed) bug in libc++ in LLVM.  See
+    // https://llvm.org/bugs/show_bug.cgi?id=18350.
+    std::unique_ptr<char,
+                    std::default_delete<char[]>> out(new char[in.size()+1]);
+    char *outp = out.get();
 
     for (const char *c = in.c_str(); *c; ++c)
     {
@@ -900,7 +956,7 @@ TfEscapeString(const std::string &in)
 
     }
     *outp++ = '\0';
-    return string(out,outp-out-1);
+    return std::string(out.get(), outp - out.get() - 1);
 }
 
 string 
@@ -921,19 +977,19 @@ TfMakeValidIdentifier(const std::string &in)
 
     result.reserve(in.size());
     char const *p = in.c_str();
-    if (not (('a' <= *p and *p <= 'z') or
-             ('A' <= *p and *p <= 'Z') or 
-             *p == '_')) {
+    if (!(('a' <= *p && *p <= 'z') || 
+          ('A' <= *p && *p <= 'Z') || 
+          *p == '_')) {
         result.push_back('_');
     } else {
         result.push_back(*p);
     }
 
     for (++p; *p; ++p) {
-        if (not (('a' <= *p and *p <= 'z') or
-                 ('A' <= *p and *p <= 'Z') or
-                 ('0' <= *p and *p <= '9') or
-                 *p == '_')) {
+        if (!(('a' <= *p && *p <= 'z') ||    
+              ('A' <= *p && *p <= 'Z') ||  
+              ('0' <= *p && *p <= '9') ||  
+              *p == '_')) {
             result.push_back('_');
         } else {
             result.push_back(*p);
@@ -958,3 +1014,5 @@ TfGetXmlEscapedString(const std::string &in)
 
     return result;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

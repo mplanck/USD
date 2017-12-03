@@ -21,12 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glf/debugCodes.h
-
 #ifndef GLF_DEBUG_CODES_H
 #define GLF_DEBUG_CODES_H
 
+/// \file glf/debugCodes.h
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/debug.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DEBUG_CODES(
 
@@ -36,5 +40,8 @@ TF_DEBUG_CODES(
     GLF_DEBUG_TEXTURE_PLUGINS
 
 );
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

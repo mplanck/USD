@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/plug/info.h"
 #include "pxr/base/plug/debugCodes.h"
 #include "pxr/base/js/json.h"
@@ -33,10 +35,11 @@
 #include <tbb/task_arena.h>
 #include <tbb/task_group.h>
 #include <boost/bind.hpp>
-#include <boost/foreach.hpp>
 #include <fstream>
 #include <regex>
 #include <set>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 namespace {
 
@@ -84,16 +87,16 @@ _MergePaths(
     bool keepTrailingSlash = false)
 {
     // Return absolute or empty path as is.
-    if (subpathname.empty() or subpathname[0] == '/') {
+    if (subpathname.empty() || !TfIsRelativePath(subpathname)) {
         return subpathname;
     }
 
     // Join dirname(ownerPathname) and subpathname.
     const std::string result =
-        TfNormPath(TfStringCatPaths(TfGetPathName(ownerPathname), subpathname));
+        TfStringCatPaths(TfGetPathName(ownerPathname), subpathname);
 
     // Retain trailing slash if request and if any.
-    return (keepTrailingSlash and *subpathname.rbegin() == '/')
+    return (keepTrailingSlash && *subpathname.rbegin() == '/')
            ? result + "/"
            : result;
 }
@@ -111,12 +114,12 @@ _AppendToRootPath(
     }
 
     // Return absolute or empty path as is.
-    if (subpathname[0] == '/') {
+    if (!TfIsRelativePath(subpathname)) {
         return subpathname;
     }
 
     // Join rootPathname and subpathname.
-    return TfNormPath(TfStringCatPaths(rootPathname, subpathname));
+    return TfStringCatPaths(rootPathname, subpathname);
 }
 
 void
@@ -147,7 +150,7 @@ _ReadPlugInfoObject(const std::string& pathname, JsObject* result)
     // The file may not exist or be readable.
     std::ifstream ifs;
     ifs.open(pathname.c_str());
-    if (not ifs.is_open()) {
+    if (!ifs.is_open()) {
         TF_DEBUG(PLUG_INFO_SEARCH).
             Msg("Failed to open plugin info %s\n", pathname.c_str());
         return false;
@@ -177,13 +180,13 @@ _ReadPlugInfoObject(const std::string& pathname, JsObject* result)
                          "(line %d, col %d): %s", pathname.c_str(),
                          error.line, error.column, error.reason.c_str());
     }
-    else if (not plugInfo.IsObject()) {
+    else if (!plugInfo.IsObject()) {
         // The contents didn't evaluate to a json object....
         TF_RUNTIME_ERROR("Plugin info file %s did not contain a JSON object",
                          pathname.c_str());
     }
     else {
-        *result = plugInfo.GetObject();
+        *result = plugInfo.GetJsObject();
     }
     return true;
 }
@@ -205,7 +208,7 @@ _ReadPlugInfo(_ReadContext* context, std::string pathname)
     }
 
     // Ignore redundant reads.  This also prevents infinite recursion.
-    if (not context->addVisitedPath(pathname)) {
+    if (!context->addVisitedPath(pathname)) {
         TF_DEBUG(PLUG_INFO_SEARCH).
             Msg("Ignore already read plugin info %s\n", pathname.c_str());
         return true;
@@ -215,7 +218,7 @@ _ReadPlugInfo(_ReadContext* context, std::string pathname)
     TF_DEBUG(PLUG_INFO_SEARCH).
         Msg("Will read plugin info %s\n", pathname.c_str());
     JsObject top;
-    if (not _ReadPlugInfoObject(pathname, &top)) {
+    if (!_ReadPlugInfoObject(pathname, &top)) {
         return false;
     }
     TF_DEBUG(PLUG_INFO_SEARCH).
@@ -225,13 +228,13 @@ _ReadPlugInfo(_ReadContext* context, std::string pathname)
     JsObject::const_iterator i;
     i = top.find(_Tokens->PluginsKey);
     if (i != top.end()) {
-        if (not i->second.IsArray()) {
+        if (!i->second.IsArray()) {
             TF_RUNTIME_ERROR("Plugin info file %s key '%s' "
                              "doesn't hold an array",
                              pathname.c_str(), i->first.c_str());
         }
         else {
-            const JsArray& plugins = i->second.GetArray();
+            const JsArray& plugins = i->second.GetJsArray();
             for (size_t j = 0, n = plugins.size(); j != n; ++j) {
                 _AddPlugin(context, pathname, i->first, j, plugins[j]);
             }
@@ -239,15 +242,15 @@ _ReadPlugInfo(_ReadContext* context, std::string pathname)
     }
     i = top.find(_Tokens->IncludesKey);
     if (i != top.end()) {
-        if (not i->second.IsArray()) {
+        if (!i->second.IsArray()) {
             TF_RUNTIME_ERROR("Plugin info file %s key '%s' "
                              "doesn't hold an array",
                              pathname.c_str(), i->first.c_str());
         }
         else {
-            const JsArray& includes = i->second.GetArray();
+            const JsArray& includes = i->second.GetJsArray();
             for (size_t j = 0, n = includes.size(); j != n; ++j) {
-                if (not includes[j].IsString()) {
+                if (!includes[j].IsString()) {
                     TF_RUNTIME_ERROR("Plugin info file %s key '%s' "
                                      "index %zd doesn't hold a string",
                                      pathname.c_str(), i->first.c_str(), j);
@@ -266,9 +269,9 @@ _ReadPlugInfo(_ReadContext* context, std::string pathname)
     }
 
     // Report unexpected keys.
-    BOOST_FOREACH(const JsObject::value_type& v, top) {
+    for (const auto& v : top) {
         const JsObject::key_type& key = v.first;
-        if (key != _Tokens->PluginsKey and
+        if (key != _Tokens->PluginsKey && 
             key != _Tokens->IncludesKey) {
             TF_RUNTIME_ERROR("Plugin info file %s has unknown key %s",
                              pathname.c_str(), key.c_str());
@@ -295,7 +298,7 @@ _TranslateWildcardToRegex(const std::string& wildcard)
             break;
 
         case '*':
-            if (i + 1 != n and wildcard[i + 1] == '*') {
+            if (i + 1 != n && wildcard[i + 1] == '*') {
                 // ** => match anything
                 result.append(".*", 2);
 
@@ -323,26 +326,24 @@ _TraverseDirectory(
     const std::string& dirname,
     const std::shared_ptr<std::regex> dirRegex)
 {
-    const std::vector<std::string> dirContents = TfListDir(dirname);
+    std::vector<std::string> dirnames, filenames;
+    TfReadDir(dirname, &dirnames, &filenames, &filenames);
 
     // Traverse all files in the directory to see if we have a
     // match first so that we can terminate the recursive walk
     // if we find one.
-    for (const auto& path : dirContents) {
-        const bool isFilePath = (*path.rbegin() != '/');
-        if (isFilePath and std::regex_match(path, *dirRegex)) {
-            context->taskArena.Run(boost::bind(_ReadPlugInfo, 
-                                               context, path));
+    for (const auto& f : filenames) {
+        const std::string path = TfStringCatPaths(dirname, f);
+        if (std::regex_match(path, *dirRegex)) {
+            context->taskArena.Run(boost::bind(_ReadPlugInfo, context, path));
             return;
         }
     }
 
-    for (const auto& path : dirContents) {
-        const bool isDirPath = (*path.rbegin() == '/');
-        if (isDirPath) {
-            context->taskArena.Run(boost::bind(_TraverseDirectory, 
-                                               context, path, dirRegex));
-        }
+    for (const auto& d : dirnames) {
+        const std::string path = TfStringCatPaths(dirname, d);
+        context->taskArena.Run(
+            boost::bind(_TraverseDirectory, context, path, dirRegex));
     }
 }
 
@@ -363,7 +364,7 @@ _ReadPlugInfoWithWildcards(_ReadContext* context, const std::string& pathname)
     }
 
     // Fail if pathname is not absolute.
-    if (pathname[0] != '/') {
+    if (TfIsRelativePath(pathname)) {
         TF_RUNTIME_ERROR("Plugin info file %s is not absolute",
                          pathname.c_str());
         return;
@@ -384,16 +385,19 @@ _ReadPlugInfoWithWildcards(_ReadContext* context, const std::string& pathname)
             Msg("Globbing plugin info path %s\n", pathname.c_str());
 
         // Yes, no recursive searches so do the glob.
-        BOOST_FOREACH(const std::string& match, TfGlob(pathname, 0)) {
+        for (const auto& match : TfGlob(pathname, 0)) {
             context->taskArena.Run(boost::bind(_ReadPlugInfo, context, match));
         }
         return;
     }
 
+    // Converts backslashes to forward slashes for Windows.
+    std::string normalized = TfStringReplace(pathname, "\\", "/");
+
     // Find longest non-wildcarded prefix directory.
-    std::string::size_type j = pathname.rfind('/', i);
-    std::string dirname = pathname.substr(0, j);
-    std::string pattern = pathname.substr(j + 1);
+    std::string::size_type j = normalized.rfind('/', i);
+    std::string dirname = TfNormPath(normalized.substr(0, j));
+    std::string pattern = normalized.substr(j + 1);
 
     // Convert to regex.
     pattern = _TranslateWildcardToRegex(pattern);
@@ -401,7 +405,7 @@ _ReadPlugInfoWithWildcards(_ReadContext* context, const std::string& pathname)
     // Append implied filename and build full regex string.
     pattern = TfStringPrintf("%s/%s%s",
                              dirname.c_str(), pattern.c_str(),
-                             not pattern.empty() and *pattern.rbegin() == '/'
+                             !pattern.empty() && *pattern.rbegin() == '/'
                              ? _Tokens->PlugInfoName.GetText() : "");
 
     std::shared_ptr<std::regex> re;
@@ -529,19 +533,19 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
     JsObject::const_iterator i;
 
     // Validate
-    if (not value.IsObject()) {
+    if (!value.IsObject()) {
         TF_RUNTIME_ERROR("Plugin info %s doesn't hold an object; "
                          "plugin ignored",
                          locationForErrorReporting.c_str());
         return;
     }
-    const JsObject& topInfo = value.GetObject();
+    const JsObject& topInfo = value.GetJsObject();
 
     // Parse type.
     key = &_Tokens->TypeKey;
     i = topInfo.find(*key);
     if (i != topInfo.end()) {
-        if (not i->second.IsString()) {
+        if (!i->second.IsString()) {
             errorMessage = "doesn't hold a string";
             goto error;
         }
@@ -550,9 +554,11 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
             if (typeName == "library") {
                 type = LibraryType;
             }
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
             else if (typeName == "python") {
                 type = PythonType;
             }
+#endif // PXR_PYTHON_SUPPORT_ENABLED
             else if (typeName == "resource") {
                 type = ResourceType;
             }
@@ -571,7 +577,7 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
     key = &_Tokens->NameKey;
     i = topInfo.find(*key);
     if (i != topInfo.end()) {
-        if (not i->second.IsString()) {
+        if (!i->second.IsString()) {
             errorMessage = "doesn't hold a string";
             goto error;
         }
@@ -592,7 +598,7 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
     key = &_Tokens->RootKey;
     i = topInfo.find(*key);
     if (i != topInfo.end()) {
-        if (not i->second.IsString()) {
+        if (!i->second.IsString()) {
             errorMessage = "doesn't hold a string";
             goto error;
         }
@@ -612,7 +618,7 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
     key = &_Tokens->LibraryPathKey;
     i = topInfo.find(*key);
     if (i != topInfo.end()) {
-        if (not i->second.IsString()) {
+        if (!i->second.IsString()) {
             errorMessage = "doesn't hold a string";
             goto error;
         }
@@ -633,7 +639,7 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
     key = &_Tokens->ResourcePathKey;
     i = topInfo.find(*key);
     if (i != topInfo.end()) {
-        if (not i->second.IsString()) {
+        if (!i->second.IsString()) {
             errorMessage = "doesn't hold a string";
             goto error;
         }
@@ -653,12 +659,12 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
     key = &_Tokens->InfoKey;
     i = topInfo.find(*key);
     if (i != topInfo.end()) {
-        if (not i->second.IsObject()) {
+        if (!i->second.IsObject()) {
             errorMessage = "doesn't hold an object";
             goto error;
         }
         else {
-            plugInfo = i->second.GetObject();
+            plugInfo = i->second.GetJsObject();
         }
     }
     else {
@@ -667,13 +673,13 @@ Plug_RegistrationMetadata::Plug_RegistrationMetadata(
     }
 
     // Report unexpected keys.
-    BOOST_FOREACH(const JsObject::value_type& v, topInfo) {
+    for (const auto& v : topInfo) {
         const JsObject::key_type& subkey = v.first;
-        if (subkey != _Tokens->TypeKey and
-            subkey != _Tokens->NameKey and
-            subkey != _Tokens->InfoKey and
-            subkey != _Tokens->RootKey and
-            subkey != _Tokens->LibraryPathKey and
+        if (subkey != _Tokens->TypeKey && 
+            subkey != _Tokens->NameKey && 
+            subkey != _Tokens->InfoKey && 
+            subkey != _Tokens->RootKey && 
+            subkey != _Tokens->LibraryPathKey &&
             subkey != _Tokens->ResourcePathKey) {
             TF_RUNTIME_ERROR("Plugin info %s: ignoring unknown key '%s'",
                              locationForErrorReporting.c_str(),
@@ -699,14 +705,12 @@ Plug_ReadPlugInfo(
 {
     TF_DEBUG(PLUG_INFO_SEARCH).Msg("Will check plugin info paths\n");
     _ReadContext context(*taskArena, addVisitedPath, addPlugin);
-    BOOST_FOREACH(const std::string& pathname, pathnames) {
+    for (const auto& pathname : pathnames) {
         // For convenience we allow given paths that are directories but
         // don't end in "/" to be handled as directories.  Includes in
         // plugInfo files must still explicitly append '/' to be handled
         // as directories.
-        if (not pathname.empty() and
-                *pathname.rbegin() != '/' and
-                TfIsDir(pathname)) {
+        if (!pathname.empty() && *pathname.rbegin() != '/') {
             context.taskArena.Run(
                 boost::bind(_ReadPlugInfoWithWildcards, &context,
                             pathname + "/"));
@@ -719,3 +723,5 @@ Plug_ReadPlugInfo(
     context.taskArena.Wait();
     TF_DEBUG(PLUG_INFO_SEARCH).Msg("Did check plugin info paths\n");
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

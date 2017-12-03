@@ -24,9 +24,10 @@
 #ifndef USDKATANA_GENERATED_BLINDDATAOBJECT_H
 #define USDKATANA_GENERATED_BLINDDATAOBJECT_H
 
+/// \file usdKatana/blindDataObject.h
 
-
-
+#include "pxr/pxr.h"
+#include "usdKatana/api.h"
 #include "pxr/usd/usd/schemaBase.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -41,12 +42,16 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // BLINDDATAOBJECT                                                            //
 // -------------------------------------------------------------------------- //
 
+/// \class UsdKatanaBlindDataObject
+///
 /// Container namespace schema for katana blind data from the klf file
 ///
 class UsdKatanaBlindDataObject : public UsdSchemaBase
@@ -76,15 +81,17 @@ public:
     }
 
     /// Destructor.
+    USDKATANA_API
     virtual ~UsdKatanaBlindDataObject();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDKATANA_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdKatanaBlindDataObject holding the prim adhering to this
+    /// Return a UsdKatanaBlindDataObject holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -93,10 +100,11 @@ public:
     /// UsdKatanaBlindDataObject(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDKATANA_API
     static UsdKatanaBlindDataObject
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
-    /// \brief Attempt to ensure a \a UsdPrim adhering to this schema at \p path
+    /// Attempt to ensure a \a UsdPrim adhering to this schema at \p path
     /// is defined (according to UsdPrim::IsDefined()) on this stage.
     ///
     /// If a prim adhering to this schema at \p path is already defined on this
@@ -118,17 +126,20 @@ public:
     /// specify this schema class, in case a stronger typeName opinion overrides
     /// the opinion at the current EditTarget.
     ///
+    USDKATANA_API
     static UsdKatanaBlindDataObject
     Define(const UsdStagePtr &stage, const SdfPath &path);
 
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDKATANA_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDKATANA_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -141,6 +152,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->String
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDKATANA_API
     UsdAttribute GetTypeAttr() const;
 
     /// See GetTypeAttr(), and also 
@@ -148,6 +160,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDKATANA_API
     UsdAttribute CreateTypeAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -160,6 +173,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->Bool
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDKATANA_API
     UsdAttribute GetVisibleAttr() const;
 
     /// See GetVisibleAttr(), and also 
@@ -167,6 +181,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDKATANA_API
     UsdAttribute CreateVisibleAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -174,8 +189,10 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 
@@ -252,5 +269,7 @@ public:
     ///
     static bool IsKbdAttribute(const UsdProperty &prop);
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

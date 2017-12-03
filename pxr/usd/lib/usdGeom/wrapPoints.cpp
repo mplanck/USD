@@ -22,12 +22,11 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/usd/usdGeom/points.h"
-
 #include "pxr/usd/usd/schemaBase.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/usd/sdf/primSpec.h"
 
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -38,6 +37,10 @@
 #include <string>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 #define WRAP_CUSTOM                                                     \
     template <class Cls> static void _CustomWrapCode(Cls &_class)
@@ -59,6 +62,8 @@ _CreateIdsAttr(UsdGeomPoints &self,
     return self.CreateIdsAttr(
         UsdPythonToSdfType(defaultVal, SdfValueTypeNames->Int64Array), writeSparsely);
 }
+
+} // anonymous namespace
 
 void wrapUsdGeomPoints()
 {
@@ -122,8 +127,14 @@ void wrapUsdGeomPoints()
 // }
 //
 // Of course any other ancillary or support code may be provided.
+// 
+// Just remember to wrap code in the appropriate delimiters:
+// 'namespace {', '}'.
+//
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
+
+namespace {
 
 static TfPyObjWrapper 
 _ComputeExtent(object points, object widths) {
@@ -136,12 +147,12 @@ _ComputeExtent(object points, object widths) {
         SdfValueTypeNames->FloatArray);
 
     // Check Proper conversion to VtVec3fArray
-    if (not pointsAsVtValue.IsHolding<VtVec3fArray>()) {
+    if (!pointsAsVtValue.IsHolding<VtVec3fArray>()) {
         TF_CODING_ERROR("Improper value for 'points'");
         return object();
     }
 
-    if (not widthsAsVtValue.IsHolding<VtFloatArray>()) {
+    if (!widthsAsVtValue.IsHolding<VtFloatArray>()) {
         TF_CODING_ERROR("Improper value for 'widths'");
         return object();
     }
@@ -166,3 +177,5 @@ WRAP_CUSTOM {
 
         ;
 }
+
+} // anonymous namespace

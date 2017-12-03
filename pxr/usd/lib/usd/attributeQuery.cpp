@@ -21,15 +21,18 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/attributeQuery.h"
 
-#include "pxr/usd/usd/conversions.h"
 #include "pxr/usd/usd/stage.h"
 
 #include "pxr/usd/sdf/types.h"
 #include "pxr/base/tracelite/trace.h"
 
 #include <boost/preprocessor/seq/for_each.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 UsdAttributeQuery::UsdAttributeQuery(
     const UsdAttribute& attr)
@@ -41,7 +44,7 @@ UsdAttributeQuery::UsdAttributeQuery(
     const UsdPrim& prim, const TfToken& attrName)
 {
     UsdAttribute attr = prim.GetAttribute(attrName);
-    if (not attr) {
+    if (!attr) {
         TF_CODING_ERROR(
             "Invalid attribute '%s' on prim <%s>",
             attrName.GetText(), prim.GetPath().GetString().c_str());
@@ -57,8 +60,8 @@ UsdAttributeQuery::CreateQueries(
 {
     std::vector<UsdAttributeQuery> rval;
     rval.reserve(attrNames.size());
-    TF_FOR_ALL(it, attrNames) {
-        rval.push_back(UsdAttributeQuery(prim, *it));
+    for (const auto& attrName : attrNames) {
+        rval.push_back(UsdAttributeQuery(prim, attrName));
     }
 
     return rval;
@@ -73,7 +76,7 @@ UsdAttributeQuery::_Initialize(const UsdAttribute& attr)
 {
     TRACE_FUNCTION();
 
-    if (not attr) {
+    if (!attr) {
         TF_CODING_ERROR("Invalid attribute");
         return;
     }
@@ -91,6 +94,7 @@ UsdAttributeQuery::GetAttribute() const
 }
 
 template <typename T>
+USD_API
 bool 
 UsdAttributeQuery::_Get(T* value, UsdTimeCode time) const
 {
@@ -99,6 +103,7 @@ UsdAttributeQuery::_Get(T* value, UsdTimeCode time) const
 }
 
 template <>
+USD_API
 bool
 UsdAttributeQuery::_Get(VtArray<SdfAssetPath>* assetPaths, 
                         UsdTimeCode time) const
@@ -116,6 +121,7 @@ UsdAttributeQuery::_Get(VtArray<SdfAssetPath>* assetPaths,
 
 
 template <>
+USD_API
 bool
 UsdAttributeQuery::_Get(SdfAssetPath* assetPath, UsdTimeCode time) const
 {
@@ -136,7 +142,7 @@ UsdAttributeQuery::Get(VtValue* value, UsdTimeCode time) const
     bool foundValue = stage->_GetValueFromResolveInfo(_resolveInfo, time, 
                                                       _attr, value);
 
-    if (foundValue and value) {
+    if (foundValue && value) {
         stage->_MakeResolvedAssetPaths(time, _attr, value);
     }
 
@@ -179,18 +185,13 @@ UsdAttributeQuery::GetBracketingTimeSamples(double desiredTime,
 bool 
 UsdAttributeQuery::HasValue() const
 {
-    return _resolveInfo.source != Usd_ResolveInfoSourceNone;  
+    return _resolveInfo._source != UsdResolveInfoSourceNone;  
 }
 
 bool 
 UsdAttributeQuery::HasAuthoredValueOpinion() const
 {
-    bool authoredValueFound = 
-        _resolveInfo.source == Usd_ResolveInfoSourceDefault
-        or _resolveInfo.source == Usd_ResolveInfoSourceTimeSamples
-        or _resolveInfo.source == Usd_ResolveInfoSourceValueClips;
-
-    return authoredValueFound or _resolveInfo.valueIsBlocked;
+    return _resolveInfo.HasAuthoredValueOpinion();
 }
 
 bool
@@ -209,11 +210,14 @@ UsdAttributeQuery::ValueMightBeTimeVarying() const
 // Explicitly instantiate templated getters for all Sdf value
 // types.
 #define _INSTANTIATE_GET(r, unused, elem)                               \
-    template bool UsdAttributeQuery::_Get(                              \
+    template USD_API bool UsdAttributeQuery::_Get(                      \
         SDF_VALUE_TRAITS_TYPE(elem)::Type*, UsdTimeCode) const;         \
-    template bool UsdAttributeQuery::_Get(                              \
+    template USD_API bool UsdAttributeQuery::_Get(                      \
         SDF_VALUE_TRAITS_TYPE(elem)::ShapedType*, UsdTimeCode) const;
 
 BOOST_PP_SEQ_FOR_EACH(_INSTANTIATE_GET, ~, SDF_VALUE_TYPES)
 #undef _INSTANTIATE_GET
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

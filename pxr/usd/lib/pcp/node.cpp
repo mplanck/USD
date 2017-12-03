@@ -21,8 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/node.h"
 #include "pxr/usd/pcp/primIndex_Graph.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 static inline int _GetNonVariantPathElementCount(const SdfPath &path);
 
@@ -72,7 +76,7 @@ PcpNodeRef
 PcpNodeRef::GetOriginRootNode() const
 {
     PcpNodeRef root(*this);
-    while (root.GetOriginNode() and 
+    while (root.GetOriginNode() &&
            root.GetOriginNode() != root.GetParentNode())
         root = root.GetOriginNode();
 
@@ -122,21 +126,15 @@ PCP_DEFINE_GET_API(const PcpMapExpression&, GetMapToParent, mapToParent);
 PCP_DEFINE_GET_API(const PcpMapExpression&, GetMapToRoot, mapToRoot);
 
 PCP_DEFINE_API(bool, HasSymmetry, SetHasSymmetry, smallInts.hasSymmetry);
-PCP_DEFINE_API(
-    bool, HasVariantSelections, SetHasVariantSelections, 
-    smallInts.hasVariantSelections);
 PCP_DEFINE_API(SdfPermission, GetPermission, SetPermission, smallInts.permission);
 PCP_DEFINE_API(bool, IsCulled, SetCulled, smallInts.culled);
 PCP_DEFINE_API(bool, IsRestricted, SetRestricted, smallInts.permissionDenied);
-PCP_DEFINE_API(
-    bool, ShouldContributeDependencies, SetShouldContributeDependencies,
-    smallInts.shouldContributeDependencies);
 
 PCP_DEFINE_SET_API(bool, SetInert, smallInts.inert);
 
 PCP_DEFINE_GET_NODE_API(size_t, _GetParentIndex, smallInts.arcParentIndex);
 PCP_DEFINE_GET_NODE_API(size_t, _GetOriginIndex, smallInts.arcOriginIndex);
-PCP_DEFINE_GET_API(const PcpLayerStackPtr&, GetLayerStack, layerStack);
+PCP_DEFINE_GET_API(const PcpLayerStackRefPtr&, GetLayerStack, layerStack);
 
 bool
 PcpNodeRef::HasSpecs() const
@@ -175,7 +173,7 @@ bool
 PcpNodeRef::IsInert() const
 {
     const PcpPrimIndex_Graph::_Node& node = _graph->_GetNode(_nodeIdx);
-    return node.smallInts.inert or node.smallInts.culled;
+    return node.smallInts.inert || node.smallInts.culled;
 }
 
 bool 
@@ -184,22 +182,22 @@ PcpNodeRef::CanContributeSpecs() const
     // No permissions in Usd mode, so skip restriction check.
     //
     // The logic here is equivalent to:
-    //     (not IsInert() and (IsUsd() or not IsRestricted()))
+    //     (!IsInert() and (IsUsd() or not IsRestricted()))
     //
     // but it looks at the bits directly instead of going through those public
     // methods to avoid some unnecessary overhead.  This method is heavily used
     // so avoiding that overhead for the slight obfuscation is justified.
 
     const PcpPrimIndex_Graph::_Node& node = _graph->_GetNode(_nodeIdx);
-    return not (node.smallInts.inert or node.smallInts.culled) and
-        (not node.smallInts.permissionDenied or _graph->_data->usd);
+    return !(node.smallInts.inert || node.smallInts.culled) &&
+        (!node.smallInts.permissionDenied || _graph->_data->usd);
 }
 
 int
 PcpNodeRef::GetDepthBelowIntroduction() const
 {
     const PcpNodeRef parent = GetParentNode();
-    if (not parent)
+    if (!parent)
         return 0;
 
     return _GetNonVariantPathElementCount(parent.GetPath())
@@ -236,7 +234,7 @@ PcpNodeRef::GetIntroPath() const
 {
     // Start with the parent node's current path.
     const PcpNodeRef parent = GetParentNode();
-    if (not parent)
+    if (!parent)
         return SdfPath::AbsoluteRootPath();
     SdfPath introPath = parent.GetPath();
 
@@ -291,7 +289,7 @@ PcpNodeRef_ChildrenIterator::PcpNodeRef_ChildrenIterator() :
 PcpNodeRef_ChildrenIterator::PcpNodeRef_ChildrenIterator(
     const PcpNodeRef& node, bool end) :
     _node(node),
-    _index(not end ?
+    _index(!end ?
             _node._graph->_GetNode(_node).smallInts.firstChildIndex :
             PcpPrimIndex_Graph::_Node::_invalidNodeIndex)
 {
@@ -326,7 +324,7 @@ PcpNodeRef_ChildrenReverseIterator::PcpNodeRef_ChildrenReverseIterator(
 PcpNodeRef_ChildrenReverseIterator::PcpNodeRef_ChildrenReverseIterator(
     const PcpNodeRef& node, bool end) :
     _node(node),
-    _index(not end ?
+    _index(!end ?
             _node._graph->_GetNode(_node).smallInts.lastChildIndex :
             PcpPrimIndex_Graph::_Node::_invalidNodeIndex)
 {
@@ -351,12 +349,14 @@ _GetNonVariantPathElementCount(const SdfPath &path)
     //return path.StripAllVariantSelections().GetPathElementCount();
     if (ARCH_UNLIKELY(path.ContainsPrimVariantSelection())) {
         SdfPath cur(path);
-        int result = (not cur.IsPrimVariantSelectionPath());
+        int result = (!cur.IsPrimVariantSelectionPath());
         cur = cur.GetParentPath();
         for (; cur.ContainsPrimVariantSelection(); cur = cur.GetParentPath())
-            result += (not cur.IsPrimVariantSelectionPath());
-        return result + cur.GetPathElementCount();
+            result += (!cur.IsPrimVariantSelectionPath());
+        return result + static_cast<int>(cur.GetPathElementCount());
     } else {
-        return path.GetPathElementCount();
+        return static_cast<int>(path.GetPathElementCount());
     }
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

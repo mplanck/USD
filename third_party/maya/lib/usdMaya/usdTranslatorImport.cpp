@@ -26,6 +26,7 @@
  * \brief file translator for USD files
  */
 
+#include "pxr/pxr.h"
 #include "usdMaya/usdTranslatorImport.h"
 
 #include "usdMaya/JobArgs.h"
@@ -39,6 +40,9 @@
 
 #include <map>
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 
 void* usdTranslatorImport::creator(const std::string& assemblyTypeName,
@@ -79,7 +83,7 @@ MStatus usdTranslatorImport::reader(const MFileObject & file,
                     jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->none;
                 } else if (theOption[1]=="GPrim Colors") {
                     jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->displayColor;
-                } else if (theOption[1]=="Look Colors") {
+                } else if (theOption[1]=="Material Colors") {
                     jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->displayColor;
                 } else if (theOption[1]=="RfM Shaders") {
                     TfToken shadingMode("pxrRis");
@@ -91,11 +95,26 @@ MStatus usdTranslatorImport::reader(const MFileObject & file,
                                         shadingMode.GetText()).c_str());
                         jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->none;
                     }
+                } else { 
+                    TfToken modeToken(theOption[1].asChar()); 
+                    if (PxrUsdMayaShadingModeRegistry::GetInstance().GetExporter(modeToken)) { 
+                        jobArgs.shadingMode = modeToken; 
+                    } else { 
+                        MGlobal::displayError( 
+                            TfStringPrintf("No shadingMode '%s' found. Setting shadingMode='none'", modeToken.GetText()).c_str()); 
+                        jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->none; 
+                    }
                 }
             } else if (theOption[0] == MString("readAnimData")) {
                 jobArgs.readAnimData = theOption[1].asInt();
             } else if (theOption[0] == MString("assemblyRep")) {
                 jobArgs.assemblyRep = TfToken(theOption[1].asChar());
+            } else if (theOption[0] == MString("startTime")) {
+                jobArgs.startTime = theOption[1].asDouble();
+            } else if (theOption[0] == MString("endTime")) {
+                jobArgs.endTime = theOption[1].asDouble();
+            } else if (theOption[0] == MString("useCustomFrameRange")) {
+                jobArgs.useCustomFrameRange = theOption[1].asInt();
             }
         }
     }
@@ -107,21 +126,31 @@ MStatus usdTranslatorImport::reader(const MFileObject & file,
     return (success) ? MS::kSuccess : MS::kFailure;
 }
 
-MPxFileTranslator::MFileKind usdTranslatorImport::identifyFile(
-    const MFileObject &fileName,
-    const char*,
-    short) const {
-
+MPxFileTranslator::MFileKind
+usdTranslatorImport::identifyFile(
+        const MFileObject& file,
+        const char* buffer,
+        short size) const
+{
     MFileKind retValue = kNotMyFileType;
-    MString fName = fileName.fullName();
-    int sLen=fName.length();
-    if (sLen>5) {
-        if (fName.substring(sLen-4, sLen-1)==".usd" || 
-            fName.substring(sLen-5, sLen-1)==".usda" ||
-            fName.substring(sLen-5, sLen-1)==".usdb" ||
-            fName.substring(sLen-5, sLen-1)==".usdc") {
-            retValue = kIsMyFileType;
-        }
+    const MString fileName = file.fullName();
+    const int lastIndex = fileName.length() - 1;
+
+    const int periodIndex = fileName.rindex('.');
+    if (periodIndex < 0 || periodIndex >= lastIndex) {
+        return retValue;
     }
+
+    const MString fileExtension = fileName.substring(periodIndex + 1, lastIndex);
+
+    if (fileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionDefault.GetText() || 
+        fileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionASCII.GetText() || 
+        fileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionCrate.GetText()) {
+        retValue = kIsMyFileType;
+    }
+
     return retValue;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

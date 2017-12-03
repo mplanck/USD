@@ -21,9 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/diagnosticMgr.h"
 #include "pxr/base/tf/error.h"
 #include "pxr/base/tf/errorMark.h"
+#include "pxr/base/tf/pyCallContext.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyError.h"
@@ -45,6 +49,10 @@ using std::string;
 using std::vector;
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static void
 _RaiseCodingError(string const &msg,
@@ -101,7 +109,7 @@ _InvokeWithErrorHandling(tuple const &args, dict const &kw)
     handle<> ret(PyObject_Call(callable, args_tail.get(), kw.ptr()));
     // if the call completed successfully, then we need to see if any tf errors
     // occurred, and if so, convert them to python exceptions.
-    if (not m.IsClean() and TfPyConvertTfErrorsToPythonException(m))
+    if (!m.IsClean() && TfPyConvertTfErrorsToPythonException(m))
         throw_error_already_set();
     // if we made it this far, we return the result.
     return ret;
@@ -140,7 +148,7 @@ _RepostErrors(boost::python::object exc)
     const bool TF_ERROR_MARK_TRACKING =
         TfDebug::IsDebugSymbolNameEnabled("TF_ERROR_MARK_TRACKING");
 
-    if (TF_ERROR_MARK_TRACKING and
+    if (TF_ERROR_MARK_TRACKING &&
         TfDiagnosticMgr::GetInstance().HasActiveErrorMark()) {
         if (TF_ERROR_MARK_TRACKING)
             printf("Tf.RepostErrors called with active marks\n");
@@ -198,18 +206,20 @@ static void
 _SetPythonExceptionDebugTracingEnabled(bool enable)
 {
     static TfPyTraceFnId traceFnId;
-    if (not enable) {
+    if (!enable) {
         traceFnId.reset();
-    } else if (not traceFnId) {
+    } else if (!traceFnId) {
         traceFnId = TfPyRegisterTraceFn(_PythonExceptionDebugTracer);
     }
 }
 
+} // anonymous namespace 
+
 void wrapError() {
-    def("_RaiseCodingError", &::_RaiseCodingError);
-    def("_RaiseRuntimeError", &::_RaiseRuntimeError);
-    def("_Fatal", &::_Fatal);
-    def("RepostErrors", &::_RepostErrors, arg("exception"));
+    def("_RaiseCodingError", &_RaiseCodingError);
+    def("_RaiseRuntimeError", &_RaiseRuntimeError);
+    def("_Fatal", &_Fatal);
+    def("RepostErrors", &_RepostErrors, arg("exception"));
     def("ReportActiveErrorMarks", TfReportActiveErrorMarks);
     def("SetPythonExceptionDebugTracingEnabled",
         _SetPythonExceptionDebugTracingEnabled, arg("enabled"));
@@ -273,7 +283,7 @@ void wrapError() {
         .def("SetMark", &TfErrorMark::SetMark)
         .def("IsClean", &TfErrorMark::IsClean)
         .def("Clear", &TfErrorMark::Clear)
-        .def("GetErrors", &::_GetErrors,
+        .def("GetErrors", &_GetErrors,
             return_value_policy<TfPySequenceToList>(),
              "A list of the errors held by this mark.")
         ;

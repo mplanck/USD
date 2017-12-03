@@ -24,6 +24,7 @@
 #ifndef USD_CLIP_CACHE_H
 #define USD_CLIP_CACHE_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/clip.h"
 #include "pxr/usd/sdf/pathTable.h"
 
@@ -31,11 +32,16 @@
 #include <boost/noncopyable.hpp>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 class PcpPrimIndex;
 
 /// \class Usd_ClipCache
+///
 /// Private helper object for computing and caching clip information for 
 /// a prim on a UsdStage.
+///
 class Usd_ClipCache : public boost::noncopyable
 {
 public:
@@ -60,19 +66,27 @@ public:
 
         void Swap(Clips& rhs)
         {
-            using namespace std;
-            swap(sourceNode, rhs.sourceNode);
-            swap(sourceLayerIndex, rhs.sourceLayerIndex);
-            swap(manifestClip, rhs.manifestClip);
-            swap(valueClips, rhs.valueClips);
+            std::swap(sourceLayerStack, rhs.sourceLayerStack);
+            std::swap(sourcePrimPath, rhs.sourcePrimPath);
+            std::swap(sourceLayerIndex, rhs.sourceLayerIndex);
+            std::swap(manifestClip, rhs.manifestClip);
+            std::swap(valueClips, rhs.valueClips);
         }
 
-        PcpNodeRef sourceNode;
+        PcpLayerStackPtr sourceLayerStack;
+        SdfPath sourcePrimPath;
         size_t sourceLayerIndex;
         Usd_ClipRefPtr manifestClip;
         Usd_ClipRefPtrVector valueClips;
     };
 
+    /// Get all the layers that have been opened because we needed to extract
+    /// data from their corresponding clips.  USD tries to be as lazy as 
+    /// possible about opening clip layers to avoid unnecessary latency and
+    /// memory bloat; however, once a layer is open, it will generally be
+    /// kept open for the life of the stage.
+    SdfLayerHandleSet GetUsedLayers() const;
+    
     /// Get all clips that may contribute opinions to attributes on the
     /// prim at \p path, including clips that were authored on ancestral prims.
     ///
@@ -83,8 +97,10 @@ public:
     GetClipsForPrim(const SdfPath& path) const;
 
     /// \struct Lifeboat
+    ///
     /// Structure for keeping invalidated clip data alive.
-    /// See InvalidateClipsForPrim.
+    /// \sa InvalidateClipsForPrim.
+    ///
     struct Lifeboat
     {
         std::vector<Clips> _clips;
@@ -108,5 +124,8 @@ private:
     _ClipTable _table;
     mutable tbb::mutex _mutex;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_CLIP_CACHE_H

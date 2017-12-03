@@ -21,22 +21,22 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
 #if !BOOST_PP_IS_ITERATING
 
 #ifndef TF_MAKE_CONSTRUCTOR_H
 #define TF_MAKE_CONSTRUCTOR_H
 
-///
-/// \file makePyConstructor.h
-///
-/// \brief An injected constructor mechanism that works with polymorphic wrapped
+/// \file tf/makePyConstructor.h
+/// An injected constructor mechanism that works with polymorphic wrapped
 /// classes.
-///
 
 #ifndef TF_MAX_ARITY
 #  define TF_MAX_ARITY 7
 #endif // TF_MAX_ARITY
 
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/refPtr.h"
 #include "pxr/base/tf/weakPtr.h"
 #include "pxr/base/tf/diagnostic.h"
@@ -63,7 +63,8 @@
 
 #include <string>
 
-//
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Helper for wrapping objects that are held by weak pointers, but may also be
 // constructed from script.  This lets one construct an object from script and
 // stores a ref pointer to the C++ object inside the python object.  This way,
@@ -230,7 +231,7 @@ void Install(object const &self, T const &t, TfErrorMark const &m) {
             bp::throw_error_already_set();
         // If no TfError, but object construction failed, raise a generic error
         // back to python.
-        if (not held)
+        if (!held)
             TfPyThrowRuntimeError("could not construct " +
                                   ArchGetDemangled(typeid(HeldType)));
         bp::detail::initialize_wrapper(self.ptr(), &(*(held.operator->())));
@@ -264,7 +265,7 @@ struct _RefPtrFactoryConverter {
                     (get_pointer(p)));
 
         // If resulting pointer is null, return None.
-        if (not ptr)
+        if (!ptr)
             return bp::incref(Py_None);
 
         // The to-python converter will set identity here.
@@ -384,10 +385,8 @@ struct TfPyRefPtrFactory : public Tf_MakePyConstructor::RefPtrFactory<T> {};
 
 template <typename T> struct Tf_PySequenceToListConverterRefPtrFactory;
 
-/*!
- * \brief A boost::python result converter generator which converts standard
- * library sequences to lists of python owned objects.
- */
+/// A \c boost::python result converter generator which converts standard
+/// library sequences to lists of python owned objects.
 struct TfPySequenceToListRefPtrFactory {
     template <typename T>
     struct apply {
@@ -422,16 +421,11 @@ struct Tf_PySequenceToListConverterRefPtrFactory {
     }
 };
 
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_MAKE_CONSTRUCTOR_H
 
-
-
-
-
-
 #else // BOOST_PP_IS_ITERATING
-
 
 #define N BOOST_PP_ITERATION()
 
@@ -485,7 +479,7 @@ struct NewCtor<SIGNATURE> : CtorBase<SIGNATURE> {
             TfPyThrowRuntimeError("could not construct " +
                                   ArchGetDemangled(typeid(HeldType)));
 
-        bp::detail::initialize_wrapper(ret.ptr(), bp::get_pointer(h));
+        bp::detail::initialize_wrapper(ret.ptr(), get_pointer(h));
         // make the object have the right class.
         bp::setattr(ret, "__class__", cls);
 
@@ -615,7 +609,7 @@ struct NewCtorWithClassReference<SIGNATURE> : CtorBase<SIGNATURE> {
             TfPyThrowRuntimeError("could not construct " +
                                   ArchGetDemangled(typeid(HeldType)));
 
-        bp::detail::initialize_wrapper(ret.ptr(), bp::get_pointer(h));
+        bp::detail::initialize_wrapper(ret.ptr(), get_pointer(h));
         // make the object have the right class.
         bp::setattr(ret, "__class__", a0);
 

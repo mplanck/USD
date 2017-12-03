@@ -21,24 +21,26 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/vt/typeHeaders.h"
 #include "pxr/base/vt/types.h"
 
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/value.h"
-#include "pxr/base/vt/wrapArray.h"
 
 #include "pxr/base/tf/type.h"
 
 #include <algorithm>
 #include <vector>
 
-#include <boost/foreach.hpp>
 #include <boost/utility/enable_if.hpp>
 #include <boost/preprocessor.hpp>
 #include <boost/type_traits/is_same.hpp>
 
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // The following preprocessor code generates specializations for free functions
 // that produce
@@ -51,22 +53,22 @@ using std::vector;
 // etc.
 #define VT_ZERO_0_CONSTRUCTOR(r, unused, elem)      \
 template<>                                          \
-VT_TYPE(elem) VtZero() {                            \
+VT_API VT_TYPE(elem) VtZero() {                     \
     return (VT_TYPE(elem))(0);                      \
 }
 #define VT_ZERO_0FLOAT_CONSTRUCTOR(r, unused, elem) \
 template<>                                          \
-VT_TYPE(elem) VtZero() {                            \
+VT_API VT_TYPE(elem) VtZero() {                     \
     return VT_TYPE(elem)(0.0f);                     \
 }
 #define VT_ZERO_0DOUBLE_CONSTRUCTOR(r, unused, elem)\
 template<>                                          \
-VT_TYPE(elem) VtZero() {                            \
-    return VT_TYPE(elem)(0.0);                     \
+VT_API VT_TYPE(elem) VtZero() {                     \
+    return VT_TYPE(elem)(0.0);                      \
 }
 #define VT_ZERO_EMPTY_CONSTRUCTOR(r, unused, elem)  \
 template<>                                          \
-VT_TYPE(elem) VtZero() {                            \
+VT_API VT_TYPE(elem) VtZero() {                     \
     return VT_TYPE(elem)() ;                        \
 }
 
@@ -163,11 +165,6 @@ TF_REGISTRY_FUNCTION(VtValue)
     VtValue::RegisterSimpleBidirectionalCast<GfVec4h, GfVec4f>();
     VtValue::RegisterSimpleBidirectionalCast<GfVec4f, GfVec4d>();
 
-    // Allow converting python sequences to VtArray for certain types.  Note
-    // that sequences of numeric types are handled in arrayNumpy.{cpp,h}.
-    VtRegisterValueCastsFromPythonSequencesToArray<std::string>();
-    VtRegisterValueCastsFromPythonSequencesToArray<TfToken>();
-
     // Precision casts.
     _RegisterArrayCasts<VtHalfArray, VtFloatArray>();
     _RegisterArrayCasts<VtHalfArray, VtDoubleArray>();
@@ -188,3 +185,4 @@ TF_REGISTRY_FUNCTION(VtValue)
     _RegisterRangeArrayCasts<VtRange3fArray, VtRange3dArray>();
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

@@ -34,7 +34,7 @@
 #include <boost/mpl/remove.hpp>
 #include <boost/mpl/empty.hpp>
 
-
+PXR_NAMESPACE_OPEN_SCOPE
 
 // Recursive template for declaring the types in TypeVector as
 // TfTypes and pushing them onto the result vector.
@@ -93,8 +93,6 @@ struct Tf_AddBases<DERIVED, TypeVector, true /* empty vector */>
         // Base case; nothing left to do.
     }
 };
-
-
 
 template <typename T, typename B>
 TfType const&
@@ -167,5 +165,6 @@ TfType::_TypeDefiner<DERIVED>::_AddBaseCppType()
     return *this;
 }
 
-#endif // TF_TYPE_IMPL_H
+PXR_NAMESPACE_CLOSE_SCOPE
 
+#endif // TF_TYPE_IMPL_H

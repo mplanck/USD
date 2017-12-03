@@ -24,13 +24,8 @@
 #ifndef HD_BUFFER_ARRAY_REGISTRY_H
 #define HD_BUFFER_ARRAY_REGISTRY_H
 
-#include <condition_variable>
-#include <mutex>
-
-#include <boost/noncopyable.hpp>
-#include <boost/shared_ptr.hpp>
-#include <tbb/concurrent_unordered_map.h>
-
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 
 #include "pxr/imaging/hd/bufferArrayRange.h"
@@ -38,50 +33,75 @@
 #include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/strategyBase.h"
 
+#include "pxr/imaging/hf/perfLog.h"
+
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/base/tf/token.h"
 
+#include <boost/noncopyable.hpp>
+#include <boost/shared_ptr.hpp>
+#include <tbb/concurrent_unordered_map.h>
+
+#include <condition_variable>
+#include <mutex>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class HdBufferArray> HdBufferArraySharedPtr;
 
-/// Manages the pool of buffer arrays
+/// \class HdBufferArrayRegistry
+///
+/// Manages the pool of buffer arrays.
 ///
 class HdBufferArrayRegistry : public boost::noncopyable {
 public:
-    HD_MALLOC_TAG_NEW("new HdBufferArrayRegistry");
+    HF_MALLOC_TAG_NEW("new HdBufferArrayRegistry");
 
+    HD_API
     HdBufferArrayRegistry();
     ~HdBufferArrayRegistry()   = default;
 
     /// Allocate new buffer array range using strategy
     /// Thread-Safe
+    HD_API
     HdBufferArrayRangeSharedPtr AllocateRange(
         HdAggregationStrategy *strategy,
         TfToken const &role,
         HdBufferSpecVector const &bufferSpecs);
 
     /// Triggers reallocation on all buffers managed by the registry.
+    HD_API
     void   ReallocateAll(HdAggregationStrategy *strategy);
 
     /// Frees up buffers that no longer contain any allocated ranges.
+    HD_API
     void   GarbageCollect();
 
     /// Generate a report on resources consumed by the managed
     /// buffer array.  The returned size is an esitmate of the 
     /// gpu memory consumed by the buffers
-    size_t GetResourceAllocation(VtDictionary &result) const;
+    HD_API
+    size_t GetResourceAllocation(HdAggregationStrategy *strategy, 
+                                 VtDictionary &result) const;
     
     /// Debug dump
+    HD_API
     friend std::ostream &operator <<(std::ostream &out,
                                      const HdBufferArrayRegistry& self);
 
 private:
     typedef std::list<HdBufferArraySharedPtr> _HdBufferArraySharedPtrList;
 
-    /// Entry in the buffer array cache.  The list is the buffer arrays
-    /// which all have the same format.  There is as a lock for modifcations
-    /// to the entry and a condition used to determine if the entry has been consturcted.
+    /// \struct _Entry
+    ///
+    /// Entry in the buffer array cache.  The list is the buffer arrays which
+    /// all have the same format.  There is as a lock for modifications to the
+    /// entry and a condition used to determine if the entry has been
+    /// construction.
     /// 
-    /// A Consrutcted entry always has at least 1 buffer array in its list.
+    /// A constructed entry always has at least 1 buffer array in its list.
+    ///
     struct _Entry
     {
         _HdBufferArraySharedPtrList bufferArrays;
@@ -104,7 +124,7 @@ private:
         _EntryIsNotEmpty(const _Entry &entry) : _entry(entry) {}
 
         bool operator()() {
-            return (not (_entry.bufferArrays.empty()));
+            return (!(_entry.bufferArrays.empty()));
         }
 
     private:
@@ -129,4 +149,7 @@ private:
                                HdBufferSpecVector const &bufferSpecs);
 };
     
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // HD_BUFFER_ARRAY_REGISTRY_H

@@ -24,6 +24,7 @@
 #ifndef SDF_TEXTPARSERCONTEXT_H
 #define SDF_TEXTPARSERCONTEXT_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/data.h"
 #include "pxr/usd/sdf/layerOffset.h"
 #include "pxr/usd/sdf/listOp.h"
@@ -41,6 +42,8 @@
 
 // Lexical scanner type.
 typedef void *yyscan_t;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // This class contains the global state while parsing a menva file.
 // It contains the data structures that we use to create the scene description
@@ -88,7 +91,7 @@ public:
     // relationship target paths that will be saved in a list op
     // (use a boost::optional to track whether we have seen an opinion at all.)
     boost::optional<SdfPathVector> relParsingTargetPaths;
-    // relationship target paths that will be appended to the relatioship's
+    // relationship target paths that will be appended to the relationship's
     // list of target children.
     SdfPathVector relParsingNewTargetChildren;
 
@@ -160,5 +163,7 @@ public:
     // Used by flex for reentrant parsing
     yyscan_t scanner;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_TEXTPARSERCONTEXT_H

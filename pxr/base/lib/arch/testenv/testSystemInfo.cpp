@@ -21,26 +21,19 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/arch/systemInfo.h"
 
-#include <cassert>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+#include "pxr/pxr.h"
+#include "pxr/base/arch/systemInfo.h"
+#include "pxr/base/arch/error.h"
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 using std::string;
 
 //most of these tests are just for code coverage
 int main(int argc, char const* argv[])
 {
-    assert(! ArchGetUserName().empty());
-    assert(ArchGetHomeDirectory("~nosuchuser").empty());
-    assert(ArchGetHomeDirectory().find(ArchGetUserName(), 0) != string::npos);
-    assert(ArchGetHomeDirectory(
-                ArchGetUserName()).find(ArchGetUserName(), 0) != string::npos);
-
-    assert(ArchGetExecutablePath().find("testArch", 0) != string::npos);
-
+    ARCH_AXIOM(ArchGetExecutablePath().find("testArch", 0) != string::npos);
     return 0;
 }
 

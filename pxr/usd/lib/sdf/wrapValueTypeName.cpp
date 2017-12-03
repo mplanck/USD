@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/valueTypeName.h"
 #include "pxr/base/tf/type.h"
 #include "pxr/base/vt/value.h"
@@ -30,12 +32,14 @@
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 void
 wrapValueType()
 {
     class_<SdfValueTypeName>("ValueTypeName", no_init)
         .def(init<>())
-        .def(not self)
+        .def(!self)
         .def(self == std::string())
         .def(self != std::string())
         .def(self == self)

@@ -21,8 +21,9 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 #
-from PySide import QtGui,QtCore
-from pxr import Usd
+from qt import QtCore, QtGui, QtWidgets
+import os
+from pxr import Usd, Sdf
 from customAttributes import CustomAttribute
 
 # Color constants.  
@@ -38,10 +39,10 @@ HeaderColor = QtGui.QBrush(QtGui.QColor(201, 199, 195))
 # We use color in the attribute browser to specify value source
 RedColor = QtGui.QBrush(QtGui.QColor(230, 132, 131))
 FallbackTextColor = HasArcsColor
-ClampedTextColor = QtGui.QBrush(QtGui.QColor(180, 180, 180))
-KeyframeTextColor = QtGui.QBrush(QtGui.QColor(177, 207, 153))
+TimeSampleTextColor = QtGui.QBrush(QtGui.QColor(177, 207, 153))
 DefaultTextColor = InstanceColor
 NoValueTextColor = QtGui.QBrush(QtGui.QColor(140, 140, 140))
+ValueClipsTextColor = QtGui.QBrush(QtGui.QColor(230,150,230))
 
 # Font constants.  We use font in the prim browser to distinguish
 # "resolved" prim specifier
@@ -60,9 +61,58 @@ NormalFont = QtGui.QFont()
 NormalFont.setWeight(35)
 AbstractPrimFont = NormalFont
 
-# Keys for destinguishing items in the attribute inspector
-class AttributeStatus:
-    DEFAULT, CLAMPED, KEYFRAME, FALLBACK, NOVALUE = range(5)
+# Property viewer constants
+INDEX_PROPTYPE, INDEX_PROPNAME, INDEX_PROPVAL = range(3)
+
+ICON_DIR_ROOT = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'icons')
+
+# We use deferred loading because icons can't be constructed before
+# application initialization time.
+_icons = {}
+def _DeferredIconLoad(path):
+    fullPath = os.path.join(ICON_DIR_ROOT, path)
+    try:
+        icon = _icons[fullPath] 
+    except KeyError:
+        icon = QtGui.QIcon(fullPath)
+        _icons[fullPath] = icon
+    return icon
+
+ATTR_PLAIN_TYPE_ICON        = lambda: _DeferredIconLoad('usd-attr-plain-icon.png')
+ATTR_WITH_CONN_TYPE_ICON    = lambda: _DeferredIconLoad('usd-attr-with-conn-icon.png')
+REL_PLAIN_TYPE_ICON         = lambda: _DeferredIconLoad('usd-rel-plain-icon.png')
+REL_WITH_TARGET_TYPE_ICON   = lambda: _DeferredIconLoad('usd-rel-with-target-icon.png')
+TARGET_TYPE_ICON            = lambda: _DeferredIconLoad('usd-target-icon.png')
+CONN_TYPE_ICON              = lambda: _DeferredIconLoad('usd-conn-icon.png')
+CMP_TYPE_ICON               = lambda: _DeferredIconLoad('usd-cmp-icon.png')
+
+ATTR_PLAIN_TYPE_ROLE = "Attr"
+REL_PLAIN_TYPE_ROLE = "Rel"
+ATTR_WITH_CONN_TYPE_ROLE = "Attr_"
+REL_WITH_TARGET_TYPE_ROLE = "Rel_"
+TARGET_TYPE_ROLE = "Tgt"
+CONN_TYPE_ROLE = "Conn"
+CMP_TYPE_ROLE = "Cmp"
+
+def _PropTreeWidgetGetRole(tw):
+    return tw.data(INDEX_PROPTYPE, QtCore.Qt.ItemDataRole.WhatsThisRole)
+
+def PropTreeWidgetTypeIsRel(tw):
+    role = _PropTreeWidgetGetRole(tw) 
+    return (role == REL_PLAIN_TYPE_ROLE or role == REL_WITH_TARGET_TYPE_ROLE) 
+
+def _UpdateLabelText(text, substring, mode):
+    return text.replace(substring,'<'+mode+'>'+substring+'</'+mode+'>')
+
+def ItalicizeLabelText(text, substring):
+    return _UpdateLabelText(text, substring, 'i')
+
+def BoldenLabelText(text, substring):
+    return _UpdateLabelText(text, substring, 'b')
+
+def ColorizeLabelText(text, substring, r, g, b):
+    return _UpdateLabelText(text, substring, 
+                            "span style=\"color:rgb(%d, %d, %d);\"" % (r,g,b))
 
 def PrintWarning(title, description):
     import sys
@@ -72,56 +122,90 @@ def PrintWarning(title, description):
     print >> msg, description
     print >> msg, "------------------------------------------------------------"
 
+def GetShortString(prop, frame):
+    from customAttributes import CustomAttribute
+    if isinstance(prop, (Usd.Attribute, CustomAttribute)):
+        val = prop.Get(frame)
+    elif isinstance(prop, Sdf.AttributeSpec):
+        if frame == Usd.TimeCode.Default():
+            val = prop.default
+        else:
+            numTimeSamples = -1
+            if prop.HasInfo('timeSamples'):
+                numTimeSamples = prop.layer.GetNumTimeSamplesForPath(prop.path)
+            if numTimeSamples == -1:
+                val = prop.default
+            elif numTimeSamples == 1:
+                return "1 time sample"
+            else:
+                return str(numTimeSamples) + " time samples"
+    elif isinstance(prop, Sdf.RelationshipSpec):
+        return str(prop.targetPathList)
+
+    from scalarTypes import GetScalarTypeFromAttr
+    scalarType, isArray = GetScalarTypeFromAttr(prop)
+    result = ''
+    if isArray and not isinstance(val, Sdf.ValueBlock):
+        def arrayToStr(a):
+            from itertools import chain
+            elems = a if len(a) <= 6 else chain(a[:3], ['...'], a[-3:])
+            return '[' + ', '.join(map(str, elems)) + ']'
+        if val is not None and len(val):
+            result = "%s[%d]: %s" % (scalarType, len(val), arrayToStr(val))
+        else:
+            result = "%s[]" % scalarType
+    else:
+        result = str(val)
+
+    return result[:500]
+
 # Return attribute status at a certian frame (is it using the default, or the
 # fallback? Is it authored at this frame? etc.
-def GetAttributeStatus(attribute, frame, hasValue=None, hasAuthoredValue=None,
-                       valueIsDefault=None):
+def GetAttributeStatus(attribute, frame):
     if not isinstance(frame, Usd.TimeCode):
         frame = Usd.TimeCode(frame)
 
-    # Save time if someone has already made the queries
-    if hasValue == False:
-        return AttributeStatus.NOVALUE
-    elif hasValue is not None and hasAuthoredValue == False:
-        return AttributeStatus.FALLBACK
+    return attribute.GetResolveInfo(frame).GetSource()
 
-    if not attribute.HasValue():
-        return AttributeStatus.NOVALUE
+# Return a Font corresponding to certain attribute properties.
+# Currently this only applies italicization on interpolated time samples.
+def GetAttributeTextFont(attribute, frame):
+    if isinstance(attribute, CustomAttribute):
+        return None
 
-    # no authored value? it's using fallback
-    if not attribute.HasAuthoredValueOpinion():
-        return AttributeStatus.FALLBACK
+    if not isinstance(frame, Usd.TimeCode):
+        frame = Usd.TimeCode(frame)
 
-    if frame.IsDefault() or valueIsDefault:
-        return AttributeStatus.DEFAULT
+    frameVal = frame.GetValue()
+    bracketing = attribute.GetBracketingTimeSamples(frameVal) 
 
-    bracketingTS = attribute.GetBracketingTimeSamples(frame.GetValue())
-    if len(bracketingTS) == 0:
-        return AttributeStatus.DEFAULT
+    # Note that some attributes return an empty tuple, some None, from
+    # GetBracketingTimeSamples(), but all will be fed into this function.
+    if bracketing and (len(bracketing) == 2) and (bracketing[0] != frameVal):
+        return ItalicFont
 
-    return (AttributeStatus.KEYFRAME if bracketingTS[0] == frame.GetValue() else
-            AttributeStatus.CLAMPED)
+    return None 
 
 # Helper function that takes attribute status and returns the display color
 def GetAttributeColor(attribute, frame, hasValue=None, hasAuthoredValue=None,
                       valueIsDefault=None):
+
     if isinstance(attribute, CustomAttribute):
         return RedColor.color()
 
-    statusToColor = {AttributeStatus.FALLBACK: FallbackTextColor,
-                     AttributeStatus.DEFAULT: DefaultTextColor,
-                     AttributeStatus.KEYFRAME: KeyframeTextColor,
-                     AttributeStatus.CLAMPED: ClampedTextColor,
-                     AttributeStatus.NOVALUE: NoValueTextColor}
+    statusToColor = {Usd.ResolveInfoSourceFallback   : FallbackTextColor,
+                     Usd.ResolveInfoSourceDefault    : DefaultTextColor,
+                     Usd.ResolveInfoSourceValueClips : ValueClipsTextColor,
+                     Usd.ResolveInfoSourceTimeSamples: TimeSampleTextColor,
+                     Usd.ResolveInfoSourceNone       : NoValueTextColor}
 
-    return statusToColor[GetAttributeStatus(attribute, frame, hasValue, 
-                                            hasAuthoredValue, valueIsDefault)]\
-                                            .color()
+    valueSource = GetAttributeStatus(attribute, frame)
 
+    return statusToColor[valueSource].color()
 
 # Gathers information about a layer used as a subLayer, including its
 # position in the layerStack hierarchy.
-class SubLayerInfo:
+class SubLayerInfo(object):
     def __init__(self, sublayer, offset, containingLayer, prefix):
         self.layer = sublayer
         self.offset = offset
@@ -151,12 +235,22 @@ def _AddSubLayers(layer, layerOffset, prefix, parentLayer, layers):
     for i, l in enumerate(layer.subLayerPaths):
         offset = offsets[i] if offsets is not None and len(offsets) > i else Sdf.LayerOffset()
         subLayer = Sdf.Layer.FindRelativeToLayer(layer, l)
+        # Due to an unfortunate behavior of the Pixar studio resolver, 
+        # FindRelativeToLayer() may fail to resolve certain paths.  We will
+        # remove this extra Find() call as soon as we can retire the behavior;
+        # in the meantime, the extra call does not hurt (but should not, in 
+        # general, be necessary)
+        if not subLayer:
+            subLayer = Sdf.Layer.Find(l)
+        
         if subLayer:
             # This gives a 'tree'-ish presentation, but it looks sad in
             # a QTableWidget.  Just use spaces for now
             # addedPrefix = "|-- " if parentLayer is None else "|    "
             addedPrefix = "     "
             _AddSubLayers(subLayer, offset, addedPrefix + prefix, layer, layers)
+        else:
+            print "Could not find layer " + l
 
 def GetRootLayerStackInfo(layer):
     from pxr import Sdf
@@ -183,7 +277,7 @@ def PrettyFormatSize(sz):
         return "%db" % sz
 
 
-class Timer:
+class Timer(object):
     """Use as a context object with python's "with" statement, like so:
        with Timer() as t:
            doSomeStuff()
@@ -204,15 +298,15 @@ class Timer:
         print "Time to %s: %2.3fs" % (action, self.interval)
         
 
-class BusyContext:
+class BusyContext(object):
     """When used as a context object with python's "with" statement,
     will set Qt's busy cursor upon entry and pop it on exit.
     """
     def __enter__(self):
-        QtGui.QApplication.setOverrideCursor(QtCore.Qt.BusyCursor)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.BusyCursor)
 
     def __exit__(self, *args):
-        QtGui.QApplication.restoreOverrideCursor()
+        QtWidgets.QApplication.restoreOverrideCursor()
 
 
 def InvisRootPrims(stage):
@@ -263,10 +357,10 @@ def GetEnclosingModelPrim(prim):
 
     return prim
 
-# This should be codified in UsdShadeLook API
-def GetClosestBoundLook(prim):
-    """If 'prim' or any of its ancestors are bound to a Look, return the
-    *closest in namespace* bound Look prim, as well as the prim on which the
+# This should be codified in UsdShadeMaterial API
+def GetClosestBoundMaterial(prim):
+    """If 'prim' or any of its ancestors are bound to a Material, return the
+    *closest in namespace* bound Material prim, as well as the prim on which the
     binding was found.  If none of 'prim's ancestors has a binding, return
     (None, None)"""
     from pxr import UsdShade
@@ -276,12 +370,9 @@ def GetClosestBoundLook(prim):
     # bug/122473 is addressed
     psr = prim.GetStage().GetPseudoRoot()
     while prim and prim != psr:
-        # We use Kind here instead of prim.IsModel because point instancer
-        # prototypes currently don't register as models in IsModel. See
-        # bug: http://bugzilla.pixar.com/show_bug.cgi?id=117137 
-        look = UsdShade.Look.GetBoundLook(prim)
-        if look:
-            return (look.GetPrim(), prim)
+        material = UsdShade.Material.GetBoundMaterial(prim)
+        if material:
+            return (material.GetPrim(), prim)
         prim = prim.GetParent()
 
     return (None, None)
@@ -303,7 +394,7 @@ def GetPrimLoadability(prim):
     # XXX Note that we are potentially traversing the entire stage here.
     # If this becomes a performance issue, we can cast this query into C++,
     # cache results, etc.
-    for p in Usd.TreeIterator(prim, Usd.PrimIsActive):
+    for p in Usd.PrimRange(prim, Usd.PrimIsActive):
         if not p.IsLoaded():
             return (True, False)
     return (True, True)
@@ -319,6 +410,23 @@ def GetPrimsLoadability(prims):
         isLoadable = isLoadable or loadable
         isLoaded = isLoaded and loaded
     return (isLoadable, isLoaded)
+
+def GetFileOwner(path):
+    try:
+        import platform
+        if platform.system() == 'Windows':
+            # This only works if pywin32 is installed.
+            # Try "pip install pypiwin32".
+            import win32security as w32s
+            fs = w32s.GetFileSecurity(path, w32s.OWNER_SECURITY_INFORMATION)
+            sdo = fs.GetSecurityDescriptorOwner()
+            name, domain, use = w32.LookupAccountSid(None, sdo)
+            return "%s\\%s" % (domain, name)
+        else:
+            import os, pwd
+            return pwd.getpwuid(os.stat(path).st_uid).pw_name
+    except:
+        return "<unknown>"
 
 # In future when we have better introspection abilities in Usd core API,
 # we will change this function to accept a prim rather than a primStack.
@@ -350,13 +458,11 @@ def GetAssetCreationTime(primStack, assetIdentifier):
         from pixar import UsdviewPlug
         return UsdviewPlug.GetAssetCreationTime(definingFile, assetIdentifier)
     except:
-        import os, pwd, time
+        import os, time
         stat_info = os.stat(definingFile)
-        uid = stat_info.st_uid
-        user = pwd.getpwuid(uid)[0]
         return (definingFile.split('/')[-1],
                 time.ctime(stat_info.st_ctime),
-                user)
+                GetFileOwner(definingFile))
     
 
 def DumpMallocTags(stage, contextStr):
@@ -365,16 +471,17 @@ def DumpMallocTags(stage, contextStr):
         callTree = Tf.MallocTag.GetCallTree()
         memInMb = Tf.MallocTag.GetTotalBytes() / (1024.0 * 1024.0)
         
-        import tempfile
         import os.path as path
+        import tempfile
         layerName = path.basename(stage.GetRootLayer().identifier)
         # CallTree.Report() gives us the most informative (and processable)
         # form of output, but it only accepts a fileName argument.  So we
-        # use tempfile just to get a filename.
+        # use NamedTemporaryFile just to get a filename.
         statsFile = tempfile.NamedTemporaryFile(prefix=layerName+'.',
-                                                suffix='.mallocTag')
-        reportName = statsFile.name
+                                                suffix='.mallocTag',
+                                                delete=False)
         statsFile.close()
+        reportName = statsFile.name
         callTree.Report(reportName)
         print "Memory consumption of %s for %s is %d Mb" % (contextStr,
                                                             layerName,
@@ -383,5 +490,29 @@ def DumpMallocTags(stage, contextStr):
     else:
         print "Unable to accumulate memory usage since the Pxr MallocTag system was not initialized"
 
-        
-        
+def GetInstanceIdForIndex(prim, instanceIndex, time):
+    '''Attempt to find an authored Id value for the instance at index
+    'instanceIndex' at time 'time', on the given prim 'prim', which we access
+    as a UsdGeom.PointInstancer (whether it actually is or not, to provide
+    some dynamic duck-typing for custom instancer types that support Ids.
+    Returns 'None' if no ids attribute was found, or if instanceIndex is
+    outside the bounds of the ids array.'''
+    from pxr import UsdGeom
+    if not prim or instanceIndex < 0:
+        return None
+    ids = UsdGeom.PointInstancer(prim).GetIdsAttr().Get(time)
+    if not ids or instanceIndex >= len(ids):
+        return None
+    return ids[instanceIndex]
+
+def Drange(start, stop, step):
+    """Like builtin range() but allows decimals and is a closed interval 
+        that is, it's inclusive of stop"""
+    r = start
+    lst = []
+    epsilon = 1e-3 * step
+    while r <= stop+epsilon:
+        lst.append(r)
+        r += step
+    return lst
+

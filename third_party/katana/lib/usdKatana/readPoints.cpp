@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readGprim.h"
 #include "usdKatana/readPoints.h"
@@ -29,31 +30,14 @@
 
 #include "pxr/usd/usdGeom/points.h"
 
-static FnKat::Attribute
-_GetVelocityAttr(
-    const UsdGeomPointBased& points,
-    double currentTime)
-{
-    VtVec3fArray velocities;
-    if (not points.GetVelocitiesAttr().Get(&velocities, currentTime))
-    {
-        return FnKat::Attribute();
-    }
+PXR_NAMESPACE_OPEN_SCOPE
 
-    // float attribute list with a width of 3
-    FnKat::FloatBuilder velocitiesBuilder(3);
-    std::vector<float> velVec;
-    PxrUsdKatanaUtils::ConvertArrayToVector(velocities, &velVec);
-    velocitiesBuilder.set(velVec);
-
-    return velocitiesBuilder.build();
-}
 
 static FnKat::Attribute
 _GetWidthAttr(const UsdGeomPoints& points, double currentTime)
 {
     VtFloatArray widths;
-    if (not points.GetWidthsAttr().Get(&widths, currentTime))
+    if (!points.GetWidthsAttr().Get(&widths, currentTime))
     {
         return FnKat::Attribute();
     }
@@ -71,7 +55,7 @@ PxrUsdKatanaReadPoints(
         const PxrUsdKatanaUsdInPrivateData& data,
         PxrUsdKatanaAttrMap& attrs)
 {
-    const double currentTime = data.GetUsdInArgs()->GetCurrentTime();
+    const double currentTime = data.GetCurrentTime();
 
     //
     // Set all general attributes for a gprim type.
@@ -89,42 +73,37 @@ PxrUsdKatanaReadPoints(
     // Construct the 'geometry' attribute.
     //
 
-    FnKat::GroupBuilder geometryBuilder;
-
-    // point
-    geometryBuilder.set("point.P", PxrUsdKatanaGeomGetPAttr(points, data));
+    // position
+    attrs.set("geometry.point.P", PxrUsdKatanaGeomGetPAttr(points, data));
 
     // velocity
-    FnKat::Attribute velocitiesAttr = _GetVelocityAttr(points, currentTime);
+    FnKat::Attribute velocitiesAttr =
+        PxrUsdKatanaGeomGetVelocityAttr(points, data);
     if (velocitiesAttr.isValid())
     {
-        geometryBuilder.set("point.v", velocitiesAttr);
+        attrs.set("geometry.point.v", velocitiesAttr);
     }
 
     // normals
     FnKat::Attribute normalsAttr = PxrUsdKatanaGeomGetNormalAttr(points, data);
     if (normalsAttr.isValid())
     {
-        geometryBuilder.set("point.N", normalsAttr);
+        // XXX RfK doesn't support uniform curve normals.
+        TfToken interp = points.GetNormalsInterpolation();
+        if (interp == UsdGeomTokens->faceVarying
+         || interp == UsdGeomTokens->varying
+         || interp == UsdGeomTokens->vertex) {
+            attrs.set("geometry.point.N", normalsAttr);
+        }
     }
 
     // width
     FnKat::Attribute widthsAttr = _GetWidthAttr(points, currentTime);
     if (widthsAttr.isValid())
     {
-        geometryBuilder.set("point.width", widthsAttr);
+        attrs.set("geometry.point.width", widthsAttr);
     }
-
-    
-    FnKat::GroupBuilder arbBuilder;
-
-    // other primvars
-    FnKat::Attribute primvarGroup = PxrUsdKatanaGeomGetPrimvarGroup(points, data);
-    if (primvarGroup.isValid())
-    {
-        arbBuilder.update(primvarGroup);
-    }
-
-    geometryBuilder.set("arbitrary", arbBuilder.build());
-    attrs.set("geometry", geometryBuilder.build());
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

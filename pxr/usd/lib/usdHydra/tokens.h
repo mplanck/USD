@@ -24,6 +24,8 @@
 #ifndef USDHYDRA_TOKENS_H
 #define USDHYDRA_TOKENS_H
 
+/// \file usdHydra/tokens.h
+
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 // 
 // This is an automatically generated file (by usdGenSchema.py).
@@ -31,9 +33,11 @@
 // 
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usdHydra/api.h"
 #include "pxr/base/tf/staticTokens.h"
 
-/// \file pxr/usd/usdHydra/tokens.h
+PXR_NAMESPACE_OPEN_SCOPE
 
 /// \hideinitializer
 #define USDHYDRA_TOKENS \
@@ -64,7 +68,8 @@
     (wrapT)
 
 /// \anchor UsdHydraTokens
-/// \brief <b>UsdHydraTokens</b> provides static, efficient TfToken's for
+///
+/// <b>UsdHydraTokens</b> provides static, efficient TfToken's for
 /// use in all public USD API
 ///
 /// These tokens are auto-generated from the module's schema, representing
@@ -107,6 +112,8 @@
 /// \li <b>uv</b> - UsdHydraUvTexture
 /// \li <b>wrapS</b> - UsdHydraUvTexture
 /// \li <b>wrapT</b> - UsdHydraUvTexture
-TF_DECLARE_PUBLIC_TOKENS(UsdHydraTokens, USDHYDRA_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(UsdHydraTokens, USDHYDRA_API, USDHYDRA_TOKENS);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -21,17 +21,23 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/**
- * \class usdTranslatorExport
- * \brief file translator for USD files
- */
 
-#ifndef __PX_USDTRANSLATOREXPORT_H__
-#define __PX_USDTRANSLATOREXPORT_H__
+#ifndef PXRUSDMAYA_TRANSLATOR_EXPORT_H
+#define PXRUSDMAYA_TRANSLATOR_EXPORT_H
 
+/// \file usdTranslatorExport.h
+
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
+#include "usdMaya/JobArgs.h"
+
+#include <maya/MFileObject.h>
 #include <maya/MPxFileTranslator.h>
+#include <maya/MStatus.h>
+#include <maya/MString.h>
 
-#include <maya/MFnMesh.h>
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 
 const char* const usdTranslatorExportDefaults = 
@@ -44,46 +50,55 @@ const char* const usdTranslatorExportDefaults =
         "allCameras=0;"
         "renderLayerMode=Use Default Layer;"
         "mergeXForm=1;"
+        "exportInstances=1;"
         "defaultMeshScheme=CatmullClark SDiv;"
         "exportVisibility=1;"
         "animation=0;"
         "startTime=1;"
         "endTime=1";
 
-class usdTranslatorExport : public MPxFileTranslator {
 
+class usdTranslatorExport : public MPxFileTranslator
+{
     public:
 
         /**
          * method to create usdTranslatorExport file translator
          */
-        static void * creator();
+        PXRUSDMAYA_API
+        static void* creator();
 
+        PXRUSDMAYA_API
         MStatus writer(
-            const MFileObject& file, 
-            const MString& optionsString,
-            MPxFileTranslator::FileAccessMode mode);
-        
+                const MFileObject& file, 
+                const MString& optionsString,
+                MPxFileTranslator::FileAccessMode mode);
+
         bool haveReadMethod() const { return false; }
         bool haveWriteMethod() const { return true; }
-        
-        MFileKind identifyFile(
-            const MFileObject&,
-            const char*, 
-            short) const;
 
-        MString defaultExtension() const { return "usda"; }
-        MString filter() const { return "*.usda"; }
-      
-    protected:
+        PXRUSDMAYA_API
+        MFileKind identifyFile(
+                const MFileObject& file,
+                const char* buffer,
+                short size) const;
+
+        MString defaultExtension() const {
+            return PxrUsdMayaTranslatorTokens->UsdFileExtensionDefault.GetText();
+        }
+        MString filter() const {
+            return PxrUsdMayaTranslatorTokens->UsdFileFilter.GetText();
+        }
 
     private:
 
         usdTranslatorExport();
-        usdTranslatorExport(
-            const usdTranslatorExport&);
+        usdTranslatorExport(const usdTranslatorExport&);
         ~usdTranslatorExport();
         usdTranslatorExport& operator=(const usdTranslatorExport&);
 };
 
-#endif /* usdTranslatorExport */
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // PXRUSDMAYA_TRANSLATOR_EXPORT_H

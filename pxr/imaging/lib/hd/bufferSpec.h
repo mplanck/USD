@@ -24,15 +24,22 @@
 #ifndef HD_BUFFER_SPEC_H
 #define HD_BUFFER_SPEC_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/garch/gl.h"
 #include "pxr/base/tf/stl.h"
 #include "pxr/base/tf/token.h"
 #include <vector>
 
-typedef std::vector<class HdBufferSpec> HdBufferSpecVector;
+PXR_NAMESPACE_OPEN_SCOPE
 
-/// HdBufferSpec describes each named resource of buffer array.
+
+typedef std::vector<struct HdBufferSpec> HdBufferSpecVector;
+
+/// \class HdBufferSpec
+///
+/// Describes each named resource of buffer array.
 ///
 /// for example:
 /// HdBufferSpecVector
@@ -40,7 +47,6 @@ typedef std::vector<class HdBufferSpec> HdBufferSpecVector;
 ///    1: name = normals, glDataType = GL_FLOAT, numComponents = 3
 ///    2: name = colors, glDataType = GL_FLOAT, numComponents = 4
 ///
-
 struct HdBufferSpec {
     /// Constructor.
     HdBufferSpec(TfToken const &name, GLenum glDataType, int numComponents,
@@ -60,33 +66,36 @@ struct HdBufferSpec {
     }
 
     /// Returns true if \p subset is a subset of \p superset.
+    HD_API
     static bool IsSubset(HdBufferSpecVector const &subset,
                          HdBufferSpecVector const &superset);
 
     /// Returns union set of \p spec1 and \p spec2.
     /// Duplicated entries are uniquified.
+    HD_API
     static HdBufferSpecVector ComputeUnion(HdBufferSpecVector const &spec1,
                                            HdBufferSpecVector const &spec2);
 
-    /// Debug output
+    /// Debug output.
+    HD_API
     static void Dump(HdBufferSpecVector const &specs);
 
-    /// equality checks
+    /// Equality checks.
     bool operator == (HdBufferSpec const &other) const {
-        return name == other.name and
-            glDataType == other.glDataType and
-            numComponents == other.numComponents and
+        return name == other.name                &&
+            glDataType == other.glDataType       &&
+            numComponents == other.numComponents &&
             arraySize == other.arraySize;
     }
     bool operator != (HdBufferSpec const &other) const {
-        return not (*this == other);
+        return !(*this == other);
     }
 
-    /// ordering
+    /// Ordering.
     bool operator < (HdBufferSpec const &other) const {
-        return name < other.name or (name == other.name and
-              (glDataType < other.glDataType or (glDataType == other.glDataType and
-              (numComponents < other.numComponents or (numComponents == other.numComponents and
+        return name < other.name || (name == other.name &&
+              (glDataType < other.glDataType || (glDataType == other.glDataType &&
+              (numComponents < other.numComponents || (numComponents == other.numComponents &&
               (arraySize < other.arraySize))))));
     }
 
@@ -95,5 +104,8 @@ struct HdBufferSpec {
     int numComponents;
     int arraySize;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_BUFFER_SPEC_H

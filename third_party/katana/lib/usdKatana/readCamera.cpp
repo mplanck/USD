@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readCamera.h"
 #include "usdKatana/readXformable.h"
@@ -31,10 +32,12 @@
 #include "pxr/base/gf/camera.h"
 #include "pxr/imaging/cameraUtil/screenWindowParameters.h"
 #include "pxr/usd/usdGeom/camera.h"
-#include "pxr/usd/usdUtils/pipeline.h"
 
 #include <FnAttribute/FnDataBuilder.h>
 #include <FnLogging/FnLogging.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 FnLogSetup("PxrUsdKatanaReadCamera");
 
@@ -44,7 +47,7 @@ PxrUsdKatanaReadCamera(
         const PxrUsdKatanaUsdInPrivateData& data,
         PxrUsdKatanaAttrMap& attrs)
 {
-    const double currentTime = data.GetUsdInArgs()->GetCurrentTime();
+    const double currentTime = data.GetCurrentTime();
 
     //
     // Set all general attributes for a xformable type.
@@ -61,9 +64,7 @@ PxrUsdKatanaReadCamera(
     // computation from returning an empty bound, which is treated as a fail
     attrs.set("bound", FnKat::Attribute());
 
-    const bool camerasAreZup = UsdUtilsGetCamerasAreZup(data.GetUsdInArgs()->GetStage());
-
-    const GfCamera cam = camera.GetCamera(currentTime, camerasAreZup);
+    const GfCamera cam = camera.GetCamera(currentTime);
 
     //
     // Set the 'prmanGlobalStatements.camera.depthOfField' attribute.
@@ -130,18 +131,21 @@ PxrUsdKatanaReadCamera(
         const std::vector<double>& motionSampleTimes =
             data.GetMotionSampleTimes(camera.GetFocalLengthAttr());
 
+        const bool isMotionBackward = data.IsMotionBackward();
+
         FnKat::DoubleBuilder fovBuilder(1);
         TF_FOR_ALL(iter, motionSampleTimes)
         {
             double relSampleTime = *iter;
             double time = currentTime + relSampleTime;
 
-            double fov = camera.GetCamera(time, camerasAreZup
-                ).GetFieldOfView(GfCamera::FOVHorizontal);
+            double fov = camera.GetCamera(time).GetFieldOfView(
+                GfCamera::FOVHorizontal);
 
-            fovBuilder.push_back(fov, fabs(relSampleTime));
+            fovBuilder.push_back(fov, isMotionBackward ?
+                PxrUsdKatanaUtils::ReverseTimeSample(relSampleTime) : relSampleTime);
 
-            if (not isVarying)
+            if (!isVarying)
             {
                 break;
             }
@@ -194,10 +198,13 @@ PxrUsdKatanaReadCamera(
                 &clippingPlanes[0][0], clippingPlanes.size() * 4, 4));
     }
 
-    // XXX The camera's zUp needs to be recorded until we have no
-    // more USD z-Up assets and the katana assets have no more prerotate
-    // camera nodes.
-    geoBuilder.set("isZUp", FnKat::IntAttribute(camerasAreZup ? 1 : 0));
+    // XXX
+    // Record isZUp until all code site/nodes that prerotate the camera
+    // node to accomodate potential z-Up cameras has been removed.
+    geoBuilder.set("isZUp", FnKat::IntAttribute(0));
     
     attrs.set("geometry", geoBuilder.build());
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

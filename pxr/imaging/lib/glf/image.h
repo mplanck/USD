@@ -21,11 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glf/image.h
-
 #ifndef GLF_IMAGE_H
 #define GLF_IMAGE_H
 
+/// \file glf/image.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/imaging/garch/gl.h"
 
 #include "pxr/base/tf/token.h"
@@ -38,18 +40,23 @@
 
 #include <string>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class GlfImage> GlfImageSharedPtr;
 
-///
 /// \class GlfImage
-/// \brief A base class for reading and writing texture image data.
+///
+/// A base class for reading and writing texture image data.
 ///
 /// The class allows basic access to texture image file data.
 ///
 class GlfImage : public boost::noncopyable {
 public:
     /// \class StorageSpec
-    /// \brief Describes the memory layout and storage of a texture image
+    ///
+    /// Describes the memory layout and storage of a texture image
+    ///
     class StorageSpec {
     public:
         StorageSpec()
@@ -66,15 +73,18 @@ public:
     };
 
 public:
+    GLF_API
     virtual ~GlfImage();
 
     /// Returns whether \a filename opened as a texture image.
+    GLF_API
     static bool IsSupportedImageFile(std::string const & filename);
 
     /// \name Reading
     /// {@
 
     /// Opens \a filename for reading from the given \a subimage.
+    GLF_API
     static GlfImageSharedPtr OpenForReading(std::string const & filename,
                                             int subimage = 0);
 
@@ -94,6 +104,7 @@ public:
     /// {@
 
     /// Opens \a filename for writing from the given \a storage.
+    GLF_API
     static GlfImageSharedPtr OpenForWriting(std::string const & filename);
 
     /// Writes the image with \a metadata.
@@ -119,6 +130,9 @@ public:
 
     /// Returns the number of bytes per pixel.
     virtual int GetBytesPerPixel() const = 0;
+
+    /// Returns the number of mips available.
+    virtual int GetNumMipLevels() const = 0;
 
     /// Returns whether the iamge is in the sRGB color space.
     virtual bool IsColorSpaceSRGB() const = 0;
@@ -149,7 +163,7 @@ bool
 GlfImage::GetMetadata(TfToken const & key, T * value) const
 {
     VtValue any;
-    if (not GetMetadata(key, &any) or not any.IsHolding<T>()) {
+    if (!GetMetadata(key, &any) || !any.IsHolding<T>()) {
         return false;
     }
     *value = any.UncheckedGet<T>();
@@ -161,7 +175,7 @@ bool
 GlfImage::GetSamplerMetadata(GLenum pname, T * param) const
 {
     VtValue any;
-    if (not GetSamplerMetadata(pname, &any) or not any.IsHolding<T>()) {
+    if (!GetSamplerMetadata(pname, &any) || !any.IsHolding<T>()) {
         return false;
     }
     *param = any.UncheckedGet<T>();
@@ -181,5 +195,8 @@ public:
         return GlfImageSharedPtr(new T);
     }
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // GLF_IMAGE_H

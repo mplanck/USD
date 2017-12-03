@@ -24,6 +24,7 @@
 #ifndef USDIMAGING_PRIM_ADAPTER_H
 #define USDIMAGING_PRIM_ADAPTER_H
 
+#include "pxr/pxr.h"
 #include "pxr/usdImaging/usdImaging/version.h"
 #include "pxr/usdImaging/usdImaging/valueCache.h"
 #include "pxr/usdImaging/usdImaging/inheritedCache.h"
@@ -34,10 +35,14 @@
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/timeCode.h"
 
+#include "pxr/usd/usdShade/shader.h"
+
 #include "pxr/base/tf/type.h"
 
 #include <boost/enable_shared_from_this.hpp> 
 #include <boost/shared_ptr.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 class UsdPrim;
 
@@ -49,6 +54,8 @@ class UsdImagingInstancerContext;
 typedef boost::shared_ptr<class UsdImagingPrimAdapter> 
                                                 UsdImagingPrimAdapterSharedPtr;
 
+/// \class UsdImagingPrimAdapter
+///
 /// Base class for all PrimAdapters.
 ///
 class UsdImagingPrimAdapter 
@@ -83,18 +90,17 @@ public:
     /// TrackVariability().
     virtual void TrackVariabilityPrep(UsdPrim const& prim,
                                       SdfPath const& cachePath,
-                                      int requestedBits,
                                       UsdImagingInstancerContext const* 
-                                          instancerContext = NULL) = 0;
+                                          instancerContext = NULL) {};
 
-    /// For the given \p prim and \p requestedBits, variability is detected and
-    /// stored in \p dirtyBits. Initial values are cached into the value cache.
+    /// For the given \p prim, variability is detected and
+    /// stored in \p timeVaryingBits. Initial values are cached into the value
+    /// cache.
     ///
     /// This method is expected to be called from multiple threads.
     virtual void TrackVariability(UsdPrim const& prim,
                                   SdfPath const& cachePath,
-                                  int requestedBits,
-                                  int* dirtyBits,
+                                  HdDirtyBits* timeVaryingBits,
                                   UsdImagingInstancerContext const* 
                                       instancerContext = NULL) = 0;
 
@@ -102,9 +108,9 @@ public:
     virtual void UpdateForTimePrep(UsdPrim const& prim,
                                    SdfPath const& cachePath, 
                                    UsdTimeCode time,
-                                   int requestedBits,
+                                   HdDirtyBits requestedBits,
                                    UsdImagingInstancerContext const* 
-                                       instancerContext = NULL) = 0;
+                                       instancerContext = NULL) {};
 
     /// Populates the \p cache for the given \p prim, \p time and \p
     /// requestedBits.
@@ -113,8 +119,7 @@ public:
     virtual void UpdateForTime(UsdPrim const& prim,
                                SdfPath const& cachePath, 
                                UsdTimeCode time,
-                               int requestedBits,
-                               int* resultBits,
+                               HdDirtyBits requestedBits,
                                UsdImagingInstancerContext const* 
                                    instancerContext = NULL) = 0;
 
@@ -124,9 +129,9 @@ public:
 
     /// Returns a bit mask of attributes to be udpated, or
     /// HdChangeTracker::AllDirty if the entire prim must be resynchronized.
-    virtual int ProcessPropertyChange(UsdPrim const& prim,
-                                      SdfPath const& cachePath, 
-                                      TfToken const& propertyName) = 0;
+    virtual HdDirtyBits ProcessPropertyChange(UsdPrim const& prim,
+                                              SdfPath const& cachePath,
+                                              TfToken const& propertyName) = 0;
 
     /// When a PrimResync event occurs, the prim may have been deleted entirely,
     /// adapter plug-ins should override this method to free any per-prim state
@@ -139,26 +144,90 @@ public:
     virtual void ProcessPrimRemoval(SdfPath const& primPath,
                                    UsdImagingIndexProxy* index);
 
+
+    virtual void MarkDirty(UsdPrim const& prim,
+                           SdfPath const& cachePath,
+                           HdDirtyBits dirty,
+                           UsdImagingIndexProxy* index) = 0;
+
+    virtual void MarkRefineLevelDirty(UsdPrim const& prim,
+                                      SdfPath const& cachePath,
+                                      UsdImagingIndexProxy* index);
+
+    virtual void MarkReprDirty(UsdPrim const& prim,
+                               SdfPath const& cachePath,
+                               UsdImagingIndexProxy* index);
+
+    virtual void MarkCullStyleDirty(UsdPrim const& prim,
+                                    SdfPath const& cachePath,
+                                    UsdImagingIndexProxy* index);
+
+    virtual void MarkTransformDirty(UsdPrim const& prim,
+                                    SdfPath const& cachePath,
+                                    UsdImagingIndexProxy* index);
+
+    virtual void MarkVisibilityDirty(UsdPrim const& prim,
+                                     SdfPath const& cachePath,
+                                     UsdImagingIndexProxy* index);
+
+
     // ---------------------------------------------------------------------- //
     /// \name Instancing
     // ---------------------------------------------------------------------- //
 
     /// Returns the path of the instance prim corresponding to the
-    /// instance index generated by the given instancer \p path.
-    /// If the instancer \p path is also instanced by parent instancer,
-    /// return the instanceCountForThisLevel as the number of instances.
+    /// instance index generated by the given instanced \p protoPath.
+    /// The instancer instances the rprim is derived from \p protoPath,
+    /// following the naming convention of each instance adapter.
+    /// (i.e. taking PrimPath of attribute path or variant selection path)
+    /// If \protoPath is an instancer and also instanced by another parent
+    /// instancer, return the instanceCountForThisLevel as the number of
+    /// instances.
     virtual SdfPath GetPathForInstanceIndex(
-        SdfPath const &path, int instanceIndex,
-        int *instanceCountForThisLevel, int *absoluteInstanceIndex);
+        SdfPath const &protoPath, int instanceIndex,
+        int *instanceCountForThisLevel, int *absoluteInstanceIndex,
+        SdfPath *resolvedPrimPath=NULL,
+        SdfPathVector *resolvedInstanceContext=NULL);
 
     /// Returns the instancer path for given \p instancePath. If it's not
     /// instanced path, returns empty.
     virtual SdfPath GetInstancer(SdfPath const &instancePath);
 
     // ---------------------------------------------------------------------- //
+    /// \name Nested instancing support
+    // ---------------------------------------------------------------------- //
+
+    /// Returns the path of the instance prim corresponding to the
+    /// instance index generated by the given instanced \p protoPath on
+    /// the \p instancerPath. This method can be used if instancerPath
+    /// can't be inferred from protoPath, such as nested instancing.
+    /// \p protoPath can be either rprim or child instancer.
+    virtual SdfPath GetPathForInstanceIndex(
+        SdfPath const &instancerPath, SdfPath const &protoPath,
+        int instanceIndex, int *instanceCountForThisLevel,
+        int *absoluteInstanceIndex,
+        SdfPath *resolvedPrimPath,
+        SdfPathVector *resolvedInstanceContext);
+
+    /// Returns the instance index array for \p protoRprimPath, instanced
+    /// by \p instancerPath. \p instancerPath must be managed by this
+    /// adapter.
+    virtual VtIntArray GetInstanceIndices(SdfPath const &instancerPath,
+                                          SdfPath const &protoRprimPath);
+
+    /// Returns the transform of \p protoInstancerPath relative to
+    /// \p instancerPath. \p instancerPath must be managed by this
+    /// adapter.
+    virtual GfMatrix4d GetRelativeInstancerTransform(
+        SdfPath const &instancerPath,
+        SdfPath const &protoInstancerPath,
+        UsdTimeCode time);
+
+    // ---------------------------------------------------------------------- //
     /// \name Selection
     // ---------------------------------------------------------------------- //
-    virtual bool PopulateSelection(SdfPath const &path,
+    virtual bool PopulateSelection(HdxSelectionHighlightMode const& highlightMode,
+                                   SdfPath const &usdPath,
                                    VtIntArray const &instanceIndices,
                                    HdxSelectionSharedPtr const &result);
 
@@ -186,7 +255,7 @@ public:
                             bool ignoreRootTransform = false);
 
     /// Gets the shader binding for the given prim, walking up namespace if
-    /// necessary.
+    /// necessary.  
     SdfPath GetShaderBinding(UsdPrim const& prim);
 
     /// Gets the instancer ID for the given prim and instancerContext.
@@ -196,6 +265,13 @@ public:
     /// Returns the depending rprim paths which don't exist in descendants.
     /// Used for change tracking over subtree boundary (e.g. instancing)
     virtual SdfPathVector GetDependPaths(SdfPath const &path) const;
+
+    // ---------------------------------------------------------------------- //
+    /// \name Render Index Compatibility
+    // ---------------------------------------------------------------------- //
+
+    /// Returns whether the adapter can be populated into the target render index.
+    virtual bool IsSupported(HdRenderIndex* renderIndex) { return true; }
 
 protected:
     typedef std::vector<UsdImagingValueCache::PrimvarInfo> PrimvarInfoVector;
@@ -228,19 +304,22 @@ protected:
     // \p dirtyFlag in the \p dirtyFlags and increments a perf counter. Returns
     // true if the attribute is varying.
     bool _IsVarying(UsdPrim prim, TfToken const& attrName, 
-           HdChangeTracker::DirtyBits dirtyFlag, TfToken const& perfToken,
-           int* dirtyFlags, bool isInherited);
+           HdDirtyBits dirtyFlag, TfToken const& perfToken,
+           HdDirtyBits* dirtyFlags, bool isInherited);
 
     // Determines if the prim's transform (CTM) is varying and if so, sets the 
     // given \p dirtyFlag in the \p dirtyFlags and increments a perf counter. 
     // Returns true if the prim's transform is varying.
     bool _IsTransformVarying(UsdPrim prim,
-                             HdChangeTracker::DirtyBits dirtyFlag, 
+                             HdDirtyBits dirtyFlag,
                              TfToken const& perfToken,
-                             int* dirtyFlags);
+                             HdDirtyBits* dirtyFlags);
 
     void _MergePrimvar(UsdImagingValueCache::PrimvarInfo const& primvar, 
                        PrimvarInfoVector* vec);
+
+    virtual void _RemovePrim(SdfPath const& cachePath,
+                             UsdImagingIndexProxy* index) = 0;
 
     UsdImagingDelegate* _delegate;
 };
@@ -259,5 +338,7 @@ public:
     }
 };
 
-#endif //USDIMAGING_PRIM_ADAPTER_H
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // USDIMAGING_PRIM_ADAPTER_H

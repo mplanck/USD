@@ -23,6 +23,8 @@
 //
 /// \file wrapRefPtrTracker.cpp
 
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/refPtr.h"
 #include "pxr/base/tf/weakPtr.h"
 #include "pxr/base/tf/refPtrTracker.h"
@@ -32,6 +34,10 @@
 #include <sstream>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static
 std::string
@@ -60,6 +66,8 @@ _ReportTracesForWatched(TfRefPtrTracker& tracker, uintptr_t ptr)
     return s.str();
 }
 
+} // anonymous namespace 
+
 void
 wrapRefPtrTracker()
 {
@@ -69,8 +77,8 @@ wrapRefPtrTracker()
      class_<This, ThisPtr, boost::noncopyable>("RefPtrTracker", no_init)
         .def(TfPySingleton())
 
-        .def("GetAllWatchedCountsReport", ::_ReportAllWatchedCounts)
-        .def("GetAllTracesReport", ::_ReportAllTraces)
-        .def("GetTracesReportForWatched", ::_ReportTracesForWatched)
+        .def("GetAllWatchedCountsReport", _ReportAllWatchedCounts)
+        .def("GetAllTracesReport", _ReportAllTraces)
+        .def("GetTracesReportForWatched", _ReportTracesForWatched)
         ;
 }

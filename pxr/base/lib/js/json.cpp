@@ -24,11 +24,18 @@
 ///
 /// \file js/json.cpp
 
+#include "pxr/pxr.h"
 #include "pxr/base/js/json.h"
 #include "pxr/base/tf/diagnostic.h"
-#include <boost/foreach.hpp>
+
 #include <iostream>
 #include <vector>
+
+#if PXR_USE_NAMESPACES
+#define PXRJS PXR_NS
+#else
+#define PXRJS PXRJS
+#endif
 
 // Place rapidjson into a namespace to prevent conflicts with d2.
 #define RAPIDJSON_NAMESPACE PXRJS::rapidjson
@@ -45,6 +52,8 @@
 namespace rj = RAPIDJSON_NAMESPACE;
 
 namespace {
+PXR_NAMESPACE_USING_DIRECTIVE
+
 struct _InputHandler : public rj::BaseReaderHandler<rj::UTF8<>, _InputHandler>
 {
     bool Null() {
@@ -118,6 +127,8 @@ public:
 };
 }
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 template <typename Allocator>
 static rj::Value
 _ToImplObjectValue(
@@ -126,7 +137,7 @@ _ToImplObjectValue(
 {
     rj::Value value(rj::kObjectType);
 
-    BOOST_FOREACH(const JsObject::value_type& p, object) {
+    for (const auto& p : object) {
         value.AddMember(
             rj::Value(p.first.c_str(), allocator).Move(),
             _JsValueToImplValue(p.second, allocator),
@@ -144,7 +155,7 @@ _ToImplArrayValue(
 {
     rj::Value value(rj::kArrayType);
 
-    BOOST_FOREACH(const JsValue& e, array) {
+    for (const auto& e : array) {
         value.PushBack(
             rj::Value(_JsValueToImplValue(e, allocator)).Move(),
             allocator);
@@ -161,9 +172,9 @@ _JsValueToImplValue(
 {
     switch (value.GetType()) {
     case JsValue::ObjectType:
-        return _ToImplObjectValue(value.GetObject(), allocator);
+        return _ToImplObjectValue(value.GetJsObject(), allocator);
     case JsValue::ArrayType:
-        return _ToImplArrayValue(value.GetArray(), allocator);
+        return _ToImplArrayValue(value.GetJsArray(), allocator);
     case JsValue::BoolType:
         return rj::Value(value.GetBool());
     case JsValue::StringType:
@@ -188,7 +199,7 @@ JsParseStream(
     std::istream& istr,
     JsParseError* error)
 {
-    if (not istr) {
+    if (!istr) {
         TF_CODING_ERROR("Stream error");
         return JsValue();
     }
@@ -218,7 +229,7 @@ JsParseString(
     rj::ParseResult result =
         reader.Parse<rj::kParseStopWhenDoneFlag>(ss, handler);
 
-    if (not result) {
+    if (!result) {
         if (error) {
             // Rapidjson only provides a character offset for errors, not
             // line/column information like other parsers (like json_spirit,
@@ -250,7 +261,7 @@ JsWriteToStream(
     const JsValue& value,
     std::ostream& ostr)
 {
-    if (not ostr) {
+    if (!ostr) {
         TF_CODING_ERROR("Stream error");
         return;
     }
@@ -272,3 +283,5 @@ JsWriteToString(
 
     return buffer.GetString();
 } 
+
+PXR_NAMESPACE_CLOSE_SCOPE

@@ -21,66 +21,75 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/arch/fileSystem.h"
-#include "pxr/base/arch/nap.h"
 
-#include <cassert>
+#include "pxr/pxr.h"
+#include "pxr/base/arch/fileSystem.h"
+#include "pxr/base/arch/error.h"
+#include "pxr/base/arch/pragmas.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
 
-void
-crash(int sig) {
-        printf("crashed!\n");
-        exit(sig);
-}
+PXR_NAMESPACE_USING_DIRECTIVE
+
+ARCH_PRAGMA_DEPRECATED_POSIX_NAME
 
 int main()
 {
-    (void) signal(SIGABRT,crash);
+    std::string firstName = ArchMakeTmpFileName("archFS");
+    FILE *firstFile;
 
-    std::string firstName = ArchMakeTmpFileName("archFS"),
-        secondName = ArchMakeTmpFileName("archFS"),
-        thirdName = ArchMakeTmpFileName("lockTester");
-    FILE *firstFile, *secondFile;
-    struct stat firstStat, secondStat, firstStatAgain;
+    char const * const testContent = "text in a file";
 
-    // Open a file, check that its length is 0, write to it, close it, and then check that
-    // its length is now the number of characters written.
-    assert((firstFile = fopen(firstName.c_str(), "w")) != NULL);
+    // Open a file, check that its length is 0, write to it, close it, and then
+    // check that its length is now the number of characters written.
+    ARCH_AXIOM((firstFile = ArchOpenFile(firstName.c_str(), "wb")) != NULL);
     fflush(firstFile);
-    assert(ArchGetFileLength(firstName.c_str()) == 0);
-    fputs("text in a file\n", firstFile);
+    ARCH_AXIOM(ArchGetFileLength(firstName.c_str()) == 0);
+    fputs(testContent, firstFile);
     fclose(firstFile);
-    assert(ArchGetFileLength(firstName.c_str()) == 15);
+    ARCH_AXIOM(ArchGetFileLength(firstName.c_str()) == strlen(testContent));
 
-    // Stat firstFile and secondFile.  The ArchNap()s should have delayed long enough 
-    // that secondFile will appear to have been modified more recently.
-    ArchNap(100);
-    assert((secondFile = fopen(secondName.c_str(), "w")) != NULL);
-    fclose(secondFile);
-    assert(!stat(firstName.c_str(), &firstStat));
-    assert(!stat(secondName.c_str(), &secondStat));
-    assert(!stat(firstName.c_str(), &firstStatAgain));
-    assert(ArchStatCompare(ARCH_STAT_MTIME_EQUAL, &firstStat, &firstStatAgain));
-    assert(ArchStatCompare(ARCH_STAT_MTIME_LESS, &firstStat, &secondStat));
+    // Map the file and assert the bytes are what we expect they are.
+    ARCH_AXIOM((firstFile = ArchOpenFile(firstName.c_str(), "rb")) != NULL);
+    ArchConstFileMapping cfm = ArchMapFileReadOnly(firstFile);
+    fclose(firstFile);
+    ARCH_AXIOM(cfm);
+    ARCH_AXIOM(memcmp(testContent, cfm.get(), strlen(testContent)) == 0);
+    cfm.reset();
 
-    unlink(firstName.c_str());
-    unlink(secondName.c_str());
-    unlink(thirdName.c_str());
+    // Try again with a mutable mapping.
+    ARCH_AXIOM((firstFile = ArchOpenFile(firstName.c_str(), "rb")) != NULL);
+    ArchMutableFileMapping mfm = ArchMapFileReadWrite(firstFile);
+    fclose(firstFile);
+    ARCH_AXIOM(mfm);
+    ARCH_AXIOM(memcmp(testContent, mfm.get(), strlen(testContent)) == 0);
+    // Check that we can successfully mutate.
+    mfm.get()[0] = 'T'; mfm.get()[2] = 's';
+    ARCH_AXIOM(memcmp("Test", mfm.get(), strlen("Test")) == 0);
+    mfm.reset();
+    ArchUnlinkFile(firstName.c_str());
+
+    // Test ArchPWrite and ArchPRead.
+    int64_t len = strlen(testContent);
+    ARCH_AXIOM((firstFile = ArchOpenFile(firstName.c_str(), "w+b")) != NULL);
+    ARCH_AXIOM(ArchPWrite(firstFile, testContent, len, 0) == len);
+    std::unique_ptr<char[]> buf(new char[len]);
+    ARCH_AXIOM(ArchPRead(firstFile, buf.get(), len, 0) == len);
+    ARCH_AXIOM(memcmp(testContent, buf.get(), len) == 0);
+    char const * const newText = "overwritten in a file";
+    ARCH_AXIOM(ArchPWrite(firstFile, newText, strlen(newText),
+                      5/*index of 'in a file'*/) == strlen(newText));
+    std::unique_ptr<char[]> buf2(new char[strlen("written in a")]);
+    ARCH_AXIOM(ArchPRead(firstFile, buf2.get(), strlen("written in a"),
+                     9/*index of 'written in a'*/) == strlen("written in a"));
+    ARCH_AXIOM(memcmp("written in a", buf2.get(), strlen("written in a")) == 0);
 
     // create and remove a tmp subdir
     std::string retpath;
     retpath = ArchMakeTmpSubdir(ArchGetTmpDir(), "myprefix");
-    assert (retpath != "");
-    rmdir(retpath.c_str());
-
+    ARCH_AXIOM (retpath != "");
+    ArchRmDir(retpath.c_str());
     return 0;
 }

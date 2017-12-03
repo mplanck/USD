@@ -21,8 +21,15 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
+
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/pyLock.h"
 #include "pxr/base/tf/diagnosticLite.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TfPyLock::TfPyLock()
     : _acquired(false)
@@ -124,9 +131,14 @@ TfPyLock::EndAllowThreads()
     _allowingThreads = false;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // See https://github.com/pankajp/pygilstate_check
 //
-extern PyThreadState *_PyThreadState_Current;
+PyAPI_DATA(PyThreadState *) _PyThreadState_Current;
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 TfPyEnsureGILUnlockedObj::TfPyEnsureGILUnlockedObj()
     : _lock(TfPyLock::_ConstructUnlocked)
 {
@@ -134,8 +146,12 @@ TfPyEnsureGILUnlockedObj::TfPyEnsureGILUnlockedObj()
     // the correct state) and then BeginAllowThreads() to unlock it.  Otherwise
     // do nothing.  In Python 3.4+, this can be replaced by PyGILState_Check().
     PyThreadState *tstate = _PyThreadState_Current;
-    if (tstate and (tstate == PyGILState_GetThisThreadState())) {
+    if (tstate && (tstate == PyGILState_GetThisThreadState())) {
         _lock.Acquire();
         _lock.BeginAllowThreads();
     }        
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // PXR_PYTHON_SUPPORT_ENABLED

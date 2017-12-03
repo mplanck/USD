@@ -24,9 +24,11 @@
 #ifndef HDX_UNIT_TEST_DELEGATE
 #define HDX_UNIT_TEST_DELEGATE
 
+#include "pxr/pxr.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
 #include "pxr/imaging/hd/tokens.h"
 #include "pxr/imaging/glf/simpleLight.h"
+#include "pxr/imaging/pxOsd/tokens.h"
 
 #include "pxr/base/gf/vec3f.h"
 #include "pxr/base/gf/vec3d.h"
@@ -37,24 +39,38 @@
 #include "pxr/base/vt/array.h"
 #include "pxr/base/tf/staticTokens.h"
 
-#define HDX_UNIT_TEST_TOKENS                             \
-    (geometryAndGuides)
+PXR_NAMESPACE_OPEN_SCOPE
 
-TF_DECLARE_PUBLIC_TOKENS(Hdx_UnitTestTokens, HDX_UNIT_TEST_TOKENS);
+template <typename T>
+static VtArray<T>
+_BuildArray(T values[], int numValues)
+{
+    VtArray<T> result(numValues);
+    std::copy(values, values+numValues, result.begin());
+    return result;
+}
 
 class Hdx_UnitTestDelegate : public HdSceneDelegate
 {
 public:
-    Hdx_UnitTestDelegate();
-    Hdx_UnitTestDelegate(HdRenderIndexSharedPtr const &renderIndex);
+    enum Interpolation { VERTEX, UNIFORM, CONSTANT, FACEVARYING, VARYING };
+
+    Hdx_UnitTestDelegate(HdRenderIndex *renderIndex);
 
     void SetRefineLevel(int level);
 
     // camera
     void SetCamera(GfMatrix4d const &viewMatrix, GfMatrix4d const &projMatrix);
+    void SetCamera(SdfPath const &id, GfMatrix4d const &viewMatrix, GfMatrix4d const &projMatrix);
+    void AddCamera(SdfPath const &id);
 
     // light
     void AddLight(SdfPath const &id, GlfSimpleLight const &light);
+    void SetLight(SdfPath const &id, TfToken const &key, VtValue value);
+
+    // draw target
+    void AddDrawTarget(SdfPath const &id);
+    void SetDrawTarget(SdfPath const &id, TfToken const &key, VtValue value);
 
     // tasks
     void AddRenderTask(SdfPath const &id);
@@ -62,6 +78,8 @@ public:
     void AddSimpleLightTask(SdfPath const &id);
     void AddShadowTask(SdfPath const &id);
     void AddSelectionTask(SdfPath const &id);
+    void AddDrawTargetTask(SdfPath const &id);
+    void AddDrawTargetResolveTask(SdfPath const &id);
 
     void SetTaskParam(SdfPath const &id, TfToken const &name, VtValue val);
     VtValue GetTaskParam(SdfPath const &id, TfToken const &name);
@@ -77,13 +95,52 @@ public:
                                 VtVec4fArray const &rotate,
                                 VtVec3fArray const &translate);
 
-    // prims
+    /// Shader
+    void AddShader(SdfPath const &id,
+                   std::string const &sourceSurface,
+                   std::string const &sourceDisplacement,
+                   HdShaderParamVector const &params);
+    void BindShader(SdfPath const &rprimId, SdfPath const &shaderId);
+
+    // prims    
+    void AddMesh(SdfPath const &id,
+                 GfMatrix4d const &transform,
+                 VtVec3fArray const &points,
+                 VtIntArray const &numVerts,
+                 VtIntArray const &verts,
+                 bool guide=false,
+                 SdfPath const &instancerId=SdfPath(),
+                 TfToken const &scheme=PxOsdOpenSubdivTokens->catmark,
+                 TfToken const &orientation=HdTokens->rightHanded,
+                 bool doubleSided=false);
+    
+    void AddMesh(SdfPath const &id,
+                 GfMatrix4d const &transform,
+                 VtVec3fArray const &points,
+                 VtIntArray const &numVerts,
+                 VtIntArray const &verts,
+                 PxOsdSubdivTags const &subdivTags,
+                 VtValue const &color,
+                 Interpolation colorInterpolation,
+                 bool guide=false,
+                 SdfPath const &instancerId=SdfPath(),
+                 TfToken const &scheme=PxOsdOpenSubdivTokens->catmark,
+                 TfToken const &orientation=HdTokens->rightHanded,
+                 bool doubleSided=false);
+
+    void AddCube(SdfPath const &id, GfMatrix4d const &transform, bool guide=false,
+                 SdfPath const &instancerId=SdfPath(),
+                 TfToken const &scheme=PxOsdOpenSubdivTokens->catmark,
+                 VtValue const &color = VtValue(GfVec4f(1,1,1,1)),
+                 Interpolation colorInterpolation = CONSTANT);
+
     void AddGrid(SdfPath const &id, GfMatrix4d const &transform,
                  bool guide=false, SdfPath const &instancerId=SdfPath());
-    void AddCube(SdfPath const &id, GfMatrix4d const &transform,
-                 bool guide=false, SdfPath const &instancerId=SdfPath());
+
     void AddTet(SdfPath const &id, GfMatrix4d const &transform,
-                 bool guide=false, SdfPath const &instancerId=SdfPath());
+                 bool guide=false, SdfPath const &instancerId=SdfPath(),
+                 TfToken const &scheme=PxOsdOpenSubdivTokens->catmark);
+
     void SetRefineLevel(SdfPath const &id, int level);
 
     // delegate methods
@@ -95,34 +152,58 @@ public:
     virtual TfTokenVector GetPrimVarVertexNames(SdfPath const& id);
     virtual TfTokenVector GetPrimVarConstantNames(SdfPath const& id);
     virtual TfTokenVector GetPrimVarInstanceNames(SdfPath const &id);
+    virtual TfTokenVector GetPrimVarUniformNames(SdfPath const& id);
+    virtual TfTokenVector GetPrimVarFacevaryingNames(SdfPath const& id);
     virtual VtIntArray GetInstanceIndices(SdfPath const& instancerId,
                                           SdfPath const& prototypeId);
 
     virtual GfMatrix4d GetInstancerTransform(SdfPath const& instancerId,
                                              SdfPath const& prototypeId);
     virtual int GetRefineLevel(SdfPath const& id);
-    virtual bool IsInCollection(SdfPath const& id, TfToken const& collectionName);
+
+    virtual std::string GetSurfaceShaderSource(SdfPath const &shaderId);
+    virtual std::string GetDisplacementShaderSource(SdfPath const &shaderId);
+    virtual HdShaderParamVector GetSurfaceShaderParams(SdfPath const &shaderId);
+    virtual VtValue GetSurfaceShaderParamValue(SdfPath const &shaderId,
+                                               TfToken const &paramName);
+    virtual HdTextureResource::ID GetTextureResourceID(SdfPath const& textureId);
+    virtual HdTextureResourceSharedPtr GetTextureResource(SdfPath const& textureId);
 
 private:
     struct _Mesh {
         _Mesh() { }
-        _Mesh(GfMatrix4d const &transform,
+        _Mesh(TfToken const &scheme,
+              TfToken const &orientation,
+              GfMatrix4d const &transform,
               VtVec3fArray const &points,
               VtIntArray const &numVerts,
               VtIntArray const &verts,
-              bool guide) :
+              PxOsdSubdivTags const &subdivTags,
+              VtValue const &color,
+              Interpolation colorInterpolation,
+              bool guide,
+              bool doubleSided) :
+            scheme(scheme), orientation(orientation),
             transform(transform),
-            points(points), numVerts(numVerts), verts(verts), guide(guide) {
-            color = GfVec4f(1, 1, 0, 1);
-        }
+            points(points), numVerts(numVerts), verts(verts),
+            subdivTags(subdivTags), color(color),
+            colorInterpolation(colorInterpolation), guide(guide),
+            doubleSided(doubleSided) { }
 
+        TfToken scheme;
+        TfToken orientation;
         GfMatrix4d transform;
         VtVec3fArray points;
         VtIntArray numVerts;
         VtIntArray verts;
-        GfVec4f color;
+        PxOsdSubdivTags subdivTags;
+        VtValue color;
+        Interpolation colorInterpolation;
         bool guide;
+        bool doubleSided;
+        TfToken reprName;
     };
+    
     struct _Instancer {
         _Instancer() { }
         _Instancer(VtVec3fArray const &scale,
@@ -140,10 +221,31 @@ private:
 
         std::vector<SdfPath> prototypes;
     };
+    struct _Shader {
+        _Shader() { }
+        _Shader(std::string const &srcSurface,
+                std::string const &srcDisplacement, 
+                HdShaderParamVector const &pms)
+            : sourceSurface(srcSurface)
+            , sourceDisplacement(srcDisplacement)
+            , params(pms) {
+        }
+
+        std::string sourceSurface;
+        std::string sourceDisplacement;
+        HdShaderParamVector params;
+    };
+    struct _DrawTarget {
+    };
     std::map<SdfPath, _Mesh> _meshes;
     std::map<SdfPath, _Instancer> _instancers;
+    std::map<SdfPath, _Shader> _shaders;
     std::map<SdfPath, int> _refineLevels;
+    std::map<SdfPath, _DrawTarget> _drawTargets;
     int _refineLevel;
+
+    typedef std::map<SdfPath, SdfPath> SdfPathMap;
+    SdfPathMap _shaderBindings;
 
     typedef TfHashMap<TfToken, VtValue, TfToken::HashFunctor> _ValueCache;
     typedef TfHashMap<SdfPath, _ValueCache, SdfPath::Hash> _ValueCacheMap;
@@ -152,5 +254,7 @@ private:
     SdfPath _cameraId;
 };
 
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HDX_UNIT_TEST_DELEGATE

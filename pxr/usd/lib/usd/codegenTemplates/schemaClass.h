@@ -24,6 +24,12 @@
 #ifndef {{ Upper(libraryName) }}_GENERATED_{{ Upper(cls.className) }}_H
 #define {{ Upper(libraryName) }}_GENERATED_{{ Upper(cls.className) }}_H
 
+/// \file {{ libraryName }}/{{ cls.GetHeaderFile() }}
+
+{% if useExportAPI %}
+#include "pxr/pxr.h"
+#include "{{ libraryPath }}/api.h"
+{% endif %}
 #include "{{ cls.parentLibPath }}/{{ cls.GetParentHeaderFile() }}"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -43,12 +49,18 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+{% if useExportAPI %}
+{{ namespaceOpen }}
+
+{% endif %}
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // {{ Upper(cls.usdPrimTypeName) }}{{' ' * (74 - cls.usdPrimTypeName|count)}} //
 // -------------------------------------------------------------------------- //
 
+/// \class {{ cls.cppClassName }}
+///
 {% if cls.doc -%}
 /// {{ cls.doc }}
 {% endif %}
@@ -89,15 +101,21 @@ public:
     }
 
     /// Destructor.
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     virtual ~{{ cls.cppClassName }}();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a {{ cls.cppClassName }} holding the prim adhering to this
+    /// Return a {{ cls.cppClassName }} holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -106,11 +124,14 @@ public:
     /// {{ cls.cppClassName }}(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     static {{ cls.cppClassName }}
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
 {% if cls.isConcrete == "true" %}
-    /// \brief Attempt to ensure a \a UsdPrim adhering to this schema at \p path
+    /// Attempt to ensure a \a UsdPrim adhering to this schema at \p path
     /// is defined (according to UsdPrim::IsDefined()) on this stage.
     ///
     /// If a prim adhering to this schema at \p path is already defined on this
@@ -132,6 +153,9 @@ public:
     /// specify this schema class, in case a stronger typeName opinion overrides
     /// the opinion at the current EditTarget.
     ///
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     static {{ cls.cppClassName }}
     Define(const UsdStagePtr &stage, const SdfPath &path);
 {% endif %}
@@ -139,11 +163,17 @@ public:
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     virtual const TfType &_GetTfType() const;
 
 {% for attrName in cls.attrOrder %}
@@ -157,6 +187,9 @@ public:
 {% for detail in attr.details %}
     /// \n  {{ detail[0] }}: {{ detail[1] }}
 {% endfor %}
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     UsdAttribute Get{{ Proper(attr.apiName) }}Attr() const;
 
     /// See Get{{ Proper(attr.apiName) }}Attr(), and also 
@@ -164,6 +197,9 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     UsdAttribute Create{{ Proper(attr.apiName) }}Attr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 {% endfor %}
@@ -178,10 +214,16 @@ public:
 {% for detail in rel.details %}
     /// \n  {{ detail[0] }}: {{ detail[1] }}
 {% endfor %}
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     UsdRelationship Get{{ Proper(rel.apiName) }}Rel() const;
 
     /// See Get{{ Proper(rel.apiName) }}Rel(), and also 
     /// \ref Usd_Create_Or_Get_Property for when to use Get vs Create
+    {% if useExportAPI -%}
+    {{ Upper(libraryName) }}_API
+    {% endif -%}
     UsdRelationship Create{{ Proper(rel.apiName) }}Rel() const;
 
 {% endfor %}
@@ -190,8 +232,12 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+{% if useExportAPI %}
+    //  - Close the namespace with {{ namespaceClose }}
+{% endif %}
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 

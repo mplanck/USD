@@ -21,12 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/assetPath.h"
-
 #include "pxr/base/vt/valueFromPython.h"
-
 #include "pxr/base/tf/hash.h"
 #include "pxr/base/tf/pyResultConversions.h"
+#include "pxr/base/vt/wrapArray.h"
 
 #include <boost/functional/hash.hpp>
 #include <boost/python/class.hpp>
@@ -38,6 +38,20 @@
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
+TF_REGISTRY_FUNCTION(VtValue)
+{
+    VtRegisterValueCastsFromPythonSequencesToArray<SdfAssetPath>();
+}
+
+namespace {
+
+static std::string _Str(SdfAssetPath const &self)
+{
+    return boost::lexical_cast<std::string>(self);
+}
+
 static std::string
 _Repr(SdfAssetPath const &self)
 {
@@ -46,7 +60,7 @@ _Repr(SdfAssetPath const &self)
          << TfPyRepr(self.GetAssetPath());
 
     const std::string & resolvedPath = self.GetResolvedPath();
-    if (not resolvedPath.empty()) {
+    if (!resolvedPath.empty()) {
         repr << ", " << TfPyRepr(resolvedPath);
     }
     repr << ")";
@@ -55,7 +69,7 @@ _Repr(SdfAssetPath const &self)
 
 static bool _Nonzero(SdfAssetPath const &self)
 {
-    return not self.GetAssetPath().empty();
+    return !self.GetAssetPath().empty();
 }
 
 static size_t _Hash(SdfAssetPath const &self)
@@ -65,6 +79,8 @@ static size_t _Hash(SdfAssetPath const &self)
     boost::hash_combine(hash, self.GetResolvedPath());
     return hash;
 }
+
+} // anonymous namespace 
 
 void wrapAssetPath()
 {
@@ -80,7 +96,8 @@ void wrapAssetPath()
 
         .def( self == self )
         .def( self != self )
-        .def( str(self) )
+//        .def( str(self) )
+        .def("__str__", _Str)
 
         .add_property("path", 
                       make_function(&This::GetAssetPath,

@@ -24,17 +24,21 @@
 #include "pxr/imaging/hd/package.h"
 
 #include "pxr/base/plug/plugin.h"
+#include "pxr/base/plug/thisPlugin.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/fileUtils.h"
 #include "pxr/base/tf/stringUtils.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 static TfToken
 _GetShaderPath(char const * shader)
 {
-    static PlugThisPlugin plugin;
+    static PlugPluginPtr plugin = PLUG_THIS_PLUGIN;
     const std::string path =
-        PlugFindResource(plugin, TfStringCatPaths("shaders", shader));
-    TF_VERIFY(not path.empty(), "Could not find shader: %s\n", shader);
+        PlugFindPluginResource(plugin, TfStringCatPaths("shaders", shader));
+    TF_VERIFY(!path.empty(), "Could not find shader: %s\n", shader);
 
     return TfToken(path);
 }
@@ -55,19 +59,19 @@ HdPackageRenderPassShader()
 }
 
 TfToken
-HdPackageDefaultLightingShader()
+HdPackageLightingIntegrationShader()
 {
-    static TfToken defaultLightingShader =
-        _GetShaderPath("defaultLightingShader.glslfx");
-    return defaultLightingShader;
+    static TfToken shader =
+        _GetShaderPath("lightingIntegrationShader.glslfx");
+    return shader;
 }
 
 TfToken
-HdPackageSimpleLightingShader()
+HdPackageFallbackLightingShader()
 {
-    static TfToken simpleLightingShader =
-        _GetShaderPath("simpleLightingShader.glslfx");
-    return simpleLightingShader;
+    static TfToken fallbackLightingShader =
+        _GetShaderPath("fallbackLightingShader.glslfx");
+    return fallbackLightingShader;
 }
 
 TfToken
@@ -83,3 +87,6 @@ HdPackagePtexTextureShader()
     static TfToken s = _GetShaderPath("ptexTexture.glslfx");
     return s;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

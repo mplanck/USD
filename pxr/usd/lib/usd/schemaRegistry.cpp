@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/schemaRegistry.h"
 #include "pxr/usd/usd/schemaBase.h"
 
@@ -34,16 +35,16 @@
 
 #include "pxr/base/tf/fileUtils.h"
 #include "pxr/base/tf/instantiateSingleton.h"
-#include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/registryManager.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
-#include <boost/foreach.hpp>
-
 #include <set>
 #include <utility>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 using std::make_pair;
 using std::set;
@@ -63,19 +64,18 @@ _AddSchema(SdfLayerRefPtr const &source, SdfLayerRefPtr const &target)
     // target (with possible exceptions) rather than cherry-picking certain
     // data.
     static TfToken allowedTokens("allowedTokens");
-    BOOST_FOREACH(SdfPrimSpecHandle const &prim, source->GetRootPrims()) {
-        if (not target->GetPrimAtPath(prim->GetPath())) {
+    for (SdfPrimSpecHandle const &prim: source->GetRootPrims()) {
+        if (!target->GetPrimAtPath(prim->GetPath())) {
 
             SdfPrimSpecHandle targetPrim =
                 SdfPrimSpec::New(target, prim->GetName(), prim->GetSpecifier(),
                                  prim->GetTypeName());
 
             string doc = prim->GetDocumentation();
-            if (not doc.empty())
+            if (!doc.empty())
                 targetPrim->SetDocumentation(doc);
 
-            BOOST_FOREACH(SdfAttributeSpecHandle const &attr,
-                          prim->GetAttributes()) {
+            for (SdfAttributeSpecHandle const &attr: prim->GetAttributes()) {
                 SdfAttributeSpecHandle newAttr =
                     SdfAttributeSpec::New(
                         targetPrim, attr->GetName(), attr->GetTypeName(),
@@ -86,25 +86,25 @@ _AddSchema(SdfLayerRefPtr const &source, SdfLayerRefPtr const &target)
                     newAttr->SetInfo(allowedTokens,
                                      attr->GetInfo(allowedTokens));
                 string doc = attr->GetDocumentation();
-                if (not doc.empty())
+                if (!doc.empty())
                     newAttr->SetDocumentation(doc);
                 string displayName = attr->GetDisplayName();
-                if (not displayName.empty())
+                if (!displayName.empty())
                     newAttr->SetDisplayName(displayName);
                 string displayGroup = attr->GetDisplayGroup();
-                if (not displayGroup.empty())
+                if (!displayGroup.empty())
                     newAttr->SetDisplayGroup(displayGroup);
                 if (attr->GetHidden())
                     newAttr->SetHidden(true);
             }
 
-            BOOST_FOREACH(SdfRelationshipSpecHandle const &rel,
-                          prim->GetRelationships()) {
+            for (SdfRelationshipSpecHandle const &rel:
+                     prim->GetRelationships()) {
                 SdfRelationshipSpecHandle newRel =
                     SdfRelationshipSpec::New(
                         targetPrim, rel->GetName(), rel->IsCustom());
                 string doc = rel->GetDocumentation();
-                if (not doc.empty())
+                if (!doc.empty())
                     newRel->SetDocumentation(doc);
             }
         }
@@ -128,13 +128,13 @@ UsdSchemaRegistry::_BuildPrimTypePropNameToSpecIdMap(
     // propertyName are intentionally leaked.  It's okay, since there's a fixed
     // set that we'd like to persist forever.
     SdfPrimSpecHandle prim = _schematics->GetPrimAtPath(primPath);
-    if (not prim or prim->GetTypeName().IsEmpty())
+    if (!prim || prim->GetTypeName().IsEmpty())
         return;
 
     _primTypePropNameToSpecIdMap[make_pair(typeName, TfToken())] = 
         new SdfAbstractDataSpecId(new SdfPath(prim->GetPath()));
 
-    BOOST_FOREACH(SdfPropertySpecHandle prop, prim->GetProperties()) {
+    for (SdfPropertySpecHandle prop: prim->GetProperties()) {
         _primTypePropNameToSpecIdMap[make_pair(typeName, prop->GetNameToken())] =
             new SdfAbstractDataSpecId(new SdfPath(prop->GetPath()));
     }
@@ -158,7 +158,7 @@ UsdSchemaRegistry::_FindAndAddPluginSchema()
 
     // Get all the plugins that provide the types.
     set<PlugPluginPtr> plugins;
-    BOOST_FOREACH(const TfType &type, types) {
+    for (const TfType &type: types) {
         if (PlugPluginPtr plugin =
             PlugRegistry::GetInstance().GetPluginForType(type))
             plugins.insert(plugin);
@@ -166,14 +166,14 @@ UsdSchemaRegistry::_FindAndAddPluginSchema()
 
     // For each plugin, if it has generated schema, add it to the schematics.
     SdfChangeBlock block;
-    BOOST_FOREACH(const PlugPluginPtr &plugin, plugins) {
+    for (const PlugPluginPtr &plugin: plugins) {
         if (SdfLayerRefPtr generatedSchema = _GetGeneratedSchema(plugin))
             _AddSchema(generatedSchema, _schematics);
     }
 
     // Add them to the type -> path and typeName -> path maps, and the type ->
     // SpecId and typeName -> SpecId maps.
-    BOOST_FOREACH(const TfType &type, types) {
+    for (const TfType &type: types) {
         // The path in the schema is the type's alias under UsdSchemaBase.
         vector<string> aliases = _schemaBaseType->GetAliases(type);
         if (aliases.size() == 1) {
@@ -290,3 +290,6 @@ UsdSchemaRegistry::_GetPrimDefinitionAtPath(const SdfPath &path)
 {
     return Usd_SchemaRegistryGetPrimDefinitionAtPath(path);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

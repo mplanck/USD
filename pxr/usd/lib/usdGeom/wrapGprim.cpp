@@ -22,12 +22,11 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/usd/usdGeom/gprim.h"
-
 #include "pxr/usd/usd/schemaBase.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/usd/sdf/primSpec.h"
 
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -38,6 +37,10 @@
 #include <string>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 #define WRAP_CUSTOM                                                     \
     template <class Cls> static void _CustomWrapCode(Cls &_class)
@@ -73,6 +76,8 @@ _CreateOrientationAttr(UsdGeomGprim &self,
     return self.CreateOrientationAttr(
         UsdPythonToSdfType(defaultVal, SdfValueTypeNames->Token), writeSparsely);
 }
+
+} // anonymous namespace
 
 void wrapUsdGeomGprim()
 {
@@ -148,13 +153,27 @@ void wrapUsdGeomGprim()
 // }
 //
 // Of course any other ancillary or support code may be provided.
+// 
+// Just remember to wrap code in the appropriate delimiters:
+// 'namespace {', '}'.
+//
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
+
+namespace {
 
 WRAP_CUSTOM {
     _class
         .def("GetDisplayColorPrimvar", &UsdGeomGprim::GetDisplayColorPrimvar)
+        .def("CreateDisplayColorPrimvar", 
+             &UsdGeomGprim::CreateDisplayColorPrimvar,
+             (arg("interpolation")=TfToken(), arg("elementSize")=-1))
         .def("GetDisplayOpacityPrimvar",
              &UsdGeomGprim::GetDisplayOpacityPrimvar)
+        .def("CreateDisplayOpacityPrimvar", 
+             &UsdGeomGprim::CreateDisplayOpacityPrimvar,
+             (arg("interpolation")=TfToken(), arg("elementSize")=-1))
         ;
 }
+
+} // anonymous namespace 

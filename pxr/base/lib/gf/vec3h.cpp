@@ -27,6 +27,7 @@
 
 #include "pxr/base/gf/vec3h.h"
 
+#include "pxr/pxr.h"
 #include "pxr/base/gf/math.h"
 #include "pxr/base/gf/ostreamHelpers.h"
 #include "pxr/base/tf/type.h"
@@ -39,6 +40,8 @@
 
 #include <vector>
 #include <iostream>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_REGISTRY_FUNCTION(TfType) {
     TfType::Define<GfVec3h>();
@@ -53,44 +56,26 @@ operator<<(std::ostream &out, GfVec3h const &v)
         << Gf_OstreamHelperP(v[2]) << ')';
 }
 
-GfVec3h::GfVec3h(class GfVec3d const &other)
-{
-    _data[0] = other[0];
-    _data[1] = other[1];
-    _data[2] = other[2];
-}
-GfVec3h::GfVec3h(class GfVec3f const &other)
-{
-    _data[0] = other[0];
-    _data[1] = other[1];
-    _data[2] = other[2];
-}
-GfVec3h::GfVec3h(class GfVec3i const &other)
-{
-    _data[0] = other[0];
-    _data[1] = other[1];
-    _data[2] = other[2];
-}
 
 bool
 GfVec3h::operator==(GfVec3d const &other) const
 {
-    return _data[0] == other[0] and
-           _data[1] == other[1] and
+    return _data[0] == other[0] &&
+           _data[1] == other[1] &&
            _data[2] == other[2];
 }
 bool
 GfVec3h::operator==(GfVec3f const &other) const
 {
-    return _data[0] == other[0] and
-           _data[1] == other[1] and
+    return _data[0] == other[0] &&
+           _data[1] == other[1] &&
            _data[2] == other[2];
 }
 bool
 GfVec3h::operator==(GfVec3i const &other) const
 {
-    return _data[0] == other[0] and
-           _data[1] == other[1] and
+    return _data[0] == other[0] &&
+           _data[1] == other[1] &&
            _data[2] == other[2];
 }
 
@@ -105,7 +90,7 @@ GfVec3h::OrthogonalizeBasis(
 
 void
 GfVec3h::BuildOrthonormalFrame(
-    GfVec3h *v1, GfVec3h *v2, half eps) const
+    GfVec3h *v1, GfVec3h *v2, GfHalf eps) const
 {
     return GfBuildOrthonormalFrame(*this, v1, v2, eps);
 }
@@ -221,9 +206,9 @@ GfOrthogonalizeBasis(GfVec3h *tx, GfVec3h *ty, GfVec3h *tz,
 void
 GfBuildOrthonormalFrame(GfVec3h const &v0,
                         GfVec3h* v1,
-                        GfVec3h* v2, half eps)
+                        GfVec3h* v2, GfHalf eps)
 {
-    half len = v0.GetLength();
+    GfHalf len = v0.GetLength();
 
     if (len == 0.) {
 	*v1 = *v2 = GfVec3h(0);
@@ -283,3 +268,5 @@ GfSlerp(double alpha, const GfVec3h &v0, const GfVec3h &v1)
         v1 * (sin(     alpha *angle) * oneOverSinAngle);
 }
 
+
+PXR_NAMESPACE_CLOSE_SCOPE

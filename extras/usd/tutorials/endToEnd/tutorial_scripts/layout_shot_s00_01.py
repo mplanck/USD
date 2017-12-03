@@ -62,11 +62,11 @@ def _SetupBilliards(stage):
     # Make sure the model-parents we need are well-specified
     Usd.ModelAPI(UsdGeom.Xform.Define(stage, '/World')).SetKind(Kind.Tokens.group)
     Usd.ModelAPI(UsdGeom.Xform.Define(stage, '/World/anim')).SetKind(Kind.Tokens.group)
-    # in previous examples, we've been using GetReferences().Add(...).  The
+    # in previous examples, we've been using GetReferences().AddReference(...).  The
     # following uses .SetItems() instead which lets us explicitly set (replace)
     # the references at once instead of adding.
     cueBall = stage.DefinePrim('/World/anim/CueBall')
-    cueBall.GetReferences().SetItems([
+    cueBall.GetReferences().SetReferences([
         Sdf.Reference(os.path.join(ASSET_BASE, 'Ball/Ball.usd'))])
 
     # deactivate everything that isn't 8, 9, 1, 4.  We accumulate the prims we
@@ -105,10 +105,10 @@ def _MoveCamera(stage):
     # the camera derives from UsdGeom.Xformable so we can 
     # use the XformCommonAPI on it, too, and see how rotations are handled
     xformAPI = UsdGeom.XformCommonAPI(cam)
-    xformAPI.SetTranslate( (8, 120, 80) )
+    xformAPI.SetTranslate( (8, 120, 8) )
     # -86 degree rotation around X axis.  Can specify rotation order as
     # optional parameter
-    xformAPI.SetRotate( (-116, 0, 0 ) )
+    xformAPI.SetRotate( (-86, 0, 0 ) )
 
 if __name__ == '__main__':
     main()

@@ -24,6 +24,10 @@
 #ifndef USDGEOM_GENERATED_POINTBASED_H
 #define USDGEOM_GENERATED_POINTBASED_H
 
+/// \file usdGeom/pointBased.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdGeom/api.h"
 #include "pxr/usd/usdGeom/gprim.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -38,13 +42,17 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // POINTBASED                                                                 //
 // -------------------------------------------------------------------------- //
 
-/// \brief Base class for all UsdGeomGprims that possess points,
+/// \class UsdGeomPointBased
+///
+/// Base class for all UsdGeomGprims that possess points,
 /// providing common attributes such as normals and velocities.
 ///
 class UsdGeomPointBased : public UsdGeomGprim
@@ -74,15 +82,17 @@ public:
     }
 
     /// Destructor.
+    USDGEOM_API
     virtual ~UsdGeomPointBased();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDGEOM_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdGeomPointBased holding the prim adhering to this
+    /// Return a UsdGeomPointBased holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -91,6 +101,7 @@ public:
     /// UsdGeomPointBased(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDGEOM_API
     static UsdGeomPointBased
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
@@ -98,11 +109,13 @@ public:
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDGEOM_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDGEOM_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -116,6 +129,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->Point3fArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetPointsAttr() const;
 
     /// See GetPointsAttr(), and also 
@@ -123,6 +137,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreatePointsAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -130,17 +145,23 @@ public:
     // VELOCITIES 
     // --------------------------------------------------------------------- //
     /// If provided, 'velocities' should be used by renderers to 
-    /// compute motion blur for a given 'points' sample, rather than 
-    /// interpolating to a neighboring 'points' sample.  This is the only
-    /// reasonable means of specifying motion blur for topologically
+    /// 
+    /// compute positions between samples for the 'points' attribute, rather
+    /// than interpolating between neighboring 'points' samples.  This is the
+    /// only reasonable means of computing motion blur for topologically
     /// varying PointBased primitives.  It follows that the length of each
     /// 'velocities' sample must match the length of the corresponding
-    /// 'points' sample.
+    /// 'points' sample.  Velocity is measured in position units per second,
+    /// as per most simulation software. To convert to position units per
+    /// UsdTimeCode, divide by UsdStage::GetTimeCodesPerSecond().
+    /// 
+    /// See also \ref UsdGeom_VelocityInterpolation .
     ///
     /// \n  C++ Type: VtArray<GfVec3f>
     /// \n  Usd Type: SdfValueTypeNames->Vector3fArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetVelocitiesAttr() const;
 
     /// See GetVelocitiesAttr(), and also 
@@ -148,6 +169,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateVelocitiesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -166,6 +188,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->Normal3fArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetNormalsAttr() const;
 
     /// See GetNormalsAttr(), and also 
@@ -173,6 +196,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateNormalsAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -180,8 +204,10 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
     
@@ -196,6 +222,7 @@ public:
     /// To achieve partial or fully faceted shading of a polygonal mesh
     /// with normals, one should use UsdGeomTokens->faceVarying or
     /// UsdGeomTokens->uniform interpolation.
+    USDGEOM_API
     TfToken GetNormalsInterpolation() const;
 
     /// Set the \ref Usd_InterpolationVals "interpolation" for the \em normals
@@ -208,6 +235,7 @@ public:
     /// to match its interpolation to its prim's topology.
     ///
     /// \sa GetNormalsInterpolation()
+    USDGEOM_API
     bool SetNormalsInterpolation(TfToken const &interpolation);
 
     /// Compute the extent for the point cloud defined by points. 
@@ -220,7 +248,10 @@ public:
     /// This function is to provide easy authoring of extent for usd authoring
     /// tools, hence it is static and acts outside a specific prim (as in 
     /// attribute based methods). 
+    USDGEOM_API
     static bool ComputeExtent(const VtVec3fArray& points, VtVec3fArray* extent);
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

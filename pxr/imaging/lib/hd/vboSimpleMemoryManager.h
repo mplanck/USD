@@ -24,42 +24,59 @@
 #ifndef HD_VBO_SIMPLE_MEMORY_MANAGER_H
 #define HD_VBO_SIMPLE_MEMORY_MANAGER_H
 
-#include "pxr/base/tf/singleton.h"
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/strategyBase.h"
 #include "pxr/imaging/hd/bufferArray.h"
-#include "pxr/imaging/hd/bufferArrayRange.h"
+#include "pxr/imaging/hd/bufferArrayRangeGL.h"
 #include "pxr/imaging/hd/bufferSpec.h"
 #include "pxr/imaging/hd/bufferSource.h"
 
-/// VBO simple memory manager
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class HdVBOSimpleMemoryManager
+///
+/// VBO simple memory manager.
+///
 /// This class doesn't perform any aggregation.
+///
 class HdVBOSimpleMemoryManager : public HdAggregationStrategy {
 public:
     /// Factory for creating HdBufferArray managed by
     /// HdVBOSimpleMemoryManager.
+    HD_API
     virtual HdBufferArraySharedPtr CreateBufferArray(
         TfToken const &role,
         HdBufferSpecVector const &bufferSpecs);
 
     /// Factory for creating HdBufferArrayRange
+    HD_API
     virtual HdBufferArrayRangeSharedPtr CreateBufferArrayRange();
 
     /// Returns id for given bufferSpecs to be used for aggregation
+    HD_API
     virtual HdAggregationStrategy::AggregationId ComputeAggregationId(
         HdBufferSpecVector const &bufferSpecs) const;
 
-    /// Returns an instance of resource registry
-    static HdVBOSimpleMemoryManager& GetInstance() {
-        return TfSingleton<HdVBOSimpleMemoryManager>::GetInstance();
-    }
+    /// Returns the buffer specs from a given buffer array
+    virtual HdBufferSpecVector GetBufferSpecs(
+        HdBufferArraySharedPtr const &bufferArray) const;
+
+    /// Returns the size of the GPU memory used by the passed buffer array
+    virtual size_t GetResourceAllocation(
+        HdBufferArraySharedPtr const &bufferArray, 
+        VtDictionary &result) const;
 
 protected:
-    friend class TfSingleton<HdVBOSimpleMemoryManager>;
     class _SimpleBufferArray;
 
-    /// specialized buffer array range for SimpleBufferArray
-    class _SimpleBufferArrayRange : public HdBufferArrayRange
+    /// \class _SimpleBufferArrayRange
+    ///
+    /// Specialized buffer array range for SimpleBufferArray.
+    ///
+    class _SimpleBufferArrayRange : public HdBufferArrayRangeGL
     {
     public:
         /// Constructor.
@@ -73,7 +90,11 @@ protected:
         }
 
         /// Returns true is the range has been assigned to a buffer
+        HD_API
         virtual bool IsAssigned() const;
+
+        /// Returns true if this range is marked as immutable.
+        virtual bool IsImmutable() const;
 
         /// Resize memory area for this range. Returns true if it causes container
         /// buffer reallocation.
@@ -83,9 +104,11 @@ protected:
         }
 
         /// Copy source data into buffer
+        HD_API
         virtual void CopyData(HdBufferSourceSharedPtr const &bufferSource);
 
         /// Read back the buffer content
+        HD_API
         virtual VtValue ReadData(TfToken const &name) const;
 
         /// Returns the relative offset in aggregated buffer
@@ -118,20 +141,29 @@ protected:
             _bufferArray->IncrementVersion();
         }
 
+        /// Returns the max number of elements
+        HD_API
+        virtual size_t GetMaxNumElements() const;
+
         /// Returns the GPU resource. If the buffer array contains more than one
         /// resource, this method raises a coding error.
-        virtual HdBufferResourceSharedPtr GetResource() const;
+        HD_API
+        virtual HdBufferResourceGLSharedPtr GetResource() const;
 
         /// Returns the named GPU resource.
-        virtual HdBufferResourceSharedPtr GetResource(TfToken const& name);
+        HD_API
+        virtual HdBufferResourceGLSharedPtr GetResource(TfToken const& name);
 
         /// Returns the list of all named GPU resources for this bufferArrayRange.
-        virtual HdBufferResourceNamedList const& GetResources() const;
+        HD_API
+        virtual HdBufferResourceGLNamedList const& GetResources() const;
 
         /// Sets the buffer array assosiated with this buffer;
+        HD_API
         virtual void SetBufferArray(HdBufferArray *bufferArray);
 
         /// Debug dump
+        HD_API
         virtual void DebugDump(std::ostream &out) const;
 
         /// Make this range invalid
@@ -141,44 +173,66 @@ protected:
 
     protected:
         /// Returns the aggregation container
+        HD_API
         virtual const void *_GetAggregation() const;
+
+        /// Adds a new, named GPU resource and returns it.
+        HD_API
+        HdBufferResourceGLSharedPtr _AddResource(TfToken const& name,
+                                                int glDataType,
+                                                short numComponents,
+                                                int arraySize,
+                                                int offset,
+                                                int stride);
 
     private:
         _SimpleBufferArray * _bufferArray;
         int _numElements;
     };
 
+    typedef boost::shared_ptr<_SimpleBufferArray>
+        _SimpleBufferArraySharedPtr;
     typedef boost::shared_ptr<_SimpleBufferArrayRange>
         _SimpleBufferArrayRangeSharedPtr;
     typedef boost::weak_ptr<_SimpleBufferArrayRange>
         _SimpleBufferArrayRangePtr;
 
-    /// Simple buffer array (non-aggregated)
+    /// \class _SimpleBufferArray
+    ///
+    /// Simple buffer array (non-aggregated).
+    ///
     class _SimpleBufferArray : public HdBufferArray
     {
     public:
         /// Constructor.
+        HD_API
         _SimpleBufferArray(TfToken const &role, HdBufferSpecVector const &bufferSpecs);
 
         /// Destructor. It invalidates _range
+        HD_API
         virtual ~_SimpleBufferArray();
 
         /// perform compaction if necessary, returns true if it becomes empty.
+        HD_API
         virtual bool GarbageCollect();
 
         /// Debug output
+        HD_API
         virtual void DebugDump(std::ostream &out) const;
 
         /// Set to resize buffers. Actual reallocation happens on Reallocate()
+        HD_API
         bool Resize(int numElements);
 
         /// Performs reallocation.
         /// GLX context has to be set when calling this function.
+        HD_API
         virtual void Reallocate(
                 std::vector<HdBufferArrayRangeSharedPtr> const &ranges,
                 HdBufferArraySharedPtr const &curRangeOwner);
 
         /// Returns the maximum number of elements capacity.
+        HD_API
         virtual size_t GetMaxNumElements() const;
 
         /// Returns current capacity. It could be different from numElements.
@@ -186,12 +240,47 @@ protected:
             return _capacity;
         }
 
+        /// TODO: We need to distinguish between the primvar types here, we should
+        /// tag each HdBufferSource and HdBufferResource with Constant, Uniform,
+        /// Varying, Vertex, or FaceVarying and provide accessors for the specific
+        /// buffer types.
+
+        /// Returns the GPU resource. If the buffer array contains more than one
+        /// resource, this method raises a coding error.
+        HD_API
+        HdBufferResourceGLSharedPtr GetResource() const;
+
+        /// Returns the named GPU resource. This method returns the first found
+        /// resource. In HD_SAFE_MODE it checkes all underlying GL buffers
+        /// in _resourceMap and raises a coding error if there are more than
+        /// one GL buffers exist.
+        HD_API
+        HdBufferResourceGLSharedPtr GetResource(TfToken const& name);
+
+        /// Returns the list of all named GPU resources for this bufferArray.
+        HdBufferResourceGLNamedList const& GetResources() const {return _resourceList;}
+
+        /// Reconstructs the bufferspecs and returns it (for buffer splitting)
+        HD_API
+        HdBufferSpecVector GetBufferSpecs() const;
+
     protected:
+        HD_API
         void _DeallocateResources();
 
+        /// Adds a new, named GPU resource and returns it.
+        HD_API
+        HdBufferResourceGLSharedPtr _AddResource(TfToken const& name,
+                                            int glDataType,
+                                            short numComponents,
+                                            int arraySize,
+                                            int offset,
+                                            int stride);
     private:
         int _capacity;
         size_t _maxBytesPerElement;
+
+        HdBufferResourceGLNamedList _resourceList;
 
         _SimpleBufferArrayRangeSharedPtr _GetRangeSharedPtr() const {
             return GetRangeCount() > 0
@@ -201,5 +290,6 @@ protected:
     };
 };
 
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_VBO_SIMPLE_MEMORY_MANAGER_H

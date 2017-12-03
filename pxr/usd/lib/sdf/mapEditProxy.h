@@ -21,11 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/mapEditProxy.h
-
 #ifndef SDF_MAPEDITPROXY_H
 #define SDF_MAPEDITPROXY_H
 
+/// \file sdf/mapEditProxy.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/allowed.h"
 #include "pxr/usd/sdf/changeBlock.h"
 #include "pxr/usd/sdf/declareHandles.h"
@@ -41,12 +42,15 @@
 #include <iterator>
 #include <utility>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class TfToken;
 
 SDF_DECLARE_HANDLES(SdfSpec);
 
-/// \class SdfIdentityMapEditProxyValuePolicy sdf/mapEditProxy.h
-/// \brief A value policy for \c SdfMapEditProxy that does nothing.
+/// \class SdfIdentityMapEditProxyValuePolicy
+///
+/// A value policy for \c SdfMapEditProxy that does nothing.
 ///
 /// A \c SdfMapEditProxy value policy converts incoming keys and values
 /// into a canonical form used for storage.  This is useful if you have
@@ -55,6 +59,7 @@ SDF_DECLARE_HANDLES(SdfSpec);
 /// equivalent values.  Note that the policy is only used on inputs to
 /// the map proxy;  it's never used when returning keys or values from
 /// the proxy.
+///
 template <class T>
 class SdfIdentityMapEditProxyValuePolicy {
 public:
@@ -97,8 +102,9 @@ public:
     }
 };
 
-/// \class SdfMapEditProxy sdf/mapEditProxy.h
-/// \brief A proxy for editing map-like values.
+/// \class SdfMapEditProxy
+///
+/// A proxy for editing map-like values.
 ///
 /// A \c SdfMapEditProxy provides an interface for editing fields
 /// containing map-like values. The proxy allows consumers to
@@ -107,6 +113,7 @@ public:
 ///
 /// The \c _ValuePolicy is used to canonicalize keys and values before
 /// storage or comparison.
+///
 /// \sa SdfIdentityMapEditProxyValuePolicy
 ///
 template <class T, class _ValuePolicy = SdfIdentityMapEditProxyValuePolicy<T> >
@@ -145,7 +152,6 @@ private:
 
     class _ValueProxy {
     public:
-        _ValueProxy() { }
         _ValueProxy(This* owner, const Type* data, inner_iterator i) :
             _owner(owner), _data(data), _pos(i)
         {
@@ -155,18 +161,26 @@ private:
         template <class U>
         _ValueProxy& operator=(const U& other)
         {
-            _owner->_Set(_data, _pos, other);
+            if (!_owner) {
+                TF_CODING_ERROR("Assignment to invalid map proxy");
+            } else {
+                _owner->_Set(_data, _pos, other);
+            }
             return *this;
         }
 
         operator mapped_type() const
         {
-            return _owner->_Get(_data, _pos);
+            return Get();
         }
 
         // Required for _PairProxy::operator value_type().
         mapped_type Get() const
         {
+            if (!_owner) {
+                TF_CODING_ERROR("Read from invalid map proxy");
+                return mapped_type();
+            }
             return _owner->_Get(_data, _pos);
         }
 
@@ -200,7 +214,7 @@ private:
         static _PairProxy Dereference(This* owner,
                                       const Type* data, inner_iterator i)
         {
-            if (not owner) {
+            if (!owner) {
                 TF_FATAL_ERROR("Dereferenced an invalid map proxy iterator");
             }
             return _PairProxy(owner, data, i);
@@ -210,7 +224,7 @@ private:
                                              const Type* data,
                                              const_inner_iterator i)
         {
-            if (not owner) {
+            if (!owner) {
                 TF_FATAL_ERROR("Dereferenced an invalid map proxy iterator");
             }
             return owner->_Get(data, i);
@@ -252,12 +266,12 @@ private:
         template <class Owner2, class I2, class R2>
         bool equal(const _Iterator<Owner2, I2, R2>& other) const
         {
-            if (_owner == other._owner and _pos == other._pos) {
+            if (_owner == other._owner && _pos == other._pos) {
                 return true;
             }
             else {
                 // All iterators at the end compare equal.
-                return atEnd() and other.atEnd();
+                return atEnd() && other.atEnd();
             }
         }
 
@@ -271,7 +285,7 @@ private:
 
         bool atEnd() const {
             // We consider an iterator with no owner to be at the end.
-            return not _owner or _pos == _owner->_ConstData()->end();
+            return !_owner || _pos == _owner->_ConstData()->end();
         }
 
     private:
@@ -417,7 +431,7 @@ public:
 
     void erase(iterator pos)
     {
-        if (_Validate() and _ValidateErase(pos->first)) {
+        if (_Validate() && _ValidateErase(pos->first)) {
             _Erase(pos->first);
         }
     }
@@ -552,10 +566,11 @@ public:
 
     reference operator[](const key_type& key)
     {
-        inner_iterator result =
-            _Insert(value_type(key, mapped_type())).first.base();
-
-        return reference(this, _Data(), result);
+        auto iter = _Insert(value_type(key, mapped_type())).first;
+        bool failed = iter == iterator();
+        return reference(failed ? nullptr : this,
+                         failed ? nullptr : _Data(),
+                         iter.base());
     }
 
     bool operator==(const Type& other) const
@@ -576,47 +591,47 @@ public:
     template <class U, class UVP>
     bool operator==(const SdfMapEditProxy<U, UVP>& other) const
     {
-        return _Validate() and other._Validate() ?
+        return _Validate() && other._Validate() ?
                     _CompareEqual(*other._ConstData()) : false;
     }
 
     template <class U, class UVP>
     bool operator!=(const SdfMapEditProxy<U, UVP>& other) const
     {
-        return not (*this == other);
+        return !(*this == other);
     }
 
     template <class U, class UVP>
     bool operator<(const SdfMapEditProxy<U, UVP>& other) const
     {
-        return _Validate() and other._Validate() ?
+        return _Validate() && other._Validate() ?
                     _Compare(*other._ConstData()) < 0 : false;
     }
 
     template <class U, class UVP>
     bool operator<=(const SdfMapEditProxy<U, UVP>& other) const
     {
-        return _Validate() and other._Validate() ?
+        return _Validate() && other._Validate() ?
                     _Compare(*other._ConstData()) <= 0 : false;
     }
 
     template <class U, class UVP>
     bool operator>(const SdfMapEditProxy<U, UVP>& other) const
     {
-        return not (*this <= other);
+        return !(*this <= other);
     }
 
     template <class U, class UVP>
     bool operator>=(const SdfMapEditProxy<U, UVP>& other) const
     {
-        return not (*this < other);
+        return !(*this < other);
     }
 
     /// Returns true if the value is expired. Note this a default-constructed
     /// MapEditProxy is considered to be invalid but *not* expired.
     bool IsExpired() const
     {
-        return _editor and _editor->IsExpired();
+        return _editor && _editor->IsExpired();
     }
 
 #if !defined(doxygen)
@@ -627,19 +642,19 @@ public:
     /// \c false otherwise.
     operator UnspecifiedBoolType() const
     {
-        return _ConstData() and not IsExpired() ? &This::_editor : NULL;
+        return _ConstData() && !IsExpired() ? &This::_editor : NULL;
     }
     /// Returns \c false in a boolean context if the value is valid,
     /// \c true otherwise.
     bool operator!() const
     {
-        return not _ConstData() or IsExpired();
+        return !_ConstData() || IsExpired();
     }
 
 private:
     bool _Validate()
     {
-        if (_ConstData() and not IsExpired()) {
+        if (_ConstData() && !IsExpired()) {
             return true;
         }
         else {
@@ -650,7 +665,7 @@ private:
 
     bool _Validate() const
     {
-        if (_ConstData() and not IsExpired()) {
+        if (_ConstData() && !IsExpired()) {
             return true;
         }
         else {
@@ -738,10 +753,7 @@ private:
     mapped_type _Get(const Type* data, const inner_iterator& i)
     {
         if (_Validate()) {
-            if (i == inner_iterator()) {
-                TF_CODING_ERROR("Accessing an invalid map proxy value");
-            }
-            else if (data == _ConstData()) {
+            if (data == _ConstData()) {
                 return i->second;
             }
             else {
@@ -773,7 +785,7 @@ private:
             TF_FOR_ALL(it, other) {
                 const value_type canonicalValue = 
                     ValuePolicy::CanonicalizePair(_Owner(), *it);
-                if (not canonicalOther.insert(canonicalValue).second) {
+                if (!canonicalOther.insert(canonicalValue).second) {
                     TF_CODING_ERROR("Can't copy to %s: Duplicate key '%s' "
                                     "exists in map.",
                                     _Location().c_str(),
@@ -791,7 +803,7 @@ private:
     bool _ValidateCopy(const Type& other)
     {
         SdfSpecHandle owner = _Owner();
-        if (owner and not owner->PermissionToEdit()) {
+        if (owner && !owner->PermissionToEdit()) {
             TF_CODING_ERROR("Can't copy to %s: Permission denied.",
                             _Location().c_str());
             return false;
@@ -802,7 +814,7 @@ private:
         }
 
         TF_FOR_ALL(it, other) {
-            if (not _ValidateInsert(*it)) {
+            if (!_ValidateInsert(*it)) {
                 return false;
             }
         }
@@ -814,15 +826,10 @@ private:
     void _Set(const Type* data, const inner_iterator& i, const U& value)
     {
         if (_Validate()) {
-            if (i == inner_iterator()) {
-                TF_CODING_ERROR("Assigning to invalid map proxy value");
-            }
-            else {
-                const mapped_type& x =
-                    ValuePolicy::CanonicalizeValue(_Owner(), value);
-                if (_ValidateSet(i->first, x)) {
-                    _editor->Set(i->first, x);
-                }
+            const mapped_type& x =
+                ValuePolicy::CanonicalizeValue(_Owner(), value);
+            if (_ValidateSet(i->first, x)) {
+                _editor->Set(i->first, x);
             }
         }
     }
@@ -830,7 +837,7 @@ private:
     bool _ValidateSet(const key_type& key, const mapped_type& value)
     {
         SdfSpecHandle owner = _Owner();
-        if (owner and not owner->PermissionToEdit()) {
+        if (owner && !owner->PermissionToEdit()) {
             TF_CODING_ERROR("Can't set value in %s: Permission denied.",
                             _Location().c_str());
             return false;
@@ -868,7 +875,7 @@ private:
     bool _ValidateInsert(const value_type& value)
     {
         SdfSpecHandle owner = _Owner();
-        if (owner and not owner->PermissionToEdit()) {
+        if (owner && !owner->PermissionToEdit()) {
             TF_CODING_ERROR("Can't insert value in %s: Permission denied.",
                             _Location().c_str());
             return false;
@@ -899,7 +906,7 @@ private:
 
     void _Erase(const key_type& key)
     {
-        if (_Validate() and _ValidateErase(key)) {
+        if (_Validate() && _ValidateErase(key)) {
             _editor->Erase(key);
         }
     }
@@ -907,7 +914,7 @@ private:
     bool _ValidateErase(const key_type& key)
     {
         SdfSpecHandle owner = _Owner();
-        if (owner and not owner->PermissionToEdit()) {
+        if (owner && !owner->PermissionToEdit()) {
             TF_CODING_ERROR("Can't erase value from %s: Permission denied.",
                             _Location().c_str());
             return false;
@@ -926,9 +933,11 @@ private:
 template <class T, class _ValuePolicy>
 struct Vt_DefaultValueFactory<SdfMapEditProxy<T, _ValuePolicy> > {
     static Vt_DefaultValueHolder Invoke() {
-        TF_AXIOM(false and "Failed VtValue::Get<SdfMapEditProxy> not allowed");
+        TF_AXIOM(false && "Failed VtValue::Get<SdfMapEditProxy> not allowed");
         return Vt_DefaultValueHolder::Create((void*)0);
     }
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_MAPEDITPROXY_H

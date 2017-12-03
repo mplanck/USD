@@ -22,12 +22,11 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/usd/usdGeom/imageable.h"
-
 #include "pxr/usd/usd/schemaBase.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/usd/sdf/primSpec.h"
 
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -38,6 +37,10 @@
 #include <string>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 #define WRAP_CUSTOM                                                     \
     template <class Cls> static void _CustomWrapCode(Cls &_class)
@@ -59,6 +62,8 @@ _CreatePurposeAttr(UsdGeomImageable &self,
     return self.CreatePurposeAttr(
         UsdPythonToSdfType(defaultVal, SdfValueTypeNames->Token), writeSparsely);
 }
+
+} // anonymous namespace
 
 void wrapUsdGeomImageable()
 {
@@ -103,6 +108,11 @@ void wrapUsdGeomImageable()
              (arg("defaultValue")=object(),
               arg("writeSparsely")=false))
 
+        
+        .def("GetProxyPrimRel",
+             &This::GetProxyPrimRel)
+        .def("CreateProxyPrimRel",
+             &This::CreateProxyPrimRel)
     ;
 
     _CustomWrapCode(cls);
@@ -120,14 +130,37 @@ void wrapUsdGeomImageable()
 // }
 //
 // Of course any other ancillary or support code may be provided.
+// 
+// Just remember to wrap code in the appropriate delimiters:
+// 'namespace {', '}'.
+//
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
+
+#include "pxr/base/tf/pyObjWrapper.h"
+
+namespace {
+
+static TfPyObjWrapper
+_ComputeProxyPrim(UsdGeomImageable const &self)
+{
+    UsdPrim  renderPrim, proxyPrim;
+    
+    if (self){
+        proxyPrim = self.ComputeProxyPrim(&renderPrim);
+        if (proxyPrim){
+            return TfPyObjWrapper(boost::python::make_tuple(proxyPrim, 
+                                                            renderPrim));
+        }
+    }
+    return TfPyObjWrapper();
+}
 
 WRAP_CUSTOM {
     _class
         .def("CreatePrimvar", &UsdGeomImageable::CreatePrimvar,
              (arg("attrName"), arg("typeName"), arg("interpolation")=TfToken(),
-              arg("elementSize")=-1, arg("custom")=false))
+              arg("elementSize")=-1))
         .def("GetPrimvar", &UsdGeomImageable::GetPrimvar, arg("name"))
         .def("GetPrimvars", &UsdGeomImageable::GetPrimvars,
              return_value_policy<TfPySequenceToList>())
@@ -141,6 +174,18 @@ WRAP_CUSTOM {
         .def("ComputeVisibility", &UsdGeomImageable::ComputeVisibility,
              arg("time")=UsdTimeCode::Default())
         .def("ComputePurpose", &UsdGeomImageable::ComputePurpose)
+        .def("ComputeProxyPrim", &_ComputeProxyPrim,
+            "Returns None if neither this prim nor any of its ancestors "
+            "has a valid renderProxy prim.  Otherwise, returns a tuple of "
+            "(proxyPrim, renderPrimWithAuthoredProxyPrimRel)")
+        .def("SetProxyPrim", 
+             (bool (UsdGeomImageable::*)(const UsdPrim &) const)
+             &UsdGeomImageable::SetProxyPrim, 
+             arg("proxy"))
+        .def("SetProxyPrim", 
+             (bool (UsdGeomImageable::*)(const UsdSchemaBase &) const)
+             &UsdGeomImageable::SetProxyPrim, 
+             arg("proxy"))
         .def("MakeVisible", &UsdGeomImageable::MakeVisible, 
             arg("time")=UsdTimeCode::Default())
         .def("MakeInvisible", &UsdGeomImageable::MakeInvisible, 
@@ -163,3 +208,5 @@ WRAP_CUSTOM {
 
         ;
 }
+
+} // anonymous namespace 

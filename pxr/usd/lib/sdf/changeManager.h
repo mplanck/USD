@@ -21,28 +21,34 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/changeManager.h
-
 #ifndef SDF_CHANGEMANAGER_H
 #define SDF_CHANGEMANAGER_H
 
+/// \file sdf/changeManager.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/changeList.h"
 #include "pxr/usd/sdf/declareHandles.h"
+#include "pxr/usd/sdf/spec.h"
 #include "pxr/base/tf/singleton.h"
+
 #include <boost/noncopyable.hpp>
 #include <boost/scoped_ptr.hpp>
 #include <tbb/enumerable_thread_specific.h>
 #include <string>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 SDF_DECLARE_HANDLES(SdfLayer);
 
 class SdfSpec;
 
 /// \class Sdf_ChangeManager
-/// \brief Pathway for invalidation and change notification emitted by Sdf.
 ///
-/// Since Sdf is the base represntation in our system, and doesn't have
+/// Pathway for invalidation and change notification emitted by Sdf.
+///
+/// Since Sdf is the base representation in our system, and doesn't have
 /// many derived computations, this primarily just queues up invalidation
 /// notifications directly.
 ///
@@ -50,6 +56,7 @@ class SdfSpec;
 ///
 class Sdf_ChangeManager : boost::noncopyable {
 public:
+    SDF_API
     static Sdf_ChangeManager& Get() {
         return TfSingleton<Sdf_ChangeManager>::GetInstance();
     }
@@ -59,6 +66,7 @@ public:
     void DidReloadLayerContent(const SdfLayerHandle &layer);
     void DidChangeLayerIdentifier(const SdfLayerHandle &layer,
                                   const std::string &oldIdentifier);
+    void DidChangeLayerResolvedPath(const SdfLayerHandle &layer);
     void DidChangeField(const SdfLayerHandle &layer,
                         const SdfPath & path, const TfToken &field,
                         const VtValue & oldValue, const VtValue & newValue );
@@ -76,7 +84,9 @@ public:
 
     // Open/close change blocks. SdfChangeBlock provides stack-based management
     // of change blocks and should be preferred over this API.
+    SDF_API
     void OpenChangeBlock();
+    SDF_API
     void CloseChangeBlock();
 
 private:
@@ -102,4 +112,8 @@ private:
     friend class TfSingleton<Sdf_ChangeManager>;
 };
 
-#endif
+SDF_API_TEMPLATE_CLASS(TfSingleton<Sdf_ChangeManager>);
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_CHANGEMANAGER_H

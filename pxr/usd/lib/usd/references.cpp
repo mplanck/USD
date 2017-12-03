@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/references.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -28,70 +30,72 @@
 #include "pxr/usd/sdf/changeBlock.h"
 #include "pxr/usd/sdf/layer.h"
 #include "pxr/usd/sdf/primSpec.h"
-#include "pxr/usd/sdf/schema.h"
 
-bool
-_ValidateNoSubRootReferences(const SdfReference &ref)
-{
-    if (not ref.GetPrimPath().IsEmpty() and 
-        not ref.GetPrimPath().IsRootPrimPath()) {
-        TF_CODING_ERROR("Cannot make a reference to a non-root prim: "
-                        "@%s@<%s>",
-                        ref.GetAssetPath().c_str(), ref.GetPrimPath().GetText());
-        return false;
-    }
-    return true;
-}
+PXR_NAMESPACE_OPEN_SCOPE
 
 // ------------------------------------------------------------------------- //
 // UsdReferences
 // ------------------------------------------------------------------------- //
 bool
-UsdReferences::Add(const SdfReference& ref)
+UsdReferences::AddReference(const SdfReference& ref, UsdListPosition position)
 {
-    if (not _ValidateNoSubRootReferences(ref))
-        return false;
-    
     SdfChangeBlock block;
-    TfErrorMark mark;
     bool success = false;
-    
-    if (SdfPrimSpecHandle spec = _CreatePrimSpecForEditing()) {
-        SdfReferencesProxy refs = spec->GetReferenceList();
-        refs.Add(ref);
-        success = mark.IsClean();
+    {
+        TfErrorMark mark;
+        if (SdfPrimSpecHandle spec = _CreatePrimSpecForEditing()) {
+            SdfReferencesProxy refs = spec->GetReferenceList();
+            switch (position) {
+            case UsdListPositionFront:
+                refs.Prepend(ref);
+                break;
+            case UsdListPositionBack:
+                refs.Append(ref);
+                break;
+            case UsdListPositionTempDefault:
+                if (UsdAuthorOldStyleAdd()) {
+                    refs.Add(ref);
+                } else {
+                    refs.Prepend(ref);
+                }
+                break;
+            }
+            // mark *should* contain only errors from adding the reference, NOT
+            // any recomposition errors, because the SdfChangeBlock handily
+            // defers composition till after we leave this scope.
+            success = mark.IsClean();
+        }
     }
-    // mark *should* contain only errors from adding the reference, NOT
-    // any recomposition errors, because the SdfChangeBlock handily defers
-    // composition till after we leave this scope.
-    mark.Clear();
     return success;
 }
 
 bool
-UsdReferences::Add(const std::string &assetPath,
-                   const SdfPath &primPath,
-                   const SdfLayerOffset &layerOffset)
+UsdReferences::AddReference(const std::string &assetPath,
+                               const SdfPath &primPath,
+                               const SdfLayerOffset &layerOffset,
+                               UsdListPosition position)
 {
-    return Add(SdfReference(assetPath, primPath, layerOffset));
+    return AddReference(SdfReference(assetPath, primPath, layerOffset), position);
 }
 
 bool
-UsdReferences::Add(const std::string &assetPath,
-                   const SdfLayerOffset &layerOffset)
+UsdReferences::AddReference(const std::string &assetPath,
+                            const SdfLayerOffset &layerOffset,
+                            UsdListPosition position)
 {
-    return Add(assetPath, SdfPath(), layerOffset);
+    return AddReference(assetPath, SdfPath(), layerOffset, position);
 }
 
 bool 
-UsdReferences::AddInternal(const SdfPath &primPath,
-                           const SdfLayerOffset &layerOffset)
+UsdReferences::AddInternalReference(const SdfPath &primPath,
+                                    const SdfLayerOffset &layerOffset,
+                                    UsdListPosition position)
 {
-    return Add(std::string(), primPath, layerOffset);
+    return AddReference(std::string(), primPath, layerOffset, position);
 }
 
 bool
-UsdReferences::Remove(const SdfReference& ref)
+UsdReferences::RemoveReference(const SdfReference& ref)
 {
     SdfChangeBlock block;
     TfErrorMark mark;
@@ -107,7 +111,7 @@ UsdReferences::Remove(const SdfReference& ref)
 }
 
 bool
-UsdReferences::Clear()
+UsdReferences::ClearReferences()
 {
     SdfChangeBlock block;
     TfErrorMark mark;
@@ -115,14 +119,14 @@ UsdReferences::Clear()
 
     if (SdfPrimSpecHandle spec = _CreatePrimSpecForEditing()) {
         SdfReferencesProxy refs = spec->GetReferenceList();
-        success = refs.ClearEdits() and mark.IsClean();
+        success = refs.ClearEdits() && mark.IsClean();
     }
     mark.Clear();
     return success;
 }
 
 bool 
-UsdReferences::SetItems(const SdfReferenceVector& items)
+UsdReferences::SetReferences(const SdfReferenceVector& items)
 {
     SdfChangeBlock block;
     TfErrorMark mark;
@@ -132,7 +136,7 @@ UsdReferences::SetItems(const SdfReferenceVector& items)
     // call, so instead, just set the field directly.
     SdfReferenceListOp refs;
     refs.SetExplicitItems(items);
-    success = GetPrim().SetMetadata(SdfFieldKeys->References, refs) and 
+    success = GetPrim().SetMetadata(SdfFieldKeys->References, refs) && 
         mark.IsClean();
 
     mark.Clear();
@@ -147,13 +151,13 @@ UsdReferences::SetItems(const SdfReferenceVector& items)
 SdfPrimSpecHandle
 UsdReferences::_CreatePrimSpecForEditing()
 {
-    if (not _prim) {
+    if (!_prim) {
         TF_CODING_ERROR("Invalid prim.");
         return SdfPrimSpecHandle();
     }
 
-    return _prim.GetStage()->_CreatePrimSpecForEditing(_prim.GetPath());
+    return _prim.GetStage()->_CreatePrimSpecForEditing(_prim);
 }
 
-
+PXR_NAMESPACE_CLOSE_SCOPE
 

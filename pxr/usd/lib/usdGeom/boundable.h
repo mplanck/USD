@@ -24,6 +24,10 @@
 #ifndef USDGEOM_GENERATED_BOUNDABLE_H
 #define USDGEOM_GENERATED_BOUNDABLE_H
 
+/// \file usdGeom/boundable.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdGeom/api.h"
 #include "pxr/usd/usdGeom/xformable.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -38,13 +42,17 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // BOUNDABLE                                                                  //
 // -------------------------------------------------------------------------- //
 
-/// \brief Boundable introduces the ability for a prim to persistently
+/// \class UsdGeomBoundable
+///
+/// Boundable introduces the ability for a prim to persistently
 /// cache a rectilinear, local-space, extent.
 /// 
 /// \section UsdGeom_Boundable_Extent Why Extent and not Bounds ?
@@ -98,15 +106,17 @@ public:
     }
 
     /// Destructor.
+    USDGEOM_API
     virtual ~UsdGeomBoundable();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDGEOM_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdGeomBoundable holding the prim adhering to this
+    /// Return a UsdGeomBoundable holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -115,6 +125,7 @@ public:
     /// UsdGeomBoundable(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDGEOM_API
     static UsdGeomBoundable
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
@@ -122,11 +133,13 @@ public:
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDGEOM_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDGEOM_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -149,6 +162,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->Float3Array
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetExtentAttr() const;
 
     /// See GetExtentAttr(), and also 
@@ -156,6 +170,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateExtentAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -163,10 +178,35 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
+    
+    /// Compute the extent for the Boundable prim \p boundable at time
+    /// \p time.  If successful, populates \p extent with the result and
+    /// returns \c true, otherwise returns \c false.
+    ///
+    /// The extent computation is based on the concrete type of the prim
+    /// represented by \p boundable.  Plugins that provide a Boundable
+    /// prim type may implement and register an extent computation for that
+    /// type using #UsdGeomRegisterComputeExtentFunction.
+    /// ComputeExtentFromPlugins will use this function to compute extents
+    /// for all prims of that type.  If no function has been registered for
+    /// a prim type, but a function has been registered for one of its 
+    /// base types, that function will be used instead.
+    ///
+    /// \note This function may load plugins in order to access the extent
+    /// computation for a prim type.
+    USDGEOM_API
+    static bool ComputeExtentFromPlugins(const UsdGeomBoundable &boundable,
+                                         const UsdTimeCode &time,
+                                         VtVec3fArray *extent);
+
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/inherits.h"
 
 #include <boost/python/class.hpp>
@@ -30,15 +31,18 @@ using std::string;
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 void wrapUsdInherits()
 {
     class_<UsdInherits>("Inherits", no_init)
-        .def("Add", &UsdInherits::Add, arg("primPath"))
-        .def("Remove", &UsdInherits::Remove, arg("primPath"))
-        .def("Clear", &UsdInherits::Clear)
-        .def("SetItems", &UsdInherits::SetItems)
+        .def("AddInherit", &UsdInherits::AddInherit,
+             (arg("primPath"),
+              arg("position")=UsdListPositionTempDefault))
+        .def("RemoveInherit", &UsdInherits::RemoveInherit, arg("primPath"))
+        .def("ClearInherits", &UsdInherits::ClearInherits)
+        .def("SetInherits", &UsdInherits::SetInherits)
         .def("GetPrim", (UsdPrim (UsdInherits::*)()) &UsdInherits::GetPrim)
         .def(!self)
         ;
 }
-

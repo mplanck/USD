@@ -21,15 +21,22 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/base/arch/library.h"
 #include "pxr/base/tf/dl.h"
 #include "pxr/base/tf/debugCodes.h"
 #include "pxr/base/tf/registryManager.h"
+
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
 #include "pxr/base/tf/scriptModuleLoader.h"
+#endif // PXR_PYTHON_SUPPORT_ENABLED
+
 #include "pxr/base/tf/getenv.h"
 #include <string>
 #include <stdlib.h>
 
 using std::string;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 static bool _opening = false,
             _closing = false;
@@ -37,13 +44,13 @@ static bool _opening = false,
 bool
 Tf_DlOpenIsActive()
 {
-    return ::_opening;
+    return _opening;
 }
 
 bool
 Tf_DlCloseIsActive()
 {
-    return ::_closing;
+    return _closing;
 }
 
 void*
@@ -56,29 +63,22 @@ TfDlopen(
     TF_DEBUG(TF_DLOPEN).Msg("TfDlopen: [opening] '%s' (flag=%x)...\n",
                             filename.c_str(), flag);
 
-    // Clear any existing error.
-    (void*)dlerror();
-
-    // try to dlopen the dynamic library
-    bool state = ::_opening;
-    ::_opening = true;
-    void* handle = dlopen(filename.c_str(), flag);
-    ::_opening = state;
+    // Try to open the dynamic library
+    bool state = _opening;
+    _opening = true;
+    void* handle = ArchLibraryOpen(filename.c_str(), flag);
+    _opening = state;
 
     TF_DEBUG(TF_DLOPEN).Msg("TfDlopen: [opened] '%s' (handle=%p)\n",
                             filename.c_str(), handle);
 
-    const char *err = dlerror();
-    if (err) {
-        if (error) {
-            *error = err;
-        }
-        if (strstr(err, "unresolved")) {
-            TF_WARN("While attempting to dlopen() %s: %s\n",
-                    filename.c_str(), err);
-        }
+    std::string err = ArchLibraryError();
+    if (!err.empty()) {
         TF_DEBUG(TF_DLOPEN).Msg("TfDlopen: [error on opening] '%s': %s\n",
-                                filename.c_str(), err);
+                                filename.c_str(), err.c_str());
+        if (error) {
+            *error = std::move(err);
+        }
     }
     else {
         if (error) {
@@ -86,10 +86,13 @@ TfDlopen(
         }
     }
 
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
     // If we successfully opened the shared library, load any script bindings if
     // scripting is initialized.
-    if (handle and loadScriptBindings)
+    if (handle && loadScriptBindings) {
         TfScriptModuleLoader::GetInstance().LoadModules();
+    }
+#endif // PXR_PYTHON_SUPPORT_ENABLED
     
     return handle;
 }
@@ -97,15 +100,16 @@ TfDlopen(
 int
 TfDlclose(void* handle)
 {
-    bool state = ::_closing;
-    ::_closing = true;
+    bool state = _closing;
+    _closing = true;
 
     TF_DEBUG(TF_DLCLOSE).Msg("TfDlclose: handle = %p\n", handle);
 
-    int status = dlclose(handle);
-    ::_closing = state;
+    int status = ArchLibraryClose(handle);
+
+    _closing = state;
 
     return status;
 }
 
-
+PXR_NAMESPACE_CLOSE_SCOPE

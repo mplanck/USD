@@ -28,12 +28,17 @@
 #ifndef GF_{{ UPPER(VEC)[2:] }}_H
 #define GF_{{ UPPER(VEC)[2:] }}_H
 
+/// \file gf/vec{{ SUFFIX }}.h
+/// \ingroup group_gf_LinearAlgebra
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/diagnostic.h"
+#include "pxr/base/gf/api.h"
 #include "pxr/base/gf/limits.h"
 #include "pxr/base/gf/traits.h"
 {% if IS_FLOATING_POINT(SCL) -%}
 #include "pxr/base/gf/math.h"
-{% if SCL == 'half' -%}
+{% if SCL == 'GfHalf' -%}
 #include "pxr/base/gf/half.h"
 {% endif %}
 {% endif %}
@@ -47,24 +52,21 @@
 
 #include <iosfwd>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+class {{ VEC }};
+
 template <>
 struct GfIsGfVec<class {{ VEC }}> { static const bool value = true; };
 
-/*!
- * \file vec{{ SUFFIX }}.h
- * \ingroup group_gf_LinearAlgebra
- */
-
-/*!
- * \class {{ VEC }} vec{{ SUFFIX }}.h "pxr/base/gf/vec{{ SUFFIX }}.h"
- * \ingroup group_gf_LinearAlgebra
- * \brief Basic type for a vector of {{ DIM }} {{ SCL }} components.
- *
- * Represents a vector of {{ DIM }} components of type \c {{ SCL }}.
- * It is intended to be fast and simple.
- *
- */
-
+/// \class {{ VEC }}
+/// \ingroup group_gf_LinearAlgebra
+///
+/// Basic type for a vector of {{ DIM }} {{ SCL }} components.
+///
+/// Represents a vector of {{ DIM }} components of type \c {{ SCL }}.
+/// It is intended to be fast and simple.
+///
 class {{ VEC }}
 {
 public:
@@ -75,8 +77,8 @@ public:
     /// Default constructor does no initialization.
     {{ VEC }}() {}
 
-
-    // Copy constructor.  XXX: Remove this, use compiler-generated.
+    // Copy constructor.
+    // TODO Remove this, use compiler-generated.
     {{ VEC }}(const {{ VEC }} &other) {
         *this = other;
     }
@@ -90,7 +92,7 @@ public:
     {{ VEC }}({{ LIST(SCL + " s%(i)s") }}) {
         Set({{ LIST("s%(i)s") }});
     }
-    
+
     /// Construct with pointer to values.
     template <class Scl>
     explicit {{ VEC }}(Scl const *p) { Set(p); }
@@ -110,7 +112,7 @@ public:
         return result;
     }
 {% endfor %}
-    
+
     /// Create a unit vector along the i-th axis, zero-based.  Return the zero
     /// vector if \p i is greater than or equal to {{ DIM }}.
     static {{ VEC }} Axis(size_t i) {
@@ -119,7 +121,7 @@ public:
             result[i] = 1;
         return result;
     }
-    
+
     /// Set all elements with passed arguments.
     {{ VEC }} &Set({{ LIST(SCL + " s%(i)s") }}) {
         {{ LIST("_data[%(i)s] = s%(i)s;", sep='\n        ') }}
@@ -150,15 +152,16 @@ public:
     /// Equality comparison.
     bool operator==({{ VEC }} const &other) const {
         return {{ LIST("_data[%(i)s] == other[%(i)s]",
-                       sep=' and\n               ') }};
+                       sep=' &&\n               ') }};
     }
     bool operator!=({{ VEC }} const &other) const {
         return !(*this == other);
     }
 
-    // XXX: Add inequality for other vec types...
+    // TODO Add inequality for other vec types...
     {% for S in SCALARS if S != SCL -%}
     /// Equality comparison.
+    GF_API
     bool operator==(class {{ VECNAME(DIM, S) }} const &other) const;
     {% endfor %}
 
@@ -188,10 +191,10 @@ public:
     /// Multiplication by scalar.
     {{ VEC }} &operator*=(double s) {
         {{ LIST("_data[%(i)s] *= s;", sep='\n        ') }}
-	return *this;
+        return *this;
     }
     {{ VEC }} operator*(double s) const {
-	return {{ VEC }}(*this) *= s;
+        return {{ VEC }}(*this) *= s;
     }
     friend {{ VEC }} operator*(double s, {{ VEC }} const &v) {
         return v * s;
@@ -199,15 +202,15 @@ public:
 
     {% if IS_FLOATING_POINT(SCL) %}
     /// Division by scalar.
-    // XXX: should divide by the scalar type.
+    // TODO should divide by the scalar type.
     {{ VEC }} &operator/=(double s) {
-        // XXX: This should not multiply by 1/s, it should do the division.
+        // TODO This should not multiply by 1/s, it should do the division.
         // Doing the division is more numerically stable when s is close to
         // zero.
         return *this *= (1.0 / s);
     }
     {{ VEC }} operator/(double s) const {
-	return *this * (1.0 / s);
+        return *this * (1.0 / s);
     }
     {% else %}
     /// Division by scalar.
@@ -216,7 +219,7 @@ public:
         return *this;
     }
     {{ VEC }} operator/({{ SCL }} s) const {
-	return {{ VEC }}(*this) /= s;
+        return {{ VEC }}(*this) /= s;
     }
     {% endif %}
 
@@ -225,7 +228,7 @@ public:
         return {{ LIST("_data[%(i)s] * v[%(i)s]", sep=" + ") }};
     }
 
-    /// Returns the projection of \p this onto \p v. That is: 
+    /// Returns the projection of \p this onto \p v. That is:
     /// \code
     /// v * (*this * v)
     /// \endcode
@@ -233,12 +236,13 @@ public:
         return v * (*this * v);
     }
 
-    /// Returns the orthogonal complement of \p this->GetProjection(b). That is:
+    /// Returns the orthogonal complement of \p this->GetProjection(b).
+    /// That is:
     /// \code
     ///  *this - this->GetProjection(b)
     /// \endcode
     {{ VEC }} GetComplement({{ VEC }} const &b) const {
-	return *this - this->GetProjection(b);
+        return *this - this->GetProjection(b);
     }
 
     /// Squared length.
@@ -249,7 +253,7 @@ public:
 {% if IS_FLOATING_POINT(SCL) %}
     /// Length
     {{ SCL }} GetLength() const {
-        // XXX: should use GfSqrt.
+        // TODO should use GfSqrt.
         return sqrt(GetLengthSq());
     }
 
@@ -262,7 +266,7 @@ public:
     /// By tickling the code, it no longer tries to write into
     /// an illegal memory address (in the code section of memory).
     {{ SCL }} Normalize({{ SCL }} eps = {{ EPS }}) {
-        // XXX: this seems suspect...  suggest dividing by length so long as
+        // TODO this seems suspect...  suggest dividing by length so long as
         // length is not zero.
         {{ SCL }} length = GetLength();
         *this /= (length > eps) ? length : eps;
@@ -276,26 +280,28 @@ public:
     }
 
 {% if DIM == 3 %}
-    /// Orthogonalize and optionally normalize a set of basis vectors.
-    /// This uses an iterative method that is very stable even when the vectors
-    /// are far from orthogonal (close to colinear).  The number of iterations
-    /// and thus the computation time does increase as the vectors become
-    /// close to colinear, however.
-    /// Returns a bool specifying whether the solution converged after
-    /// a number of iterations.  If it did not converge, the returned vectors
-    /// will be as close as possible to orthogonal within the iteration limit.
-    /// Colinear vectors will be unaltered, and the method will return false.
+    /// Orthogonalize and optionally normalize a set of basis vectors. This
+    /// uses an iterative method that is very stable even when the vectors are
+    /// far from orthogonal (close to colinear).  The number of iterations and
+    /// thus the computation time does increase as the vectors become close to
+    /// colinear, however. Returns a bool specifying whether the solution
+    /// converged after a number of iterations.  If it did not converge, the
+    /// returned vectors will be as close as possible to orthogonal within the
+    /// iteration limit. Colinear vectors will be unaltered, and the method
+    /// will return false.
+    GF_API
     static bool OrthogonalizeBasis(
         {{ VEC }} *tx, {{ VEC }} *ty, {{ VEC }} *tz,
         const bool normalize,
         double eps = GF_MIN_ORTHO_TOLERANCE);
 
-    /// Sets \c v1 and \c v2 to unit vectors such that v1, v2 and *this
-    /// are mutually orthogonal.  If the length L of *this is smaller than
-    /// \c eps, then v1 and v2 will have magnitude L/eps.  As a result,
-    /// the function delivers a continuous result as *this shrinks in length.
+    /// Sets \c v1 and \c v2 to unit vectors such that v1, v2 and *this are
+    /// mutually orthogonal.  If the length L of *this is smaller than \c eps,
+    /// then v1 and v2 will have magnitude L/eps.  As a result, the function
+    /// delivers a continuous result as *this shrinks in length.
+    GF_API
     void BuildOrthonormalFrame({{ VEC }} *v1, {{ VEC }} *v2,
-			       {{ SCL }} eps = {{ EPS }}) const;
+                    {{ SCL }} eps = {{ EPS }}) const;
 
 {% endif %} {# DIM == 3 #}
 {% endif %} {# IS_FLOATING_POINT(SCL) #}
@@ -304,13 +310,26 @@ private:
     {{ SCL }} _data[{{ DIM }}];
 };
 
-/// Output a {{ VEC }}
+/// Output a {{ VEC }}.
 /// \ingroup group_gf_DebuggingOutput
-std::ostream& operator<<(std::ostream &, {{ VEC }} const &);
+GF_API std::ostream& operator<<(std::ostream &, {{ VEC }} const &);
 
 {% if IS_FLOATING_POINT(SCL) %}
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
 {% for S in SCALARS if S != SCL %}
-#include "pxr/base/gf/vec{{ DIM }}{{ S[0] }}.h"
+#include "pxr/base/gf/vec{{ DIM }}{{ SCALAR_SUFFIX(S) }}.h"
+{% endfor %}
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+{% for S in SCALARS if S != SCL %}
+inline
+{{ VEC }}::{{ VEC }}(class {{ VECNAME(DIM, S) }} const &other)
+{
+    {{ LIST("_data[%(i)s] = other[%(i)s];", sep='\n    ') }}
+}
 {% endfor %}
 {% endif %}
 
@@ -336,7 +355,6 @@ GfDot({{ VEC }} const &v1, {{ VEC }} const &v2) {
     return v1 * v2;
 }
 
-
 {% if IS_FLOATING_POINT(SCL) %}
 
 /// Returns the geometric length of \c v.
@@ -356,8 +374,8 @@ GfNormalize({{ VEC }} *v, {{ SCL }} eps = {{ EPS }})
 }
 
 /// Returns a normalized (unit-length) vector with the same direction as \p v.
-/// If the length of this vector is smaller than \p eps, the vector divided
-/// by \p eps is returned.
+/// If the length of this vector is smaller than \p eps, the vector divided by
+/// \p eps is returned.
 inline {{ VEC }}
 GfGetNormalized({{ VEC }} const &v, {{ SCL }} eps = {{ EPS }})
 {
@@ -395,11 +413,11 @@ GfIsClose({{ VEC }} const &v1, {{ VEC }} const &v2, double tolerance)
 
 {% if DIM == 3 %}
 
-bool
+GF_API bool
 GfOrthogonalizeBasis({{ VEC }} *tx, {{ VEC }} *ty, {{ VEC }} *tz,
                      bool normalize, double eps = GF_MIN_ORTHO_TOLERANCE);
 
-void
+GF_API void
 GfBuildOrthonormalFrame({{ VEC }} const &v0,
                         {{ VEC }}* v1,
                         {{ VEC }}* v2,
@@ -415,7 +433,8 @@ GfCross({{ VEC }} const &v1, {{ VEC }} const &v2)
         v1[0] * v2[1] - v1[1] * v2[0]);
 }
 
-/// Returns the cross product of \p v1 and \p v2. See also GfCross().
+/// Returns the cross product of \p v1 and \p v2. 
+/// \see GfCross()
 inline {{ VEC }}
 operator^({{ VEC }} const &v1, {{ VEC }} const &v2)
 {
@@ -423,11 +442,13 @@ operator^({{ VEC }} const &v1, {{ VEC }} const &v2)
 }
 
 /// Spherical linear interpolation in three dimensions.
-{{ VEC }}
+GF_API {{ VEC }}
 GfSlerp(double alpha, {{ VEC }} const &v0, {{ VEC }} const &v1);
 
 {% endif %} {# DIM == 3 #}
 
 {% endif %} {# IS_FLOATING_POINT(SCL) #}
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // GF_{{ UPPER(VEC)[2:] }}_H

@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include <boost/python/def.hpp>
 
 #include "pxr/usd/usdUtils/authoring.h"
@@ -31,8 +32,11 @@
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 void wrapAuthoring()
 {
     def("CopyLayerMetadata", UsdUtilsCopyLayerMetadata, 
-        (arg("source"), arg("destination"), arg("skipSublayers") = false ));
+        (arg("source"), arg("destination"), arg("skipSublayers") = false,
+         arg("bakeUnauthoredFallbacks") = false ));
 }

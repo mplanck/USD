@@ -21,9 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/site.h"
 #include "pxr/usd/pcp/layerStack.h"
+
 #include <ostream>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -40,7 +45,8 @@ PcpSite::PcpSite( const PcpLayerStackIdentifier & layerStackIdentifier_,
     // Do nothing
 }
 
-PcpSite::PcpSite( const PcpLayerStackPtr & layerStack, const SdfPath & path_ ) :
+PcpSite::PcpSite( const PcpLayerStackPtr & layerStack,
+                  const SdfPath & path_ ) :
     path(path_)
 {
     if (layerStack) {
@@ -67,14 +73,14 @@ bool
 PcpSite::operator==(const PcpSite &rhs) const
 {
     return layerStackIdentifier == rhs.layerStackIdentifier
-        and path == rhs.path;
+        && path == rhs.path;
 }
 
 bool
 PcpSite::operator<(const PcpSite &rhs) const
 {
-    return (layerStackIdentifier < rhs.layerStackIdentifier) or
-           (layerStackIdentifier == rhs.layerStackIdentifier and
+    return (layerStackIdentifier < rhs.layerStackIdentifier) ||
+           (layerStackIdentifier == rhs.layerStackIdentifier && 
             path < rhs.path);
 }
 
@@ -94,7 +100,7 @@ PcpLayerStackSite::PcpLayerStackSite()
     // Do nothing
 }
 
-PcpLayerStackSite::PcpLayerStackSite( const PcpLayerStackPtr & layerStack_,
+PcpLayerStackSite::PcpLayerStackSite( const PcpLayerStackRefPtr & layerStack_,
                                       const SdfPath & path_ ) :
     layerStack(layerStack_),
     path(path_)
@@ -105,14 +111,14 @@ PcpLayerStackSite::PcpLayerStackSite( const PcpLayerStackPtr & layerStack_,
 bool
 PcpLayerStackSite::operator==(const PcpLayerStackSite &rhs) const
 {
-    return layerStack == rhs.layerStack and path == rhs.path;
+    return layerStack == rhs.layerStack && path == rhs.path;
 }
 
 bool
 PcpLayerStackSite::operator<(const PcpLayerStackSite &rhs) const
 {
-    return (layerStack < rhs.layerStack) or
-           (layerStack == rhs.layerStack and path < rhs.path);
+    return (layerStack < rhs.layerStack) ||
+           (layerStack == rhs.layerStack && path < rhs.path);
 }
 
 size_t
@@ -137,3 +143,5 @@ operator<<(std::ostream& s, const PcpLayerStackSite& x)
 {
     return s << x.layerStack << "<" << x.path << ">";
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

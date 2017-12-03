@@ -21,12 +21,15 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/vt/value.h"
 
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/types.h"
 #include "pxr/base/vt/typeHeaders.h"
 #include "pxr/base/vt/valueFromPython.h"
+#include "pxr/base/vt/wrapArray.h"
 
 #include "pxr/base/arch/demangle.h"
 #include "pxr/base/arch/inttypes.h"
@@ -60,6 +63,15 @@ using namespace boost::python;
 using std::string;
 using std::map;
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+TF_REGISTRY_FUNCTION(VtValue)
+{
+    // Allow converting python sequences to VtArray for certain types.  Note
+    // that sequences of numeric types are handled in arrayNumpy.{cpp,h}.
+    VtRegisterValueCastsFromPythonSequencesToArray<std::string>();
+    VtRegisterValueCastsFromPythonSequencesToArray<TfToken>();
+}
 
 TfPyObjWrapper
 Vt_GetPythonObjectFromHeldValue(VtValue const &self)
@@ -67,6 +79,11 @@ Vt_GetPythonObjectFromHeldValue(VtValue const &self)
     return self._GetPythonObject();
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 // This is only for testing and hitting code coverage.
 static string _test_ValueTypeName(VtValue const &val) {
@@ -180,7 +197,7 @@ struct Vt_ValueFromPython {
             // Python long -> either c++ int or long or unsigned long or long
             // long or unsigned long long or fail, depending on range.
             long long val = PyLong_AsLongLong(obj_ptr);
-            if (not PyErr_Occurred()) {
+            if (!PyErr_Occurred()) {
                 if (std::numeric_limits<int>::min() <= val && 
                     val <= std::numeric_limits<int>::max()) {
                     new (storage) VtValue(boost::numeric_cast<int>(val));
@@ -196,7 +213,7 @@ struct Vt_ValueFromPython {
                 PyErr_Clear();
                 // Try as unsigned long long.
                 unsigned long long uval = PyLong_AsUnsignedLongLong(obj_ptr);
-                if (not PyErr_Occurred()) {
+                if (!PyErr_Occurred()) {
                     new (storage) VtValue(uval);
                     data->convertible = storage;
                     return;
@@ -211,7 +228,7 @@ struct Vt_ValueFromPython {
             data->convertible = storage;
             return;
         }
-        if (PyString_Check(obj_ptr) or PyUnicode_Check(obj_ptr)) {
+        if (PyString_Check(obj_ptr) || PyUnicode_Check(obj_ptr)) {
             // Py string or unicode -> std::string.
             new (storage) VtValue(std::string(extract<std::string>(obj_ptr)));
             data->convertible = storage;
@@ -221,7 +238,7 @@ struct Vt_ValueFromPython {
         // Attempt a registered conversion via the registry.
         VtValue v = Vt_ValueFromPythonRegistry::Invoke(obj_ptr);
 
-        if (not v.IsEmpty()) {
+        if (!v.IsEmpty()) {
             new (storage) VtValue(v);
             data->convertible = storage;
             return;
@@ -235,6 +252,10 @@ struct Vt_ValueFromPython {
     }
 };
 
+} // anonymous namespace 
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 // XXX: Disable rvalue conversion of TfType.  It causes a mysterious
 //      crash and we don't need any implicit conversions.
 template <>
@@ -242,6 +263,8 @@ VtValue Vt_ValueFromPythonRegistry::
 _Extractor::_RValueHolder<TfType>::Invoke(PyObject *obj) const {
     return VtValue();
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 void wrapValue()
 {
@@ -283,8 +306,8 @@ void wrapValue()
     def("UInt64", Vt_ValueWrapper::Create<uint64_t>, 
         TfStringPrintf(funcDocString, "UInt64","uint64_t","uint64_t").c_str());
 
-    def("Half", Vt_ValueWrapper::Create<half>, 
-        TfStringPrintf(funcDocString, "Half","half","half").c_str());
+    def("Half", Vt_ValueWrapper::Create<GfHalf>, 
+        TfStringPrintf(funcDocString, "Half","half","GfHalf").c_str());
     def("Float", Vt_ValueWrapper::Create<float>, 
         TfStringPrintf(funcDocString, "Float","float","float").c_str());
     def("Double", Vt_ValueWrapper::Create<double>, 
@@ -294,8 +317,8 @@ void wrapValue()
     // nobody's registered anything before us.
 
     if (Vt_ValueFromPythonRegistry::HasConversions()) {
-	TF_FATAL_ERROR("Vt was not the first library to register VtValue "
-		       "from-python conversions!");
+        TF_FATAL_ERROR("Vt was not the first library to register VtValue "
+                       "from-python conversions!");
     }
 
     // register conversion types in reverse order, because the extractor

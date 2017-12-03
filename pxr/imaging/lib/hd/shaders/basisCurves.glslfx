@@ -28,6 +28,7 @@
 --- #import $TOOLS/hd/shaders/basisCurves.glslfx
 
 #import $TOOLS/hd/shaders/instancing.glslfx
+#import $TOOLS/hd/shaders/terminals.glslfx
 
 --- --------------------------------------------------------------------------
 -- glsl BasisCurves.Vertex
@@ -380,13 +381,13 @@ in VertexData
     vec3 Neye;
 } inData;
 
-vec3 SimpleLighting(in vec3 Peye, in vec3 Neye, in vec3 color);
-vec3 getNormal(vec3 Peye, vec3 Neye);
-vec4 surfaceShader(vec4 Peye, vec3 Neye, vec4 color, vec4 patchCoord);
-
 void main(void)
 {
+#ifdef HD_HAS_color
     vec4 color = HdGet_color();
+#else
+    vec4 color = vec4(1);
+#endif
     color.rgb = ApplyColorOverrides(color).rgb;
 
     vec3 Peye = inData.Peye.xyz / inData.Peye.w;
@@ -400,7 +401,7 @@ void main(void)
 
     vec4 patchCoord = vec4(0);
     color.rgb = mix(color.rgb, 
-                    surfaceShader(vec4(Peye, 1), Neye, color, patchCoord).rgb,
+                    ShadingTerminal(vec4(Peye, 1), Neye, color, patchCoord).rgb,
                     GetLightingBlendAmount());
 
     if (ShouldDiscardByAlpha(color)) {
@@ -439,12 +440,13 @@ in VertexData
     vec4 Peye;
 } inData;
 
-vec3 SimpleLighting(in vec3 Peye, in vec3 Neye, in vec3 color);
-vec4 surfaceShader(vec4 Peye, vec3 Neye, vec4 color, vec4 patchCoord);
-
 void main(void)
 {
+#ifdef HD_HAS_color
     vec4 color = HdGet_color();
+#else
+    vec4 color = vec4(1);
+#endif
 
     vec3 Peye = inData.Peye.xyz / inData.Peye.w;
 
@@ -456,7 +458,7 @@ void main(void)
 
     vec4 patchCoord = vec4(0);
     color.rgb = mix(color.rgb,
-                    surfaceShader(vec4(Peye, 1), Neye, color, patchCoord).rgb,
+                    ShadingTerminal(vec4(Peye, 1), Neye, color, patchCoord).rgb,
                     GetLightingBlendAmount());
 
     if (ShouldDiscardByAlpha(color)) {

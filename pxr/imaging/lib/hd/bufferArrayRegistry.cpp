@@ -22,8 +22,9 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/imaging/hd/bufferArrayRegistry.h"
-
 #include "pxr/imaging/hd/bufferArray.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 
 HdBufferArrayRegistry::HdBufferArrayRegistry()
@@ -38,14 +39,14 @@ HdBufferArrayRangeSharedPtr HdBufferArrayRegistry::AllocateRange(
         HdBufferSpecVector const &bufferSpecs)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     // early out for empty source
-    if (not TF_VERIFY(not bufferSpecs.empty())) {
+    if (!TF_VERIFY(!bufferSpecs.empty())) {
         return HdBufferArrayRangeSharedPtr();
     }
 
-    if (not strategy) {
+    if (!strategy) {
         TF_CODING_ERROR("Aggregation strategy is set to null");
         return HdBufferArrayRangeSharedPtr();
     }
@@ -86,7 +87,7 @@ HdBufferArrayRangeSharedPtr HdBufferArrayRegistry::AllocateRange(
     do {
         HdBufferArraySharedPtr currentArray = *it;
 
-        if (not currentArray->TryAssignRange(range)) {
+        if (!currentArray->TryAssignRange(range)) {
             _HdBufferArraySharedPtrList::iterator prev = it;
             ++it;
 
@@ -101,7 +102,7 @@ HdBufferArrayRangeSharedPtr HdBufferArrayRegistry::AllocateRange(
                 ++it;
             }
         }        
-    } while (not range->IsAssigned());
+    } while (!range->IsAssigned());
 
     return range;
 }
@@ -116,7 +117,7 @@ HdBufferArrayRegistry::ReallocateAll(HdAggregationStrategy *strategy)
              bufferIt != e; ++bufferIt) {
 
             HdBufferArraySharedPtr const &bufferArray = *bufferIt;
-            if (not bufferArray->NeedsReallocation()) continue;
+            if (!bufferArray->NeedsReallocation()) continue;
 
             // in case of over aggregation, split the buffer
 
@@ -133,18 +134,27 @@ HdBufferArrayRegistry::ReallocateAll(HdAggregationStrategy *strategy)
                 HdBufferArrayRangeSharedPtr range =
                     bufferArray->GetRange(rangeIdx).lock();
 
-                if (not range) continue; // shouldn't exist
+                if (!range) continue; // shouldn't exist
 
                 size_t numElements = range->GetNumElements();
 
-                // numElements in each range should not exceed maxTotalElements
-                if (not TF_VERIFY(numElements < maxTotalElements))
-                    continue;
+                if (numElements > maxTotalElements) {
+                    // Issue a warning and reset number of elements in the BAR.
+                    TF_WARN("Number of elements in the buffer array range "
+                            "(0x%lx) is _larger_ than the maximum number of "
+                            "elements in the buffer array (0x%lx). 0x%lx bytes "
+                            "of data will be skipped.",
+                            numElements, maxTotalElements,
+                            numElements - maxTotalElements);
 
+                    range->Resize(maxTotalElements);
+                }
+                
                 // over aggregation check of non-uniform buffer
                 if (numTotalElements + numElements > maxTotalElements) {
                     // create new BufferArray with same specification
-                    HdBufferSpecVector bufferSpecs = bufferArray->GetBufferSpecs();
+                    HdBufferSpecVector bufferSpecs = 
+                        strategy->GetBufferSpecs(bufferArray);
                     HdBufferArraySharedPtr newBufferArray =
                         strategy->CreateBufferArray(bufferArray->GetRole(),
                                                     bufferSpecs);
@@ -165,7 +175,6 @@ HdBufferArrayRegistry::ReallocateAll(HdAggregationStrategy *strategy)
         }
     }
 }
-
 
 void
 HdBufferArrayRegistry::GarbageCollect()
@@ -193,44 +202,20 @@ HdBufferArrayRegistry::GarbageCollect()
     }
 }
 
-
 size_t
-HdBufferArrayRegistry::GetResourceAllocation(VtDictionary &result) const
+HdBufferArrayRegistry::GetResourceAllocation(HdAggregationStrategy *strategy,
+                                             VtDictionary &result) const
 {
     size_t gpuMemoryUsed = 0;
-    std::set<GLuint> idSet;
-
     TF_FOR_ALL (entryIt, _entries) {
         TF_FOR_ALL(bufferIt, entryIt->second.bufferArrays) {
-            idSet.clear();
-
-            TF_FOR_ALL(resIt, (*bufferIt)->GetResources()) {
-                HdResourceSharedPtr const & resource = resIt->second;
-
-                // XXX avoid double counting of resources shared within a buffer
-                GLuint id = resource->GetId();
-                if (idSet.count(id) == 0) {
-                    idSet.insert(id);
-
-                    std::string const & role = resource->GetRole().GetString();
-                    size_t size = size_t(resource->GetSize());
-
-                    if (result.count(role)) {
-                        size_t currentSize = result[role].Get<size_t>();
-                        result[role] = VtValue(currentSize + size);
-                    } else {
-                        result[role] = VtValue(size);
-                    }
-
-                    gpuMemoryUsed += size;
-                }
-            }
+            gpuMemoryUsed += strategy->GetResourceAllocation(
+                                                *bufferIt, result);
         }
     }
 
     return gpuMemoryUsed;
 }
-
 
 void
 HdBufferArrayRegistry::_InsertNewBufferArray(_Entry &entry,
@@ -244,14 +229,14 @@ HdBufferArrayRegistry::_InsertNewBufferArray(_Entry &entry,
 
         // Check state of list, still matches what is expected.
         // If not another thread won and inserted a new buffer.
-        if (not entry.bufferArrays.empty()) {
+        if (!entry.bufferArrays.empty()) {
             if (entry.bufferArrays.back() != expectedTail) {
                 return;  // Lock_guard will unlock entry
             }
         } else {
             // This shouldn't ever happen, because where did the expected tail
             // come from if it wasn't in the list???
-            TF_VERIFY(not expectedTail);
+            TF_VERIFY(!expectedTail);
         }
 
         entry.bufferArrays.emplace_back(strategy->CreateBufferArray(role, bufferSpecs));
@@ -262,6 +247,7 @@ HdBufferArrayRegistry::_InsertNewBufferArray(_Entry &entry,
 }
 
 
+HD_API
 std::ostream &
 operator <<(std::ostream &out, const HdBufferArrayRegistry& self)
 {
@@ -272,10 +258,14 @@ operator <<(std::ostream &out, const HdBufferArrayRegistry& self)
         size_t bufferNum = 0;
         TF_FOR_ALL(bufferIt, entryIt->second.bufferArrays) {
             out << "HdBufferArray " << bufferNum << "\n";
-            out << **bufferIt;
+            bufferNum++;
         }
     }
 
 
     return out;
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -21,21 +21,36 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
+#include <locale>
+#include <string>
+
 #include "pxr/base/tf/timeStamp.h"
 #include "pxr/base/tf/pyResultConversions.h"
 
 #include <boost/python/class.hpp>
 #include <boost/python/operators.hpp>
 
-#include <string>
-
 using std::string;
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
+
+static std::string _Str(const TfTimeStamp &self)
+{
+    return boost::lexical_cast<std::string>(self);
+}
 
 static std::string _Repr(const TfTimeStamp &self)
 {
     return TF_PY_REPR_PREFIX + "TimeStamp(" + TfPyRepr(self.Get()) + ")";
 }
+
+} // anonymous namespace
 
 void wrapTimeStamp() {
 
@@ -53,7 +68,8 @@ void wrapTimeStamp() {
         .def(self <= self)
         .def(self >= self)
 
-        .def( str(self) )
+//        .def( str(self) )
+        .def("__str__", _Str)
 
         .def("Get", &This::Get)
         .def("Set", &This::Set)
@@ -61,4 +77,3 @@ void wrapTimeStamp() {
         .def("Decrement", &This::Decrement)
         ;
 }
-

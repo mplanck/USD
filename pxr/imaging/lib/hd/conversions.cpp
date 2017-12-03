@@ -25,6 +25,9 @@
 #include "pxr/imaging/hd/conversions.h"
 #include "pxr/base/tf/iterator.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 struct _FormatDesc {
     GLenum format;
     GLenum type;
@@ -60,6 +63,13 @@ size_t
 HdConversions::GetComponentSize(int glDataType)
 {
     switch (glDataType) {
+        case GL_BOOL:
+            // Note that we don't use GLboolean here because according to
+            // code in vtBufferSource, everything gets rounded up to 
+            // size of single value in interleaved struct rounds up to
+            // sizeof(GLint) according to GL spec.
+            //      _size = std::max(sizeof(T), sizeof(GLint));
+            return sizeof(GLint);
         case GL_BYTE:
             return sizeof(GLbyte);
         case GL_UNSIGNED_BYTE:
@@ -84,6 +94,8 @@ HdConversions::GetComponentSize(int glDataType)
             return sizeof(GLuint64EXT);
         case GL_DOUBLE:
             return sizeof(GLdouble);
+        case GL_INT_2_10_10_10_REV:
+            return sizeof(GLint);
         // following enums are for bindless texture pointers.
         case GL_SAMPLER_2D:
             return sizeof(GLuint64EXT);
@@ -93,7 +105,7 @@ HdConversions::GetComponentSize(int glDataType)
             return sizeof(GLuint64EXT);
     };
 
-    TF_CODING_ERROR("Unexpected GL datatype %d", glDataType);
+    TF_CODING_ERROR("Unexpected GL datatype 0x%x", glDataType);
     return 1;
 }
 
@@ -152,6 +164,7 @@ HdConversions::GetWrap(HdWrap wrap)
         case HdWrapClamp : return GL_CLAMP_TO_EDGE;
         case HdWrapRepeat : return GL_REPEAT;
         case HdWrapBlack : return GL_CLAMP_TO_BORDER;
+        case HdWrapUseMetaDict : return GL_REPEAT;
     }
 
     TF_CODING_ERROR("Unexpected HdWrap type %d", wrap);
@@ -176,3 +189,6 @@ HdConversions::GetGlFormat(HdFormat inFormat, GLenum *outFormat, GLenum *outType
     *outType           = desc.type;
     *outInternalFormat = desc.internalFormat;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

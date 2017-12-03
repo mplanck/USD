@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/primWriterRegistry.h"
 #include "usdMaya/debugCodes.h"
 #include "usdMaya/registryHelper.h"
@@ -30,33 +31,36 @@
 
 #include <boost/assign.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_DEFINE_PRIVATE_TOKENS(_tokens,
     (UsdMaya)
         (PrimWriter)
 );
 
-typedef std::map<std::string, PxrUsdMayaPrimWriterRegistry::WriterFn> _Registry;
+typedef std::map<std::string, PxrUsdMayaPrimWriterRegistry::WriterFactoryFn> _Registry;
 static _Registry _reg;
 
 /* static */
 void 
 PxrUsdMayaPrimWriterRegistry::Register(
         const std::string& mayaTypeName,
-        PxrUsdMayaPrimWriterRegistry::WriterFn fn)
+        PxrUsdMayaPrimWriterRegistry::WriterFactoryFn fn)
 {
     TF_DEBUG(PXRUSDMAYA_REGISTRY).Msg(
             "Registering UsdMayaPrimWriter for maya type %s.\n", mayaTypeName.c_str());
 
     std::pair< _Registry::iterator, bool> insertStatus = 
         _reg.insert(std::make_pair(mayaTypeName, fn));
-    if (not insertStatus.second) {
+    if (!insertStatus.second) {
         TF_CODING_ERROR("Multiple writer for type %s", mayaTypeName.c_str());
         insertStatus.first->second = fn;
     }
 }
 
 /* static */
-PxrUsdMayaPrimWriterRegistry::WriterFn
+PxrUsdMayaPrimWriterRegistry::WriterFactoryFn
 PxrUsdMayaPrimWriterRegistry::Find(
         const std::string& mayaTypeName)
 {
@@ -64,7 +68,7 @@ PxrUsdMayaPrimWriterRegistry::Find(
 
     // unfortunately, usdTypeName is diff from the tfTypeName which we use to
     // register.  do the conversion here.
-    WriterFn ret = NULL;
+    WriterFactoryFn ret = NULL;
     if (TfMapLookup(_reg, mayaTypeName, &ret)) {
         return ret;
     }
@@ -75,7 +79,7 @@ PxrUsdMayaPrimWriterRegistry::Find(
 
     // ideally something just registered itself.  if not, we at least put it in
     // the registry in case we encounter it again.
-    if (not TfMapLookup(_reg, mayaTypeName, &ret)) {
+    if (!TfMapLookup(_reg, mayaTypeName, &ret)) {
         TF_DEBUG(PXRUSDMAYA_REGISTRY).Msg(
                 "No usdMaya writer plugin for maya type %s.  No maya plugin found.\n", 
                 mayaTypeName.c_str());
@@ -83,4 +87,7 @@ PxrUsdMayaPrimWriterRegistry::Find(
     }
     return ret;
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

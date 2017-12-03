@@ -21,10 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/errors.h"
 #include "pxr/base/tf/stringUtils.h"
 
 #include <boost/lexical_cast.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -142,7 +146,7 @@ PcpErrorArcCycle::ToString() const
             }
         }
         msg += TfStringPrintf("%s\n", TfStringify(segment.site).c_str());
-        if ((i > 0) and (i + 1 < cycle.size())) 
+        if ((i > 0) && (i + 1 < cycle.size())) 
             msg += "which ";
     }    
     return msg;
@@ -371,7 +375,7 @@ std::string
 PcpErrorInvalidPrimPath::ToString() const
 {
     return TfStringPrintf("Invalid %s path <%s> on prim %s "
-                          "-- must be a root prim path.", 
+                          "-- must be an absolute prim path.", 
                           TfEnum::GetDisplayName(arcType).c_str(), 
                           primPath.GetText(),
                           TfStringify(site).c_str());
@@ -411,10 +415,12 @@ PcpErrorInvalidAssetPath::~PcpErrorInvalidAssetPath()
 std::string
 PcpErrorInvalidAssetPath::ToString() const
 {
-    return TfStringPrintf("Could not open asset @%s@ for %s on prim %s.",
+    return TfStringPrintf("Could not open asset @%s@ for %s on prim %s%s%s.",
                           resolvedAssetPath.c_str(), 
                           TfEnum::GetDisplayName(arcType).c_str(), 
-                          TfStringify(site).c_str());
+                          TfStringify(site).c_str(),
+                          messages.empty() ? "" : " -- ",
+                          messages.c_str());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -477,7 +483,7 @@ PcpErrorInvalidInstanceTargetPath::~PcpErrorInvalidInstanceTargetPath()
 std::string
 PcpErrorInvalidInstanceTargetPath::ToString() const
 {
-    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute or
+    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute ||
               ownerSpecType == SdfSpecTypeRelationship);
     return TfStringPrintf(
         "The %s <%s> from <%s> in layer @%s@ is authored in a class "
@@ -512,7 +518,7 @@ PcpErrorInvalidExternalTargetPath::~PcpErrorInvalidExternalTargetPath()
 std::string
 PcpErrorInvalidExternalTargetPath::ToString() const
 {
-    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute or
+    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute ||
               ownerSpecType == SdfSpecTypeRelationship);
     return TfStringPrintf("The %s <%s> from <%s> in layer @%s@ refers "
                           "to a path outside the scope of the %s from <%s>.  "
@@ -549,7 +555,7 @@ PcpErrorInvalidTargetPath::~PcpErrorInvalidTargetPath()
 std::string
 PcpErrorInvalidTargetPath::ToString() const
 {
-    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute or
+    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute ||
               ownerSpecType == SdfSpecTypeRelationship);
     return TfStringPrintf(
         "The %s <%s> from <%s> in layer @%s@ is invalid.  This may be "
@@ -673,10 +679,12 @@ PcpErrorInvalidSublayerPath::~PcpErrorInvalidSublayerPath()
 std::string
 PcpErrorInvalidSublayerPath::ToString() const
 {
-    return TfStringPrintf("Could not load sublayer @%s@ of layer @%s@ -- "
+    return TfStringPrintf("Could not load sublayer @%s@ of layer @%s@%s%s; "
                           "skipping.", 
                           sublayerPath.c_str(), 
-                          layer->GetIdentifier().c_str());
+                          layer->GetIdentifier().c_str(),
+                          messages.empty() ? "" : " -- ",
+                          messages.c_str());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -848,7 +856,7 @@ PcpErrorTargetPermissionDenied::~PcpErrorTargetPermissionDenied()
 std::string
 PcpErrorTargetPermissionDenied::ToString() const
 {
-    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute or
+    TF_VERIFY(ownerSpecType == SdfSpecTypeAttribute ||
               ownerSpecType == SdfSpecTypeRelationship);
     return TfStringPrintf(
         "The %s <%s> from <%s> in layer @%s@ targets an object that is "
@@ -896,6 +904,8 @@ void
 PcpRaiseErrors(const PcpErrorVector &errors)
 {
     TF_FOR_ALL(err, errors) {
-        TF_RUNTIME_ERROR((*err)->ToString().c_str());
+        TF_RUNTIME_ERROR("%s", (*err)->ToString().c_str());
     }
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

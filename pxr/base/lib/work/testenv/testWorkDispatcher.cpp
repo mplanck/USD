@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/work/arenaDispatcher.h"
 #include "pxr/base/work/dispatcher.h"
 
@@ -28,15 +30,17 @@
 #include "pxr/base/tf/poolAllocator.h"
 #include "pxr/base/tf/stopwatch.h"
 
-
 #include <boost/bind.hpp>
 #include <boost/scoped_ptr.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <thread>
 
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static const int numLevels =100; 
 static const int numNodesPerLevel = 1000;
@@ -381,7 +385,7 @@ static bool
 _DelayedGraphTask(Graph *graph)
 {
     std::cout << "\tSleeping..." << std::endl;
-    sleep(2);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
     return _TestDispatcher<DispatcherType>(graph);
 }
 
@@ -401,7 +405,7 @@ _TestDispatcherCancellation(Graph *graph)
     DispatcherType parentDispatcher;
 
     parentDispatcher.Run(&_DelayedGraphTask<DispatcherType>, graph);
-    sleep(1);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     std::cout << "\tCancelling..." << std::endl;
     parentDispatcher.Cancel();
     parentDispatcher.Wait();
@@ -423,7 +427,7 @@ main(int argc, char **argv)
         graph.reset(LoadGraph(argv[1]));
     }
 
-    if (not graph) {
+    if (!graph) {
         std::cerr << "Error getting a graph" << std::endl;
         return 1;
     }
@@ -431,11 +435,11 @@ main(int argc, char **argv)
     // Test the general dispatcher.
     {
         std::cout << "Using the general dispatcher" << std::endl;
-        if (not _TestDispatcher<WorkDispatcher>(graph.get())) {
+        if (!_TestDispatcher<WorkDispatcher>(graph.get())) {
             return 1;
         }
 
-        if (not _TestDispatcherCancellation<WorkDispatcher>(graph.get())) {
+        if (!_TestDispatcherCancellation<WorkDispatcher>(graph.get())) {
             return 1;
         }
     }
@@ -443,11 +447,11 @@ main(int argc, char **argv)
     // Test the arena dispatcher.
     {
         std::cout << "Using the arena dispatcher" << std::endl;
-        if (not _TestDispatcher<WorkArenaDispatcher>(graph.get())) {
+        if (!_TestDispatcher<WorkArenaDispatcher>(graph.get())) {
             return 1;
         }
 
-        if (not _TestDispatcherCancellation<WorkArenaDispatcher>(graph.get())) {
+        if (!_TestDispatcherCancellation<WorkArenaDispatcher>(graph.get())) {
             return 1;
         }
     }

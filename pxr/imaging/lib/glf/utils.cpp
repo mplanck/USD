@@ -28,6 +28,9 @@
 #include "pxr/imaging/glf/utils.h"
 #include "pxr/imaging/glf/diagnostic.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 int
 GlfGetNumElements(GLenum format)
 {
@@ -135,7 +138,7 @@ bool GlfIsCompressedFormat(GLenum format)
     return false;
 }
 
-int GlfGetCompressedTextureSize(int width, int height,GLenum format,GLenum type)
+size_t GlfGetCompressedTextureSize(int width, int height, GLenum format, GLenum type)
 {
     int blockSize = 0;
     int tileSize = 0;
@@ -149,7 +152,10 @@ int GlfGetCompressedTextureSize(int width, int height,GLenum format,GLenum type)
         alignSize = 3;
     }
 
-    return ((width + alignSize)/tileSize) * 
-            ((height + alignSize)/tileSize) * 
-            blockSize;
+    size_t numPixels = ((width + alignSize)/tileSize) * 
+                       ((height + alignSize)/tileSize);
+    return numPixels * blockSize;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

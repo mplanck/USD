@@ -22,12 +22,11 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/usd/usdGeom/mesh.h"
-
 #include "pxr/usd/usd/schemaBase.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/usd/sdf/primSpec.h"
 
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -38,6 +37,10 @@
 #include <string>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 #define WRAP_CUSTOM                                                     \
     template <class Cls> static void _CustomWrapCode(Cls &_class)
@@ -82,6 +85,13 @@ _CreateFaceVaryingLinearInterpolationAttr(UsdGeomMesh &self,
 }
         
 static UsdAttribute
+_CreateTriangleSubdivisionRuleAttr(UsdGeomMesh &self,
+                                      object defaultVal, bool writeSparsely) {
+    return self.CreateTriangleSubdivisionRuleAttr(
+        UsdPythonToSdfType(defaultVal, SdfValueTypeNames->Token), writeSparsely);
+}
+        
+static UsdAttribute
 _CreateHoleIndicesAttr(UsdGeomMesh &self,
                                       object defaultVal, bool writeSparsely) {
     return self.CreateHoleIndicesAttr(
@@ -122,6 +132,8 @@ _CreateCreaseSharpnessesAttr(UsdGeomMesh &self,
     return self.CreateCreaseSharpnessesAttr(
         UsdPythonToSdfType(defaultVal, SdfValueTypeNames->FloatArray), writeSparsely);
 }
+
+} // anonymous namespace
 
 void wrapUsdGeomMesh()
 {
@@ -189,6 +201,13 @@ void wrapUsdGeomMesh()
              (arg("defaultValue")=object(),
               arg("writeSparsely")=false))
         
+        .def("GetTriangleSubdivisionRuleAttr",
+             &This::GetTriangleSubdivisionRuleAttr)
+        .def("CreateTriangleSubdivisionRuleAttr",
+             &_CreateTriangleSubdivisionRuleAttr,
+             (arg("defaultValue")=object(),
+              arg("writeSparsely")=false))
+        
         .def("GetHoleIndicesAttr",
              &This::GetHoleIndicesAttr)
         .def("CreateHoleIndicesAttr",
@@ -248,14 +267,20 @@ void wrapUsdGeomMesh()
 // }
 //
 // Of course any other ancillary or support code may be provided.
+// 
+// Just remember to wrap code in the appropriate delimiters:
+// 'namespace {', '}'.
+//
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
+
+namespace {
 
 WRAP_CUSTOM {
     typedef UsdGeomMesh This;
 
     _class.attr("SHARPNESS_INFINITE") = UsdGeomMesh::SHARPNESS_INFINITE;
-    _class.def("GetFaceVaryingLinearInterpolation",
-               &This::GetFaceVaryingLinearInterpolation)
     ;
 }
+
+} // anonymous namespace 

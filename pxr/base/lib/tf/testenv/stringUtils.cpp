@@ -21,15 +21,19 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/tf/regTest.h"
 #include "pxr/base/tf/stringUtils.h"
+#include "pxr/base/arch/defines.h"
 
 #include <stdarg.h>
 #include <string>
 #include <vector>
+#include <sstream>
 #include <stdio.h>
 
 using namespace std;
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static bool
 TestNumbers()
@@ -61,6 +65,24 @@ TestNumbers()
              == 0.336316384899143);
     TF_AXIOM(float(TfStringToDouble(TfStringify(0.1f))) == 0.1f);
     TF_AXIOM(float(TfStringToDouble(TfStringify(0.84066f))) == 0.84066f);
+
+    // Test similar operations on stream based stringify operations
+    std::stringstream sstr;
+
+    sstr << TfStreamDouble(0.1);
+    TF_AXIOM(TfStringToDouble(sstr.str()) == 0.1);
+    sstr.str(std::string());
+
+    sstr << TfStreamDouble(0.336316384899143);
+    TF_AXIOM(TfStringToDouble(sstr.str()) == 0.336316384899143);
+    sstr.str(std::string());
+
+    sstr << TfStreamFloat(0.1f);
+    TF_AXIOM(float(TfStringToDouble(sstr.str())) == 0.1f);
+    sstr.str(std::string());
+
+    sstr << TfStreamFloat(0.84066f);
+    TF_AXIOM(float(TfStringToDouble(sstr.str())) == 0.84066f);
 
     return true;
 }
@@ -218,12 +240,24 @@ TestStrings()
     TF_AXIOM(TfGetBaseName("/foo/bar/") == "bar");
     TF_AXIOM(TfGetBaseName("../some-dir/bar") == "bar");
     TF_AXIOM(TfGetBaseName("bar") == "bar");
+#if defined(ARCH_OS_WINDOWS)
+    // Same on Windows but with backslashes.
+    TF_AXIOM(TfGetBaseName("\\foo\\bar") == "bar");
+    TF_AXIOM(TfGetBaseName("\\foo\\bar\\") == "bar");
+    TF_AXIOM(TfGetBaseName("..\\some-dir\\bar") == "bar");
+#endif
 
     TF_AXIOM(TfGetPathName("") == "");
     TF_AXIOM(TfGetPathName("/") == "/");
     TF_AXIOM(TfGetPathName("/foo/bar") == "/foo/");
     TF_AXIOM(TfGetPathName("../some-dir/bar") == "../some-dir/");
     TF_AXIOM(TfGetPathName("bar") == "");
+#if defined(ARCH_OS_WINDOWS)
+    // Same on Windows but with backslashes.
+    TF_AXIOM(TfGetPathName("\\") == "\\");
+    TF_AXIOM(TfGetPathName("\\foo\\bar") == "\\foo\\");
+    TF_AXIOM(TfGetPathName("..\\some-dir\\bar") == "..\\some-dir\\");
+#endif
 
     TF_AXIOM(TfStringTrimRight("", " ") == "");
     TF_AXIOM(TfStringTrimRight("to be trimmed") == "to be trimmed");
@@ -319,6 +353,14 @@ TestStrings()
     TF_AXIOM(TfStringCatPaths("foo", "../bar") == "bar");
     TF_AXIOM(TfStringCatPaths("/foo", "../bar") == "/bar");
     TF_AXIOM(TfStringCatPaths("foo/crud/crap", "../bar") == "foo/crud/bar");
+#if defined(ARCH_OS_WINDOWS)
+    // Same on Windows but with backslashes.
+    TF_AXIOM(TfStringCatPaths("foo", "bar") == "foo/bar");
+    TF_AXIOM(TfStringCatPaths("foo\\crud", "../bar") == "foo/bar");
+    TF_AXIOM(TfStringCatPaths("foo", "..\\bar") == "bar");
+    TF_AXIOM(TfStringCatPaths("\\foo", "..\\bar") == "/bar");
+    TF_AXIOM(TfStringCatPaths("foo\\crud\\crap", "..\\bar") == "foo/crud/bar");
+#endif
 
     return true;
 }
@@ -489,7 +531,7 @@ TestGetXmlEscapedString()
 static bool
 Test_TfStringUtils()
 {
-    return TestNumbers() and TestPreds() and TestStrings() and TestTokens() and
+    return TestNumbers() && TestPreds() && TestStrings() && TestTokens() &&
            TestGetXmlEscapedString();
 }
 

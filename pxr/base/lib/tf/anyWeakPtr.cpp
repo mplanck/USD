@@ -21,10 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/anyWeakPtr.h"
 
 using std::string;
 using std::type_info;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TfAnyWeakPtr::_EmptyHolder::~_EmptyHolder()
 {
@@ -65,11 +69,13 @@ TfAnyWeakPtr::_EmptyHolder::_IsConst() const
     return true;
 }
 
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
 boost::python::api::object
 TfAnyWeakPtr::_EmptyHolder::GetPythonObject() const
 {
     return boost::python::api::object();
 }
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 const std::type_info &
 TfAnyWeakPtr::_EmptyHolder::GetTypeInfo() const
@@ -125,7 +131,7 @@ TfAnyWeakPtr::operator bool() const
 bool
 TfAnyWeakPtr::operator !() const
 {
-    return not bool(*this);
+    return !bool(*this);
 
 }
 
@@ -153,12 +159,16 @@ TfAnyWeakPtr::GetType() const
     return _Get()->GetType();
 }
 
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
 boost::python::api::object
 TfAnyWeakPtr::_GetPythonObject() const
 {
     TfPyLock pyLock;
     return _Get()->GetPythonObject();
 }
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 TfAnyWeakPtr::_PointerHolderBase::~_PointerHolderBase() {
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

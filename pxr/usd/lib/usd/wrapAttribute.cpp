@@ -21,10 +21,11 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/attribute.h"
-#include "pxr/usd/usd/conversions.h"
 #include "pxr/usd/usd/wrapUtils.h"
 
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -39,6 +40,10 @@ using std::string;
 using std::vector;
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static vector<double>
 _GetTimeSamples(const UsdAttribute &self) {
@@ -79,6 +84,14 @@ _Set(const UsdAttribute &self, object val, const UsdTimeCode &time) {
     return self.Set(UsdPythonToSdfType(val, self.GetTypeName()), time);
 }
 
+static SdfPathVector
+_GetConnections(const UsdAttribute &self)
+{
+    SdfPathVector result;
+    self.GetConnections(&result);
+    return result;
+}
+
 static string
 __repr__(const UsdAttribute &self) {
     return self ? TfStringPrintf("%s.GetAttribute(%s)",
@@ -86,6 +99,8 @@ __repr__(const UsdAttribute &self) {
                                  TfPyRepr(self.GetName()).c_str())
         : "invalid " + self.GetDescription();
 }
+
+} // anonymous namespace 
 
 void wrapUsdAttribute()
 {
@@ -101,6 +116,11 @@ void wrapUsdAttribute()
         .def("SetTypeName", &UsdAttribute::SetTypeName, arg("typeName"))
 
         .def("GetRoleName", &UsdAttribute::GetRoleName)
+
+        .def("GetColorSpace", &UsdAttribute::GetColorSpace)
+        .def("SetColorSpace", &UsdAttribute::SetColorSpace)
+        .def("HasColorSpace", &UsdAttribute::HasColorSpace)
+        .def("ClearColorSpace", &UsdAttribute::ClearColorSpace)
 
         .def("GetTimeSamples", _GetTimeSamples,
              return_value_policy<TfPySequenceToList>())
@@ -123,12 +143,26 @@ void wrapUsdAttribute()
         .def("Get", _Get, arg("time")=UsdTimeCode::Default())
         .def("Set", _Set, (arg("value"), arg("time")=UsdTimeCode::Default()))
 
+        .def("GetResolveInfo", &UsdAttribute::GetResolveInfo,
+             arg("time")=UsdTimeCode::Default())
+
         .def("Clear", &UsdAttribute::Clear)
         .def("ClearAtTime", &UsdAttribute::ClearAtTime, arg("time"))
         .def("ClearDefault", &UsdAttribute::ClearDefault)
 
         .def("Block", &UsdAttribute::Block)
+
+        .def("AddConnection", &UsdAttribute::AddConnection,
+             (arg("source"),
+              arg("position")=UsdListPositionTempDefault))
+        .def("RemoveConnection", &UsdAttribute::RemoveConnection, arg("source"))
+        .def("BlockConnections", &UsdAttribute::BlockConnections)
+        .def("SetConnections", &UsdAttribute::SetConnections, arg("sources"))
+        .def("ClearConnections", &UsdAttribute::ClearConnections)
+        .def("GetConnections", _GetConnections,
+             return_value_policy<TfPySequenceToList>())
+        .def("HasAuthoredConnections", &UsdAttribute::HasAuthoredConnections)
         ;
+
     TfPyRegisterStlSequencesFromPython<UsdAttribute>();
 }
-

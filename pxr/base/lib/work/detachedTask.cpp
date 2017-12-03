@@ -21,11 +21,20 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/work/detachedTask.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 tbb::task_group_context &
 Work_GetDetachedTaskGroupContext()
 {
-    static tbb::task_group_context ctx(tbb::task_group_context::isolated);
-    return ctx;
+    // Deliberately leak this in case there are tasks still using it after
+    // we exit from main().
+    static tbb::task_group_context* ctx =
+        new tbb::task_group_context(tbb::task_group_context::isolated);
+    return *ctx;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

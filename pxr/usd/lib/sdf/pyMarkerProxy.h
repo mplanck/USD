@@ -21,8 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#ifndef SDF_PYMARKERPROXY_H
+#define SDF_PYMARKERPROXY_H
+
 /// \file sdf/pyMarkerProxy.h
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/changeBlock.h"
 #include "pxr/usd/sdf/declareHandles.h"
 #include "pxr/usd/sdf/path.h"
@@ -34,6 +38,8 @@
 #include <boost/python.hpp>
 #include <deque>
 #include <map>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 template <class SpecType>
 class Sdf_PyMarkerPolicy {
@@ -176,7 +182,7 @@ private:
 
     mapped_type _GetItem(const key_type& key)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return mapped_type();
         }
 
@@ -192,7 +198,7 @@ private:
 
     void _SetItem(const key_type& key, const mapped_type& value)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return;
         }
 
@@ -201,7 +207,7 @@ private:
 
     void _DelItem(const key_type& key)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return;
         }
 
@@ -210,7 +216,7 @@ private:
 
     void _Clear()
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return;
         }
 
@@ -224,7 +230,7 @@ private:
     bool _HasKey(const key_type& key)
     {
         return _Validate() ? 
-            not MarkerPolicy::GetMarker(_spec, key).empty() : false;
+            !MarkerPolicy::GetMarker(_spec, key).empty() : false;
     }    
 
     _Iterator<_ExtractItem> _GetItemIterator()
@@ -247,7 +253,7 @@ private:
 
     boost::python::object _PyGet(const key_type& key)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return boost::python::object();
         }
 
@@ -258,7 +264,7 @@ private:
 
     mapped_type _PyGetDefault(const key_type& key, const mapped_type& def)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return mapped_type();
         }
 
@@ -298,7 +304,7 @@ private:
 
     mapped_type _Pop(const key_type& key)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return mapped_type();
         }
 
@@ -315,7 +321,7 @@ private:
 
     boost::python::tuple _PopItem()
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return boost::python::tuple();
         }
 
@@ -335,12 +341,12 @@ private:
 
     mapped_type SetDefault(const key_type& key, const mapped_type& def)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return mapped_type();
         }
 
         const std::string marker = MarkerPolicy::GetMarker(_spec, key);
-        if (not marker.empty()) {
+        if (!marker.empty()) {
             return marker;
         }
         else {
@@ -352,7 +358,7 @@ private:
 
     void _Update(const std::vector<value_type>& values)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return;
         }
 
@@ -382,7 +388,7 @@ private:
 
     void Copy(const boost::python::dict& other)
     {
-        if (not _Validate()) {
+        if (!_Validate()) {
             return;
         }
 
@@ -406,7 +412,7 @@ private:
 
     bool _Validate() const
     {
-        if (not _spec) {
+        if (!_spec) {
             TF_CODING_ERROR("Accessing an expired attribute");
             return false;
         }
@@ -470,5 +476,8 @@ private:
 
 private:
     OwnerSpecHandle _spec;
-
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_PYMARKERPROXY_H

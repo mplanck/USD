@@ -24,35 +24,94 @@
 #ifndef HD_GEOMETRIC_SHADER_H
 #define HD_GEOMETRIC_SHADER_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/resourceRegistry.h"
-#include "pxr/imaging/hd/shader.h"
+#include "pxr/imaging/hd/shaderCode.h"
 #include "pxr/imaging/hd/shaderKey.h"
 #include "pxr/usd/sdf/path.h"
 #include "pxr/imaging/glf/glslfx.h"
 
 #include <boost/scoped_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class Hd_GeometricShader> Hd_GeometricShaderSharedPtr;
 
+/// \class Hd_GeometricShader
+///
 /// A geometric shader -- hydra internal use
-class Hd_GeometricShader : public HdShader {
+///
+class Hd_GeometricShader : public HdShaderCode {
 public:
+    /// Used in Hd_CodeGen to generate the appropriate shader source 
+    enum class PrimitiveType { 
+        PRIM_POINTS, 
+        PRIM_BASIS_CURVES_LINES,     // when linear (or) non-refined cubic
+        PRIM_BASIS_CURVES_PATCHES,   // refined cubic curves
+        PRIM_MESH_COARSE_TRIANGLES,  
+        PRIM_MESH_REFINED_TRIANGLES, // e.g: loop subdiv
+        PRIM_MESH_COARSE_QUADS,      // e.g: quadrangulation for ptex
+        PRIM_MESH_REFINED_QUADS,     // e.g: catmark/bilinear subdiv
+        PRIM_MESH_PATCHES
+    };                                         
+
+    /// static query functions for PrimitiveType
+    static inline bool IsPrimTypePoints (PrimitiveType primType) {
+        return primType == PrimitiveType::PRIM_POINTS;
+    }
+
+    static inline bool IsPrimTypeBasisCurves(PrimitiveType primType) {
+        return (primType == PrimitiveType::PRIM_BASIS_CURVES_LINES ||
+                primType == PrimitiveType::PRIM_BASIS_CURVES_PATCHES);
+    }
+
+    static inline bool IsPrimTypeMesh(PrimitiveType primType) {
+        return (primType == PrimitiveType::PRIM_MESH_COARSE_TRIANGLES  ||
+                primType == PrimitiveType::PRIM_MESH_REFINED_TRIANGLES ||
+                primType == PrimitiveType::PRIM_MESH_COARSE_QUADS      ||
+                primType == PrimitiveType::PRIM_MESH_REFINED_QUADS     ||
+                primType == PrimitiveType::PRIM_MESH_PATCHES);
+    }
+
+    static inline bool IsPrimTypeTriangles(PrimitiveType primType) {
+        return (primType == PrimitiveType::PRIM_MESH_COARSE_TRIANGLES ||
+                primType == PrimitiveType::PRIM_MESH_REFINED_TRIANGLES);
+    }
+
+    static inline bool IsPrimTypeQuads(PrimitiveType primType) {
+        return (primType == PrimitiveType::PRIM_MESH_COARSE_QUADS ||
+                primType == PrimitiveType::PRIM_MESH_REFINED_QUADS);
+    }
+
+    static inline bool IsPrimTypePatches(PrimitiveType primType) {
+        return primType == PrimitiveType::PRIM_MESH_PATCHES ||
+               primType == PrimitiveType::PRIM_BASIS_CURVES_PATCHES;
+    }
+
+    HD_API
     Hd_GeometricShader(std::string const &glslfxString,
-                       int16_t primitiveMode, /*=GLenum*/
-                       int16_t primitiveIndexSize,
+                       PrimitiveType primType,
                        HdCullStyle cullStyle,
                        HdPolygonMode polygonMode,
                        bool cullingPass,
                        SdfPath const &debugId=SdfPath());
 
+    HD_API
     virtual ~Hd_GeometricShader();
 
     // HdShader overrides
+    HD_API
     virtual ID ComputeHash() const;
+    HD_API
     virtual std::string GetSource(TfToken const &shaderStageKey) const;
+    HD_API
     virtual void BindResources(Hd_ResourceBinder const &binder, int program);
+    HD_API
     virtual void UnbindResources(Hd_ResourceBinder const &binder, int program);
+    HD_API
     virtual void AddBindings(HdBindingRequestVector *customBindings);
 
     /// Returns true if this geometric shader is used for GPU frustum culling.
@@ -60,20 +119,54 @@ public:
         return _cullingPass;
     }
 
-    /// Return the primitive type of this draw item.
-    GLenum GetPrimitiveMode() const {
-        return _primitiveMode;
+    PrimitiveType GetPrimitiveType() const {
+        return _primType;
     }
-    /// Return the index size of this draw item.
-    int GetPrimitiveIndexSize() const {
-        return _primitiveIndexSize;
+
+    /// member query functions for PrimitiveType
+     inline bool IsPrimTypePoints() const {
+        return IsPrimTypePoints(_primType);
     }
+
+    inline bool IsPrimTypeBasisCurves() const {
+        return IsPrimTypeBasisCurves(_primType);
+    }
+
+    inline bool IsPrimTypeMesh() const {
+        return IsPrimTypeMesh(_primType);
+    }
+
+    inline bool IsPrimTypeTriangles() const {
+        return IsPrimTypeTriangles(_primType);
+    }
+
+    inline bool IsPrimTypeQuads() const {
+        return IsPrimTypeQuads(_primType);
+    }
+
+    inline bool IsPrimTypePatches() const {
+        return IsPrimTypePatches(_primType);
+    }
+
+    /// Return the GL primitive type of the draw item based on _primType
+    GLenum GetPrimitiveMode() const;
+
+    // Returns the primitive index size based on the primitive mode
+    // 3 for triangles, 4 for quads, 16 for regular b-spline patches etc.
+    int GetPrimitiveIndexSize() const;
+
+    // Returns the primitive index size for the geometry shader shade
+    // 1 for points, 2 for lines, 3 for triangles, 4 for lines_adjacency    
+    int GetNumPrimitiveVertsForGeometryShader() const;
 
     /// template factory for convenience
     template <typename KEY>
-    static Hd_GeometricShaderSharedPtr Create(KEY const &shaderKey) {
-        HdResourceRegistry *resourceRegistry = &HdResourceRegistry::GetInstance();
-        HdInstance<HdShaderKey::ID, Hd_GeometricShaderSharedPtr> geometricShaderInstance;
+    static Hd_GeometricShaderSharedPtr Create(
+            KEY const &shaderKey, 
+            HdResourceRegistrySharedPtr const &resourceRegistry) {
+
+        HdInstance<HdShaderKey::ID, Hd_GeometricShaderSharedPtr> 
+            geometricShaderInstance;
 
         // lookup registry
         std::unique_lock<std::mutex> regLock =
@@ -85,8 +178,7 @@ public:
                 Hd_GeometricShaderSharedPtr(
                     new Hd_GeometricShader(
                         HdShaderKey::GetGLSLFXString(shaderKey),
-                        shaderKey.GetPrimitiveMode(),
-                        shaderKey.GetPrimitiveIndexSize(),
+                        shaderKey.GetPrimitiveType(),
                         shaderKey.GetCullStyle(),
                         shaderKey.GetPolygonMode(),
                         shaderKey.IsCullingPass())));
@@ -95,16 +187,7 @@ public:
     }
 
 private:
-    // one of the following:
-    // GL_POINTS          = 0x0
-    // GL_LINES           = 0x1
-    // GL_TRIANGLES       = 0x4
-    // GL_LINES_ADJACENCY = 0xA
-    // GL_PATCHES         = 0xE
-    int16_t _primitiveMode;
-    // 3 for triangles, 4 for quads, 16 for regular b-spline patches etc.
-    int16_t _primitiveIndexSize;
-
+    PrimitiveType _primType;
     HdCullStyle _cullStyle;
     HdPolygonMode _polygonMode;
     // depth offset?
@@ -112,6 +195,13 @@ private:
     boost::scoped_ptr<GlfGLSLFX> _glslfx;
     bool _cullingPass;
     ID _hash;
+
+    // No copying
+    Hd_GeometricShader(const Hd_GeometricShader &)                     = delete;
+    Hd_GeometricShader &operator =(const Hd_GeometricShader &)         = delete;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_GEOMETRIC_SHADER_H

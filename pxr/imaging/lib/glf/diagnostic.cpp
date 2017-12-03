@@ -37,19 +37,26 @@
 
 #include <sstream>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 void
 GlfPostPendingGLErrors(std::string const & where)
 {
     bool foundError = false;
     GLenum error;
-    while ((error = glGetError()) != GL_NO_ERROR) {
+    // Protect from doing infinite looping when glGetError
+    // is called from an invalid context.
+    int watchDogCount = 0;
+    while ((watchDogCount++ < 256) &&
+            ((error = glGetError()) != GL_NO_ERROR)) {
         foundError = true;
         const GLubyte *errorString = gluErrorString(error);
 
         std::ostringstream errorMessage;
         errorMessage << "GL error: " << errorString;
 
-        if (not where.empty()) {
+        if (!where.empty()) {
             errorMessage << ", reported from " << where;
         }
 
@@ -76,7 +83,7 @@ GlfRegisterDefaultDebugOutputMessageCallback()
 void
 GlfDefaultDebugOutputMessageCallback(
         GLenum source, GLenum type, GLuint id, GLenum severity,
-        GLsizei length, GLchar const * message, GLvoid * userParam)
+        GLsizei length, GLchar const * message, GLvoid const * userParam)
 {
 #if defined(GL_ARB_debug_output) || defined(GL_VERSION_4_3)
     if (type == GL_DEBUG_TYPE_ERROR_ARB) {
@@ -152,6 +159,34 @@ GlfDebugEnumToString(GLenum debugEnum)
     return "unknown";
 }
 
+static void _GlfPushDebugGroup(char const * message)
+{
+#if defined(GL_KHR_debug)
+    if (GLEW_KHR_debug) {
+        glPushDebugGroup(GL_DEBUG_SOURCE_THIRD_PARTY, 0, -1, message);
+    }
+#endif
+}
+
+static void _GlfPopDebugGroup()
+{
+#if defined(GL_KHR_debug)
+    if (GLEW_KHR_debug) {
+        glPopDebugGroup();
+    }
+#endif
+}
+
+GlfDebugGroup::GlfDebugGroup(char const *message)
+{
+    _GlfPushDebugGroup(message);
+}
+
+GlfDebugGroup::~GlfDebugGroup()
+{
+    _GlfPopDebugGroup();
+}
+
 GlfGLQueryObject::GlfGLQueryObject()
     : _id(0), _target(0)
 {
@@ -164,7 +199,7 @@ GlfGLQueryObject::GlfGLQueryObject()
 GlfGLQueryObject::~GlfGLQueryObject()
 {
     GlfSharedGLContextScopeHolder sharedGLContextScopeHolder;
-    if (glDeleteQueries and _id) {
+    if (glDeleteQueries && _id) {
         glDeleteQueries(1, &_id);
     }
 }
@@ -190,7 +225,7 @@ void
 GlfGLQueryObject::Begin(GLenum target)
 {
     _target = target;
-    if (glBeginQuery and _id) {
+    if (glBeginQuery && _id) {
         glBeginQuery(_target, _id);
     }
 }
@@ -198,7 +233,7 @@ GlfGLQueryObject::Begin(GLenum target)
 void
 GlfGLQueryObject::End()
 {
-    if (glEndQuery and _target) {
+    if (glEndQuery && _target) {
         glEndQuery(_target);
     }
     _target = 0;
@@ -208,7 +243,7 @@ GLint64
 GlfGLQueryObject::GetResult()
 {
     GLint64 value = 0;
-    if (glGetQueryObjecti64v and _id) {
+    if (glGetQueryObjecti64v && _id) {
         glGetQueryObjecti64v(_id, GL_QUERY_RESULT, &value);
     }
     return value;
@@ -218,7 +253,7 @@ GLint64
 GlfGLQueryObject::GetResultNoWait()
 {
     GLint64 value = 0;
-    if (glGetQueryObjecti64v and _id) {
+    if (glGetQueryObjecti64v && _id) {
         glGetQueryObjecti64v(_id, GL_QUERY_RESULT_AVAILABLE, &value);
         if (value == GL_TRUE) {
             glGetQueryObjecti64v(_id, GL_QUERY_RESULT, &value);
@@ -226,3 +261,6 @@ GlfGLQueryObject::GetResultNoWait()
     }
     return value;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -24,8 +24,8 @@
 ///
 /// \file gf/wrapCamera.h
 
+#include "pxr/pxr.h"
 #include "pxr/base/gf/camera.h"
-
 #include "pxr/base/gf/frustum.h"
 #include "pxr/base/tf/pyEnum.h"
 
@@ -34,6 +34,10 @@
 #include <vector>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static float
 _GetHorizontalFieldOfView(const GfCamera &camera) {
@@ -80,7 +84,7 @@ static std::string _Repr(GfCamera const &self)
     if (self.GetClippingRange() != GfRange1f(1, 1000000))
         kwargs.push_back("clippingRange = " +
                          TfPyRepr(self.GetClippingRange()));
-    if (not self.GetClippingPlanes().empty())
+    if (!self.GetClippingPlanes().empty())
         kwargs.push_back("clippingPlanes = " +
                          TfPyRepr(self.GetClippingPlanes()));
     if (self.GetFStop() != 0.0)
@@ -91,6 +95,8 @@ static std::string _Repr(GfCamera const &self)
 
     return prefix + TfStringJoin(kwargs, seperator.c_str()) + ")";
 }
+
+} // anonymous namespace 
 
 void
 wrapCamera()

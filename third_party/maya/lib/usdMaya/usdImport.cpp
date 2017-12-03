@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/usdImport.h"
 
 #include "usdMaya/JobArgs.h"
@@ -36,6 +37,9 @@
 #include <map>
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 
 usdImport::usdImport(const std::string& assemblyTypeName,
@@ -65,7 +69,8 @@ MSyntax usdImport::createSyntax()
     syntax.addFlag("-ani", "-readAnimData"      , MSyntax::kBoolean);
     syntax.addFlag("-pp", "-primPath"           , MSyntax::kString);
     syntax.addFlag("-var" , "-variant"          , MSyntax::kString, MSyntax::kString);
-    syntax.addFlag("-ar" , "-assemblyRep"      , MSyntax::kString);
+    syntax.addFlag("-ar" , "-assemblyRep"       , MSyntax::kString);
+    syntax.addFlag("-fr" , "-frameRange"        , MSyntax::kDouble, MSyntax::kDouble);
     syntax.makeFlagMultiUse("variant");
 
     syntax.enableQuery(false);
@@ -132,24 +137,21 @@ MStatus usdImport::doIt(const MArgList & args)
 
         if (shadingMode.IsEmpty()) {
             jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->displayColor;
-        }
-        else {
-            if (PxrUsdMayaShadingModeRegistry::GetInstance().GetExporter(shadingMode)) {
-                jobArgs.shadingMode = shadingMode;
+        } else if (PxrUsdMayaShadingModeRegistry::GetInstance().GetImporter(shadingMode)) {
+            jobArgs.shadingMode = shadingMode;
+        } else {
+            if (shadingMode != PxrUsdMayaShadingModeTokens->none) {
+                MGlobal::displayError(
+                    TfStringPrintf("No shadingMode '%s' found. Setting shadingMode='none'",
+                                   shadingMode.GetText()).c_str());
             }
-            else {
-                MGlobal::displayError(TfStringPrintf("No shadingMode '%s' found.  Setting shadingMode='none'", 
-                            shadingMode.GetText()).c_str());
-                jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->none;
-            }
+            jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->none;
         }
     }
 
     if (argData.isFlagSet("readAnimData"))
     {   
-        bool tmpBool = false;
-        argData.getFlagArgument("readAnimData", 0, tmpBool);
-        jobArgs.readAnimData = tmpBool;
+        argData.getFlagArgument("readAnimData", 0, jobArgs.readAnimData);
     }
 
     // Specify usd PrimPath.  Default will be "/<useFileBasename>"
@@ -180,9 +182,15 @@ MStatus usdImport::doIt(const MArgList & args)
         MString stringVal;
         argData.getFlagArgument("assemblyRep", 0, stringVal);
         std::string assemblyRep = stringVal.asChar();
-        if (not assemblyRep.empty()) {
+        if (!assemblyRep.empty()) {
             jobArgs.assemblyRep = TfToken(assemblyRep);
         }
+    }
+
+    if (argData.isFlagSet("frameRange")) {
+        jobArgs.useCustomFrameRange = true;
+        argData.getFlagArgument("frameRange", 0, jobArgs.startTime);
+        argData.getFlagArgument("frameRange", 1, jobArgs.endTime);
     }
 
     // Create the command
@@ -253,3 +261,6 @@ MStatus usdImport::undoIt()
 
     return (success) ? MS::kSuccess : MS::kFailure;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

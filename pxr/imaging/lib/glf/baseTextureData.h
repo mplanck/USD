@@ -24,15 +24,18 @@
 #ifndef GLF_BASETEXTUREDATA_H
 #define GLF_BASETEXTUREDATA_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
+#include "pxr/imaging/glf/utils.h"
+#include "pxr/imaging/garch/gl.h"
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/refPtr.h"
 #include "pxr/base/tf/weakPtr.h"
 
-#include "pxr/imaging/garch/gl.h"
-
-#include "pxr/imaging/glf/utils.h"
-
 #include <boost/noncopyable.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfBaseTextureData);
 
@@ -41,7 +44,7 @@ class GlfBaseTextureData : public TfRefBase,
                            boost::noncopyable
 {
 public:
-
+    GLF_API
     virtual ~GlfBaseTextureData();
 
     struct WrapInfo {
@@ -55,9 +58,9 @@ public:
         GLenum  wrapModeT;
     };
 
-    virtual int ResizedWidth() const = 0;
+    virtual int ResizedWidth(int mipLevel = 0) const = 0;
 
-    virtual int ResizedHeight() const = 0;
+    virtual int ResizedHeight(int mipLevel = 0) const = 0;
 
     virtual GLenum GLInternalFormat() const = 0;
 
@@ -69,13 +72,17 @@ public:
 
     virtual WrapInfo GetWrapInfo() const = 0;
 
-    virtual int ComputeBytesUsed() const = 0;
+    virtual size_t ComputeBytesUsed() const = 0;
 
-    virtual bool HasRawBuffer() const = 0;
-
-    virtual unsigned char * GetRawBuffer() const = 0;
+    virtual size_t ComputeBytesUsedByMip(int mipLevel = 0) const = 0;
 
     virtual bool Read(int degradeLevel, bool generateMipmap) = 0;
+
+    virtual bool HasRawBuffer(int mipLevel = 0) const = 0;
+
+    virtual unsigned char * GetRawBuffer(int mipLevel = 0) const = 0;   
+
+    virtual int GetNumMipLevels() const = 0;
 
     virtual bool IsCompressed() const {
         return GlfIsCompressedFormat(GLFormat());
@@ -83,9 +90,13 @@ public:
 
 protected:
     // Map image format and type and encoding to GL format.
+    GLF_API
     static GLenum _GLInternalFormatFromImageData(
         GLenum format, GLenum type, bool isSRGB);
 
 };
 
-#endif // GLF_UVTEXTURE_DATA
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // GLF_BASETEXTURE_DATA

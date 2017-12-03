@@ -24,30 +24,26 @@
 #ifndef ARCH_FUNCTIONLITE_H
 #define ARCH_FUNCTIONLITE_H
 
-#include "pxr/base/arch/defines.h"
+/// \file arch/functionLite.h
+/// Define preprocessor function name macros.
+///
+/// This file defines preprocessor macros for getting the current function
+/// name so they can be used in a architecture independent matter.  This file
+/// needs to be public but shouldn't be included directly by anything outside
+/// of \c pxr/base/tf.
 
-/*
- * \file functionLite.h
- * \brief Define preprocessor fuction name macros.
- *
- * This file defines preprocessor macros for getting the current function
- * name so they can be used in a architecture independent matter.  This file
- * needs to be public but shouldn't be accessed directly by anyone other
- * than lib/tf.
- *
- * Note: this file specifically does not include <string>.
- */
+#include "pxr/base/arch/defines.h"
+// Note: this file specifically does not include <string>.
+
+#define __ARCH_FUNCTION__ __func__
 
 #if defined(ARCH_COMPILER_GCC) || defined(ARCH_COMPILER_ICC) || \
     defined(ARCH_COMPILER_CLANG)
-#    define __ARCH_FUNCTION__ __FUNCTION__
 #    define __ARCH_PRETTY_FUNCTION__ __PRETTY_FUNCTION__
 #elif defined(ARCH_COMPILER_MSVC)
-#    define __ARCH_FUNCTION__ __FUNCTION__
-#    define __ARCH_PRETTY_FUNCTION__ __FUNCTION__
+#    define __ARCH_PRETTY_FUNCTION__ __FUNCSIG__
 #else
-#    define __ARCH_FUNCTION__ "(unknown)"
-#    define __ARCH_PRETTY_FUNCTION__ "(unknown)"
+#    define __ARCH_PRETTY_FUNCTION__ __ARCH_FUNCTION__
 #endif /* defined(ARCH_COMPILER_GCC) || defined(ARCH_COMPILER_ICC) ||
           defined(ARCH_COMPILER_CLANG)*/
 

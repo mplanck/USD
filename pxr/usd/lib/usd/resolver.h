@@ -24,6 +24,8 @@
 #ifndef USD_RESOLVER_H
 #define USD_RESOLVER_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/usd/common.h"
 
 #include "pxr/usd/pcp/node.h"
@@ -34,58 +36,70 @@
 
 #include <boost/scoped_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 class PcpPrimIndex;
 
-/// \brief Given a PcpPrimIndex, this class facilitates value resolution by
-/// providing a mechanism for walking the composition structure in
-/// strong-to-weak order.
+/// \class Usd_Resolver
+///
+/// Given a PcpPrimIndex, this class facilitates value resolution by providing
+/// a mechanism for walking the composition structure in strong-to-weak order.
+///
 class Usd_Resolver {
 public:
 
-    /// \brief Constructs a resolver with the given \p index. The index is 
+    /// Constructs a resolver with the given \p index. The index is 
     /// held for the duration of the resolver's lifetime. If \p skipEmptyNodes
     /// is \c true, the resolver will skip over nodes that provide no opinions
     /// about the prim represented by \p index. Otherwise, the resolver will
     /// visit all non-inert nodes in the index.
+    USD_API
     explicit Usd_Resolver(const PcpPrimIndex* index, bool skipEmptyNodes = true);
 
-    /// \brief Returns true when there is a current Node and Layer.
+    /// Returns true when there is a current Node and Layer.
     bool IsValid() const {
         return _curNode != _lastNode;
     }
 
-    /// \brief Advances the resolver to the next weaker Layer in the layer
+    /// Advances the resolver to the next weaker Layer in the layer
     /// stack, if the current LayerStack has no more layers, the resolver will
     /// be advanced to the next weaker PcpNode. If no layers are available, the
     /// resolver will be marked as invalid.  Returns \c true iff the resolver
     /// advanced to another node or was or became invalid.
+    USD_API
     bool NextLayer();
 
-    /// \brief Skips all pending layers in the current LayerStack and jumps to
+    /// Skips all pending layers in the current LayerStack and jumps to
     /// the next weaker PcpNode. When no more nodes are available, the resolver
     /// will be marked as invalid.
+    USD_API
     void NextNode();
 
-    /// \brief Returns the current PCP node. 
+    /// Returns the current PCP node. 
     ///
     /// This is useful for coarse grained resolution tasks, however
     /// individual layers must be inspected in the common case.
+    USD_API
     PcpNodeRef GetNode() const;
 
-    /// \brief Returns the current layer for the current PcpNode.
+    /// Returns the current layer for the current PcpNode.
     ///
     /// PERFORMANCE: This returns a const-ref to avoid ref-count bumps during
     /// resolution. This is safe under the assumption that no changes will occur
     /// during resolution and that the lifetime of this object will be short.
+    USD_API
     const SdfLayerRefPtr& GetLayer() const;
 
-    /// \brief Returns a translated path for the current PcpNode and Layer.
+    /// Returns a translated path for the current PcpNode and Layer.
+    USD_API
     const SdfPath& GetLocalPath() const;
 
-    /// \brief Returns the PcpPrimIndex. 
+    /// Returns the PcpPrimIndex. 
     ///
     /// This value is initialized when the resolver is constructed and does not
     /// change as a result of calling NextLayer() or NextNode().
+    USD_API
     const PcpPrimIndex* GetPrimIndex() const;
 
 private:
@@ -101,5 +115,7 @@ private:
     SdfLayerRefPtrVector::const_iterator _lastLayer;
 };
 
-#endif // USD_RESOLVER_H
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // USD_RESOLVER_H

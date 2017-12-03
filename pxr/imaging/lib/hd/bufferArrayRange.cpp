@@ -26,21 +26,10 @@
 #include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/tokens.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 HdBufferArrayRange::~HdBufferArrayRange() {
-}
-
-void
-HdBufferArrayRange::AddBufferSpecs(HdBufferSpecVector *specs) const
-{
-    HD_TRACE_FUNCTION();
-
-    HdBufferResourceNamedList const &resources = GetResources();
-
-    TF_FOR_ALL(it, resources) {
-        specs->push_back(HdBufferSpec(it->first,
-                                      it->second->GetGLDataType(),
-                                      it->second->GetNumComponents()));
-    }
 }
 
 std::ostream &operator <<(std::ostream &out,
@@ -57,6 +46,11 @@ HdBufferArrayRangeContainer::Set(int index,
 {
     HD_TRACE_FUNCTION();
 
+    if (index < 0) {
+        TF_CODING_ERROR("Index negative in HdBufferArrayRangeContainer::Set()");
+        return;
+    }
+
     if (static_cast<size_t>(index) >= _ranges.size()) {
         HD_PERF_COUNTER_INCR(HdPerfTokens->bufferArrayRangeContainerResized);
         _ranges.resize(index + 1);
@@ -67,7 +61,7 @@ HdBufferArrayRangeContainer::Set(int index,
 HdBufferArrayRangeSharedPtr const &
 HdBufferArrayRangeContainer::Get(int index) const
 {
-    if (index < 0 or static_cast<size_t>(index) >= _ranges.size()) {
+    if (index < 0 || static_cast<size_t>(index) >= _ranges.size()) {
         // out of range access is not an errorneous path.
         // (i.e. element/instance bars can be null if not exists)
         static HdBufferArrayRangeSharedPtr empty;
@@ -75,3 +69,6 @@ HdBufferArrayRangeContainer::Get(int index) const
     }
     return _ranges[index];
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

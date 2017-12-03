@@ -21,46 +21,58 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file uniformBlock.h
-
 #ifndef GLF_UNIFORM_BLOCK_H
 #define GLF_UNIFORM_BLOCK_H
 
+/// \file glf/uniformBlock.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
+#include "pxr/imaging/garch/gl.h"
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/refBase.h"
 #include "pxr/base/tf/weakBase.h"
-#include "pxr/imaging/garch/gl.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfUniformBlock);
 TF_DECLARE_WEAK_PTRS(GlfBindingMap);
 
+/// \class GlfUniformBlock
 ///
-/// \class GlfUniformBlock uniformBlock.h "pxr/imaging/glf/uniformBlock_H
-/// \brief Manages a GL uniform buffer object
+/// Manages a GL uniform buffer object.
 ///
 class GlfUniformBlock : public TfRefBase, public TfWeakBase {
 public:
 
-    /// \brief Returns a new instance.
+    /// Returns a new instance.
+    GLF_API
     static GlfUniformBlockRefPtr New();
 
+    GLF_API
     virtual ~GlfUniformBlock();
 
-    /// \brief Binds the uniform buffer using a bindingMap and identifier.
+    /// Binds the uniform buffer using a bindingMap and identifier.
+    GLF_API
     void Bind(GlfBindingMapPtr const & bindingMap,
               std::string const & identifier);
 
-    /// \brief Updates the content of the uniform buffer. If the size
+    /// Updates the content of the uniform buffer. If the size
     /// is different, the buffer will be reallocated.
+    GLF_API
     void Update(const void *data, int size);
 
 protected:
+    GLF_API
     GlfUniformBlock();
 
 private:
     GLuint _buffer;
     int _size;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

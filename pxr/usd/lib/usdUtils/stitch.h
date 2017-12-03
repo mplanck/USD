@@ -21,19 +21,24 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#ifndef _USDUTILS_STITCH_H_
-#define _USDUTILS_STITCH_H_
+#ifndef USDUTILS_STITCH_H
+#define USDUTILS_STITCH_H
 
-#include "pxr/usd/sdf/declareHandles.h"
-#include "pxr/usd/sdf/spec.h"
-SDF_DECLARE_HANDLES(SdfLayer);
-
-/// \file stitch.h
+/// \file usdUtils/stitch.h
 ///
 /// Collection of module-scoped utilities for combining layers.
-/// These utilize the convention of a strong and a weak layer.
-/// The strong layer will be the first parameter to the function
-/// and will always have precedence in conflicts during the merge.
+/// These utilize the convention of a strong and a weak layer. The strong
+/// layer will be the first parameter to the function and will always have
+/// precedence in conflicts during the merge.
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdUtils/api.h"
+#include "pxr/usd/sdf/declareHandles.h"
+#include "pxr/usd/sdf/spec.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+SDF_DECLARE_HANDLES(SdfLayer);
 
 /// The function will recurse down the root prims of each layer,
 /// either making clean copies if no path match is found or recursing to
@@ -91,6 +96,7 @@ SDF_DECLARE_HANDLES(SdfLayer);
 /// Verification is done post stitching to warn the user if time samples 
 /// outside of the range were provided or if a begin frame is missing to 
 /// corresponding end frame or vise-versa.
+USDUTILS_API
 void UsdUtilsStitchLayers(const SdfLayerHandle& strongLayer, 
                           const SdfLayerHandle& weakLayer,
                           bool ignoreTimeSamples = false);
@@ -101,8 +107,12 @@ void UsdUtilsStitchLayers(const SdfLayerHandle& strongLayer,
 /// we will follow our traditional rule: If \p strongObj has the key 
 /// already, nothing changes, if it does not and \p weakObj does, 
 /// we will copy \p weakObj's info over.
+USDUTILS_API
 void UsdUtilsStitchInfo(const SdfSpecHandle& strongObj, 
                         const SdfSpecHandle& weakObj,
                         bool ignoreTimeSamples = false);
 
-#endif // _USDUTILS_STITCH_H_
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif /* USDUTILS_STITCH_H */

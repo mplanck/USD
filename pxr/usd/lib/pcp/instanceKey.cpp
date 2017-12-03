@@ -21,15 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/usd/pcp/instanceKey.h"
 
+#include "pxr/pxr.h"
+#include "pxr/usd/pcp/instanceKey.h"
 #include "pxr/usd/pcp/composeSite.h"
 #include "pxr/usd/pcp/diagnostic.h"
 #include "pxr/usd/pcp/instancing.h"
 
 #include "pxr/base/tracelite/trace.h"
 
-#include <boost/foreach.hpp>
+PXR_NAMESPACE_OPEN_SCOPE
 
 struct PcpInstanceKey::_Collector
 {
@@ -41,7 +42,7 @@ struct PcpInstanceKey::_Collector
             // arc in the node graph -- but otherwise we must continue,
             // since payload arcs can be optionally included, and
             // therefore affect instance sharing.
-            if (not indexHasPayload) {
+            if (!indexHasPayload) {
                 return false;
             }
         }
@@ -63,7 +64,7 @@ PcpInstanceKey::PcpInstanceKey(const PcpPrimIndex& primIndex)
     TRACE_FUNCTION();
 
     // Instance keys only apply to instanceable prim indexes.
-    if (not primIndex.IsInstanceable()) {
+    if (!primIndex.IsInstanceable()) {
         return;
     }
 
@@ -75,18 +76,17 @@ PcpInstanceKey::PcpInstanceKey(const PcpPrimIndex& primIndex)
 
     // Collect all authored variant selections in strong-to-weak order.
     SdfVariantSelectionMap variantSelection;
-    TF_FOR_ALL(nodeIt, primIndex.GetNodeRange()) {
-        if (nodeIt->CanContributeSpecs()) {
-            PcpComposeSiteVariantSelections(
-                nodeIt->GetSite(), &variantSelection);
+    for (const PcpNodeRef &node: primIndex.GetNodeRange()) {
+        if (node.CanContributeSpecs()) {
+            PcpComposeSiteVariantSelections(node, &variantSelection);
         }
     }
     _variantSelection.assign(variantSelection.begin(), variantSelection.end());
     
-    BOOST_FOREACH(const _Arc& arc, _arcs) {
+    for (const auto& arc : _arcs) {
         boost::hash_combine(_hash, arc.GetHash());
     }
-    BOOST_FOREACH(const _VariantSelection& vsel, _variantSelection) {
+    for (const auto& vsel : _variantSelection) {
         boost::hash_combine(_hash, vsel);
     }
 }
@@ -94,14 +94,14 @@ PcpInstanceKey::PcpInstanceKey(const PcpPrimIndex& primIndex)
 bool 
 PcpInstanceKey::operator==(const PcpInstanceKey& rhs) const
 {
-    return _variantSelection == rhs._variantSelection and
+    return _variantSelection == rhs._variantSelection &&
         _arcs == rhs._arcs;
 }
 
 bool 
 PcpInstanceKey::operator!=(const PcpInstanceKey& rhs) const
 {
-    return not (*this == rhs);
+    return !(*this == rhs);
 }
 
 std::string 
@@ -113,7 +113,7 @@ PcpInstanceKey::GetString() const
         s += "  (none)\n";
     }
     else {
-        BOOST_FOREACH(const _Arc& arc, _arcs) {
+        for (const auto& arc : _arcs) {
             s += TfStringPrintf("  %s%s : %s\n",
                 TfEnum::GetDisplayName(arc._arcType).c_str(),
                 (arc._timeOffset.IsIdentity() ? 
@@ -130,7 +130,7 @@ PcpInstanceKey::GetString() const
         s += "  (none)";
     }
     else {
-        BOOST_FOREACH(const _VariantSelection& vsel, _variantSelection) {
+        for (const auto& vsel : _variantSelection) {
             s += TfStringPrintf("  %s = %s\n", 
                 vsel.first.c_str(), vsel.second.c_str());
         }
@@ -140,3 +140,5 @@ PcpInstanceKey::GetString() const
 
     return s;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

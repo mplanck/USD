@@ -24,22 +24,27 @@
 #include "pxr/imaging/glf/glew.h"
 #include "pxr/imaging/hdx/simpleLightTask.h"
 
-#include "pxr/imaging/hdx/tokens.h"
 #include "pxr/imaging/hdx/shadowMatrixComputation.h"
+#include "pxr/imaging/hdx/simpleLightingShader.h"
+#include "pxr/imaging/hdx/tokens.h"
 
-#include "pxr/imaging/hd/camera.h"
-#include "pxr/imaging/hd/light.h"
+#include "pxr/imaging/hdSt/camera.h"
+#include "pxr/imaging/hdSt/light.h"
+
 #include "pxr/imaging/hd/perfLog.h"
+#include "pxr/imaging/hd/primGather.h"
 #include "pxr/imaging/hd/renderIndex.h"
 #include "pxr/imaging/hd/renderPass.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
-#include "pxr/imaging/hd/simpleLightingShader.h"
 
 #include "pxr/imaging/glf/simpleLight.h"
 
 #include "pxr/base/gf/frustum.h"
 
 #include <boost/bind.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 static const GfVec2i _defaultShadowRes = GfVec2i(1024, 1024);
 
@@ -49,7 +54,7 @@ HdxSimpleLightTask::HdxSimpleLightTask(HdSceneDelegate* delegate, SdfPath const&
     : HdSceneTask(delegate, id) 
     , _camera()
     , _lights()
-    , _lightingShader(new HdSimpleLightingShader())
+    , _lightingShader(new HdxSimpleLightingShader())
     , _collectionVersion(0)
     , _enableShadows(false)
     , _viewport(0.0f, 0.0f, 0.0f, 0.0f)
@@ -65,7 +70,7 @@ void
 HdxSimpleLightTask::_Execute(HdTaskContext* ctx)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 }
 
 void
@@ -76,7 +81,7 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
     // Store the lighting context in the task context 
     // so later on other tasks can use this information 
     // draw shadows or other purposes
-    (*ctx)[HdTokens->lightingShader] =
+    (*ctx)[HdxTokens->lightingShader] =
         boost::dynamic_pointer_cast<HdLightingShader>(_lightingShader);
 
     _TaskDirtyState dirtyState;
@@ -94,15 +99,41 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
         _collectionVersion = dirtyState.collectionVersion;
 
         HdxSimpleLightTaskParams params;
-        if (not _GetSceneDelegateValue(HdTokens->params, &params)) {
+        if (!_GetSceneDelegateValue(HdTokens->params, &params)) {
             return;
         }
 
         HdSceneDelegate* delegate = GetDelegate();
-        _camera = delegate->GetRenderIndex().GetCamera(params.cameraPath);
-        _lights = _ComputeIncludedLights(delegate->GetRenderIndex().GetLights(),
-                                         params.lightIncludePaths,
-                                         params.lightExcludePaths);
+        HdRenderIndex &renderIndex = delegate->GetRenderIndex();
+        _camera = static_cast<const HdStCamera *>(
+                    renderIndex.GetSprim(HdPrimTypeTokens->camera,
+                                         params.cameraPath));
+
+        SdfPathVector lights;
+        if (renderIndex.IsSprimTypeSupported(HdPrimTypeTokens->light)) {
+            // XXX: This is inefficient, need to be optimized
+            SdfPathVector sprimPaths = renderIndex.GetSprimSubtree(
+                HdPrimTypeTokens->light, SdfPath::AbsoluteRootPath());
+
+            HdPrimGather gather;
+
+            gather.Filter(sprimPaths,
+                          params.lightIncludePaths,
+                          params.lightExcludePaths,
+                          &lights);
+        }
+
+        _lights.clear();
+        _lights.reserve(lights.size());
+        TF_FOR_ALL (it, lights) {
+            HdStLight const *light = static_cast<const HdStLight *>(
+                renderIndex.GetSprim(HdPrimTypeTokens->light, *it));
+
+            if (light != nullptr) {
+                _lights.push_back(light);
+            }
+        }
+
         _enableShadows = params.enableShadows;
 
         // XXX: compatibility hack for passing some unit tests until we have
@@ -113,18 +144,18 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
         _viewport = params.viewport;
     }
 
-    if (not TF_VERIFY(_camera)) {
+    if (!TF_VERIFY(_camera)) {
         return;
     }
 
     GlfSimpleLightingContextRefPtr const& lightingContext = 
                                     _lightingShader->GetLightingContext(); 
-    if (not TF_VERIFY(lightingContext)) {
+    if (!TF_VERIFY(lightingContext)) {
         return;
     }
 
     // Place lighting context in task context
-    (*ctx)[HdTokens->lightingContext] = lightingContext;
+    (*ctx)[HdxTokens->lightingContext] = lightingContext;
 
     VtValue modelViewMatrix = _camera->Get(HdShaderTokens->worldToViewMatrix);
     TF_VERIFY(modelViewMatrix.IsHolding<GfMatrix4d>());
@@ -159,7 +190,14 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
     for (size_t lightId = 0; lightId < numLights; ++lightId) {
         // Take a copy of the simple light into our temporary array and
         // update it with viewer-dependant values.
-        _glfSimpleLights.push_back(_lights[lightId]->GetParams());
+        VtValue vtLightParams = _lights[lightId]->Get(HdStLightTokens->params);
+
+        if (TF_VERIFY(vtLightParams.IsHolding<GlfSimpleLight>())) {
+            _glfSimpleLights.push_back(
+                vtLightParams.UncheckedGet<GlfSimpleLight>());
+        } else {
+            _glfSimpleLights.push_back(GlfSimpleLight());
+        }
 
         // Get a reference to the light, so we can patch it.
         GlfSimpleLight &glfl = _glfSimpleLights.back();
@@ -172,7 +210,9 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
         // the position and spot direction to the right
         // space
         if (glfl.IsCameraSpaceLight()) {
-            const GfMatrix4d &lightXform = _lights[lightId]->GetTransform();
+            VtValue vtXform = _lights[lightId]->Get(HdStLightTokens->transform);
+            const GfMatrix4d &lightXform =
+                vtXform.IsHolding<GfMatrix4d>() ? vtXform.Get<GfMatrix4d>() : GfMatrix4d(1);
 
             GfVec4f lightPos(lightXform.GetRow(2));
             lightPos[3] = 0.0f;
@@ -180,8 +220,8 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
             glfl.SetPosition(lightPos * invCamXform);
             glfl.SetSpotDirection(GfVec3f(invCamXform.TransformDir(lightDir)));
         }
-         
-        VtValue vLightShadowParams =  _lights[lightId]->GetShadowParams();
+
+        VtValue vLightShadowParams =  _lights[lightId]->Get(HdStLightTokens->shadowParams);
         TF_VERIFY(vLightShadowParams.IsHolding<HdxShadowParams>());
         HdxShadowParams lightShadowParams = 
             vLightShadowParams.GetWithDefault<HdxShadowParams>(HdxShadowParams());
@@ -190,7 +230,7 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
         // we treat this light as if it had the shadow disabled
         // doing so we guarantee that shadowIndex will be -1
         // which will not create memory for the shadow maps 
-        if (not _enableShadows or not lightShadowParams.enabled) {
+        if (!_enableShadows || !lightShadowParams.enabled) {
             glfl.SetHasShadow(false);
         } 
 
@@ -198,8 +238,8 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
         // to calculate shadows
         if (glfl.HasShadow()) {
             // Extract the window policy to adjust the frustum correctly
-            VtValue windowPolicy = _camera->Get(HdTokens->windowPolicy);
-            if (not TF_VERIFY(windowPolicy.IsHolding<CameraUtilConformWindowPolicy>())) {
+            VtValue windowPolicy = _camera->Get(HdStCameraTokens->windowPolicy);
+            if (!TF_VERIFY(windowPolicy.IsHolding<CameraUtilConformWindowPolicy>())) {
                 return;
             }
 
@@ -237,11 +277,11 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
 
     if (shadowIndex > -1) {
         for (size_t lightId = 0; lightId < numLights; ++lightId) {
-            if (not _glfSimpleLights[lightId].HasShadow()) {
+            if (!_glfSimpleLights[lightId].HasShadow()) {
                 continue;
             }
 
-            VtValue vLightShadowParams =  _lights[lightId]->GetShadowParams();
+            VtValue vLightShadowParams =  _lights[lightId]->Get(HdStLightTokens->shadowParams);
             TF_VERIFY(vLightShadowParams.IsHolding<HdxShadowParams>());
             HdxShadowParams lightShadowParams = 
                 vLightShadowParams.GetWithDefault<HdxShadowParams>(
@@ -256,46 +296,6 @@ HdxSimpleLightTask::_Sync(HdTaskContext* ctx)
         }
     }
     lightingContext->SetShadows(_shadows);
-}
-
-HdLightSharedPtrVector
-_ComputeIncludedLights(
-    HdLightSharedPtrVector const & allLights,
-    SdfPathVector const & includedPaths,
-    SdfPathVector const & excludedPaths)
-{
-    HD_TRACE_FUNCTION();
-
-    HdLightSharedPtrVector result;
-
-    // In practice, the include and exclude containers will either
-    // be empty or have just one element. So, the complexity of this method
-    // should be dominated by the number of lights, which should also
-    // be small. The TRACE_FUNCTION above will help catch when this is
-    // no longer the case.
-    TF_FOR_ALL(lightIt, allLights) {
-        bool included = false;
-        TF_FOR_ALL(includePathIt, includedPaths) {
-            if ((*lightIt)->GetID().HasPrefix(*includePathIt)) {
-                included = true;
-                break;
-            }
-        }
-        if (not included) {
-            continue;
-        }
-        TF_FOR_ALL(excludePathIt, excludedPaths) {
-            if ((*lightIt)->GetID().HasPrefix(*excludePathIt)) {
-                included = false;
-                break;
-            }
-        }
-        if (included) {
-            result.push_back(*lightIt);
-        }
-    }
-
-    return result;
 }
 
 // -------------------------------------------------------------------------- //
@@ -319,18 +319,18 @@ bool operator==(const HdxSimpleLightTaskParams& lhs,
                 const HdxSimpleLightTaskParams& rhs) 
 {
     return lhs.cameraPath == rhs.cameraPath
-        and lhs.lightIncludePaths == rhs.lightIncludePaths
-        and lhs.lightExcludePaths == rhs.lightExcludePaths
-        and lhs.material == rhs.material
-        and lhs.sceneAmbient == rhs.sceneAmbient
-        and lhs.enableShadows == rhs.enableShadows
+        && lhs.lightIncludePaths == rhs.lightIncludePaths
+        && lhs.lightExcludePaths == rhs.lightExcludePaths
+        && lhs.material == rhs.material
+        && lhs.sceneAmbient == rhs.sceneAmbient
+        && lhs.enableShadows == rhs.enableShadows
        ;
 }
 
 bool operator!=(const HdxSimpleLightTaskParams& lhs, 
                 const HdxSimpleLightTaskParams& rhs) 
 {
-    return not(lhs == rhs);
+    return !(lhs == rhs);
 }
 
 // -------------------------------------------------------------------------- //
@@ -352,14 +352,17 @@ bool
 operator==(const HdxShadowParams& lhs, const HdxShadowParams& rhs)
 {
     return lhs.shadowMatrix == rhs.shadowMatrix
-       and lhs.resolution == rhs.resolution
-       and lhs.bias == rhs.bias
-       and lhs.blur == rhs.blur
-       and lhs.enabled == rhs.enabled;
+       && lhs.resolution == rhs.resolution
+       && lhs.bias == rhs.bias
+       && lhs.blur == rhs.blur
+       && lhs.enabled == rhs.enabled;
 }
 
 bool
 operator!=(const HdxShadowParams& lhs, const HdxShadowParams& rhs)
 {
-    return not (lhs == rhs);
+    return !(lhs == rhs);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

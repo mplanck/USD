@@ -21,9 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/layerOffset.h"
 #include "pxr/base/vt/valueFromPython.h"
-
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyUtils.h"
 
@@ -33,6 +34,10 @@ using namespace boost::python;
 
 using std::string;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
+
 static std::string
 _Repr(const SdfLayerOffset &self) {
     double offset = self.GetOffset();
@@ -40,7 +45,7 @@ _Repr(const SdfLayerOffset &self) {
 
     std::stringstream s;
     s << TF_PY_REPR_PREFIX + "LayerOffset(";
-    if (offset != 0.0 or scale != 1.0) {
+    if (offset != 0.0 || scale != 1.0) {
         s << offset;
         if (scale != 1.0)
             s << ", " << scale;
@@ -48,6 +53,8 @@ _Repr(const SdfLayerOffset &self) {
     s << ")";
     return s.str();
 }
+
+} // anonymous namespace 
 
 void wrapLayerOffset()
 {    
@@ -81,7 +88,7 @@ void wrapLayerOffset()
         .def( self * self )
         .def( self * double() )
 
-        .def("__repr__", ::_Repr)
+        .def("__repr__", _Repr)
         
         ;
 

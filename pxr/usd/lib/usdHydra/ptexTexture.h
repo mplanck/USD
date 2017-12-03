@@ -24,6 +24,10 @@
 #ifndef USDHYDRA_GENERATED_PTEXTEXTURE_H
 #define USDHYDRA_GENERATED_PTEXTEXTURE_H
 
+/// \file usdHydra/ptexTexture.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdHydra/api.h"
 #include "pxr/usd/usdHydra/texture.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -38,12 +42,16 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // PTEXTEXTURE                                                                //
 // -------------------------------------------------------------------------- //
 
+/// \class UsdHydraPtexTexture
+///
 ///
 class UsdHydraPtexTexture : public UsdHydraTexture
 {
@@ -72,15 +80,17 @@ public:
     }
 
     /// Destructor.
+    USDHYDRA_API
     virtual ~UsdHydraPtexTexture();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDHYDRA_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdHydraPtexTexture holding the prim adhering to this
+    /// Return a UsdHydraPtexTexture holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -89,6 +99,7 @@ public:
     /// UsdHydraPtexTexture(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDHYDRA_API
     static UsdHydraPtexTexture
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
@@ -96,11 +107,13 @@ public:
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDHYDRA_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDHYDRA_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -114,6 +127,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->Int
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: No Fallback
+    USDHYDRA_API
     UsdAttribute GetFaceIndexAttr() const;
 
     /// See GetFaceIndexAttr(), and also 
@@ -121,6 +135,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDHYDRA_API
     UsdAttribute CreateFaceIndexAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -134,6 +149,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->Int
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: No Fallback
+    USDHYDRA_API
     UsdAttribute GetFaceOffsetAttr() const;
 
     /// See GetFaceOffsetAttr(), and also 
@@ -141,6 +157,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDHYDRA_API
     UsdAttribute CreateFaceOffsetAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -148,10 +165,14 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

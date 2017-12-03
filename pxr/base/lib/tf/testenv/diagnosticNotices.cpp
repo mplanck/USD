@@ -23,7 +23,7 @@
 //
 /// \file tf/test/testTfDiagnosticNotices.cpp
 
-
+#include "pxr/pxr.h"
 #include "pxr/base/tf/diagnosticNotice.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/regTest.h"
@@ -37,7 +37,12 @@
 #include <fstream>
 #include <string>
 
+#if defined(ARCH_OS_WINDOWS)
+#   undef GetMessage // Defined on Windows.
+#endif
+
 using std::string;
+PXR_NAMESPACE_USING_DIRECTIVE
 
 enum TfTestDiagnosticCodes { SMALL, MEDIUM, LARGE };
 enum UnRegisteredErrorCode { UNREGISTERED };
@@ -167,7 +172,7 @@ Test_TfDiagnosticNotices()
     TF_ERROR(info, MEDIUM, "const char *, %s", "...");
     TF_ERROR(info, MEDIUM, errString);
 
-    TF_AXIOM(not m.IsClean());
+    TF_AXIOM(!m.IsClean());
 
     // Assert that 12 errors got issued.
     TF_AXIOM(std::distance(m.GetBegin(), m.GetEnd()) == 12);

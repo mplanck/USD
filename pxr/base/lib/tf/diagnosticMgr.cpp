@@ -21,16 +21,21 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/diagnosticMgr.h"
 
 #include "pxr/base/tf/debugCodes.h"
 #include "pxr/base/tf/diagnosticNotice.h"
 #include "pxr/base/tf/error.h"
 #include "pxr/base/tf/instantiateSingleton.h"
-#include "pxr/base/tf/pyExceptionState.h"
 #include "pxr/base/tf/registryManager.h"
 #include "pxr/base/tf/stackTrace.h"
 #include "pxr/base/tf/stringUtils.h"
+
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
+#include "pxr/base/tf/pyExceptionState.h"
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 #include "pxr/base/arch/debugger.h"
 #include "pxr/base/arch/demangle.h"
@@ -38,7 +43,6 @@
 #include "pxr/base/arch/stackTrace.h"
 #include "pxr/base/arch/threads.h"
 
-#include <boost/foreach.hpp>
 #include <boost/utility.hpp>
 
 #include <signal.h>
@@ -48,6 +52,8 @@
 
 using std::list;
 using std::string;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // Helper function for printing a diagnostic message. This is used in non-main
 // threads and when a delegate is not available.
@@ -75,24 +81,22 @@ TF_REGISTRY_FUNCTION(TfDebug)
         TF_ERROR_MARK_TRACKING,
         "capture stack traces at TfErrorMark ctor/dtor, enable "
         "TfReportActiveMarks debugging API.");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(TF_PRINT_ALL_POSTED_ERRORS_TO_STDERR,
+        "print all posted errors immediately, meaning that even errors that "
+        "are expected and handled will be printed, producing possibly "
+        "confusing output");
 }
 
 
-// Abort, but first remove Tf's signal handler so we don't invoke the session
-// logging mechanism.  This is meant for use by things like TF_FATAL_ERROR,
+// Abort without logging.  This is meant for use by things like TF_FATAL_ERROR,
 // which already log (more extensive) session information before doing the
 // abort.
 static
 void
 Tf_UnhandledAbort()
 {
-    // Remove signal handler.
-    struct sigaction act;
-    act.sa_handler = SIG_DFL;
-    act.sa_flags   = 0;
-    sigemptyset(&act.sa_mask);
-    sigaction(SIGABRT, &act, NULL);
-    abort();
+    constexpr bool logging = true;
+    ArchAbort(!logging);
 }
 
 TF_INSTANTIATE_SINGLETON(TfDiagnosticMgr);
@@ -134,20 +138,20 @@ TfDiagnosticMgr::SetDelegate( DelegateWeakPtr const &delegate )
 
 void
 TfDiagnosticMgr::AppendError(TfError const &e) {
-    if (not HasActiveErrorMark()) {
+    if (!HasActiveErrorMark()) {
         _ReportError(e);
     } else {
         e._data->_serial = _nextSerial.fetch_and_increment();
         ErrorList &errorList = _errorList.local();
         errorList.push_back(e);
-        _AppendErrorsToLogText(boost::prior(errorList.end())); 
+        _AppendErrorsToLogText(std::prev(errorList.end())); 
     }
 }
 
 void
 TfDiagnosticMgr::_SpliceErrors(ErrorList &src)
 {
-    if (not HasActiveErrorMark()) {
+    if (!HasActiveErrorMark()) {
         for (ErrorList::const_iterator
                  i = src.begin(), end = src.end(); i != end; ++i) {
             _ReportError(*i);
@@ -155,7 +159,7 @@ TfDiagnosticMgr::_SpliceErrors(ErrorList &src)
     } else {
         // Reassign new serial numbers to the errors.
         size_t serial = _nextSerial.fetch_and_add(src.size());
-        BOOST_FOREACH(TfError &error, src) {
+        for (auto& error : src) {
             error._data->_serial = serial++;
         }
         // Now splice them into the main list.
@@ -178,8 +182,16 @@ TfDiagnosticMgr::PostError(TfEnum errorCode, const char* errorCodeString,
     if (TfDebug::IsEnabled(TF_ATTACH_DEBUGGER_ON_ERROR))
         ArchDebuggerTrap();
 
-    if (TfDebug::IsEnabled(TF_LOG_STACK_TRACE_ON_ERROR)) {
+    const bool logStackTraceOnError =
+        TfDebug::IsEnabled(TF_LOG_STACK_TRACE_ON_ERROR);
+
+    if (logStackTraceOnError ||
+        TfDebug::IsEnabled(TF_PRINT_ALL_POSTED_ERRORS_TO_STDERR)) {
+    
         _PrintDiagnostic(stderr, errorCode, context, commentary, info);
+    }
+
+    if (logStackTraceOnError) {
         TfLogStackTrace("ERROR", /* logToDb */ false);
     }
 
@@ -203,9 +215,9 @@ TfDiagnosticMgr::_ReportError(const TfError &err)
 {
     const bool isMainThread = ArchIsMainThread();
 
-    if (isMainThread and _delegate) {
+    if (isMainThread && _delegate) {
         _delegate->IssueError(err);
-    } else if (not err.GetQuiet()) {
+    } else if (!err.GetQuiet()) {
         _PrintDiagnostic(stderr,
                          err.GetDiagnosticCode(),
                          err.GetContext(),
@@ -226,7 +238,7 @@ TfDiagnosticMgr::PostWarning(
     if (TfDebug::IsEnabled(TF_ATTACH_DEBUGGER_ON_WARNING))
         ArchDebuggerTrap();
 
-    if (not ArchIsMainThread()) {
+    if (!ArchIsMainThread()) {
         _PrintDiagnostic(stderr, warningCode, context, commentary, info);
         return;
     }
@@ -238,7 +250,7 @@ TfDiagnosticMgr::PostWarning(
 
     if (_delegate)
         _delegate->IssueWarning(warning);
-    else if (not quiet)
+    else if (!quiet)
         _PrintDiagnostic(stderr, warningCode, context, commentary, info);
 
     TfDiagnosticNotice::IssuedWarning(warning).Send(TfCreateWeakPtr(this));
@@ -258,7 +270,7 @@ void TfDiagnosticMgr::PostStatus(
     TfCallContext const &context, std::string const &commentary,
     TfDiagnosticInfo info, bool quiet) const
 {
-    if (not ArchIsMainThread()) {
+    if (!ArchIsMainThread()) {
         _PrintDiagnostic(stdout, statusCode, context, commentary, info);
         return;
     }
@@ -270,7 +282,7 @@ void TfDiagnosticMgr::PostStatus(
 
     if (_delegate)
         _delegate->IssueStatus(status);
-    else if (not quiet)
+    else if (!quiet)
         _PrintDiagnostic(stderr, statusCode, context, commentary, info);
 
     TfDiagnosticNotice::IssuedStatus(status).Send(TfCreateWeakPtr(this));
@@ -289,7 +301,7 @@ void TfDiagnosticMgr::PostFatal(TfCallContext const &context,
                                 TfEnum statusCode,
                                 std::string const &msg) const
 {
-    if (TfDebug::IsEnabled(TF_ATTACH_DEBUGGER_ON_ERROR) or
+    if (TfDebug::IsEnabled(TF_ATTACH_DEBUGGER_ON_ERROR) ||
         TfDebug::IsEnabled(TF_ATTACH_DEBUGGER_ON_FATAL_ERROR))
         ArchDebuggerTrap();
 
@@ -304,7 +316,7 @@ void TfDiagnosticMgr::PostFatal(TfCallContext const &context,
         fe.Send(TfCreateWeakPtr(this));
     }
 
-    if (isMainThread and _delegate) {
+    if (isMainThread && _delegate) {
         _delegate->IssueFatalError(context, msg);
     } else {
         if (statusCode == TF_DIAGNOSTIC_CODING_ERROR_TYPE) {
@@ -342,7 +354,7 @@ TfDiagnosticMgr::_GetErrorMarkBegin(size_t mark, size_t *nErrors)
 {
     ErrorList &errorList = _errorList.local();
 
-    if (mark >= _nextSerial or errorList.empty()) {
+    if (mark >= _nextSerial || errorList.empty()) {
         if (nErrors)
             *nErrors = 0;
         return errorList.end();
@@ -353,7 +365,7 @@ TfDiagnosticMgr::_GetErrorMarkBegin(size_t mark, size_t *nErrors)
     size_t count = 0;
 
     ErrorList::reverse_iterator i = errorList.rbegin(), end = errorList.rend();
-    while (i != end and i->_data->_serial >= mark) {
+    while (i != end && i->_data->_serial >= mark) {
         ++i, ++count;
     }
 
@@ -373,51 +385,46 @@ TfDiagnosticMgr::EraseRange(ErrorIterator first, ErrorIterator last)
     return result;
 }
 
-TfDiagnosticMgr::ErrorIterator
+void
 TfDiagnosticMgr::ErrorHelper::PostWithInfo(
     const string& msg, TfDiagnosticInfo info) const
 {
     TfDiagnosticMgr::GetInstance().PostError(_errorCode, _errorCodeString,
         _context, msg, info, false);
-    return boost::prior(TfDiagnosticMgr::GetInstance().GetErrorEnd());
 }
 
-TfDiagnosticMgr::ErrorIterator
+void
 TfDiagnosticMgr::ErrorHelper::Post(const string& msg) const
 {
     TfDiagnosticMgr::GetInstance().PostError(_errorCode, _errorCodeString,
         _context, msg, TfDiagnosticInfo(), false);
-    return boost::prior(TfDiagnosticMgr::GetInstance().GetErrorEnd());
 }
 
-TfDiagnosticMgr::ErrorIterator
+void
 TfDiagnosticMgr::ErrorHelper::PostQuietly(
     const string& msg, TfDiagnosticInfo info) const
 {
     TfDiagnosticMgr::GetInstance().PostError(_errorCode, _errorCodeString,
         _context, msg, info, true);
-    return boost::prior(TfDiagnosticMgr::GetInstance().GetErrorEnd());
 }
 
 
-TfDiagnosticMgr::ErrorIterator
+void
 TfDiagnosticMgr::ErrorHelper::Post(const char* fmt, ...) const
 {
     va_list ap;
     va_start(ap, fmt);
     Post(TfVStringPrintf(fmt, ap));
     va_end(ap);
-    return boost::prior(TfDiagnosticMgr::GetInstance().GetErrorEnd());
 }
 
-TfDiagnosticMgr::ErrorIterator
+void
 TfDiagnosticMgr::ErrorHelper::PostQuietly(const char* fmt, ...) const
 {
     va_list ap;
     va_start(ap, fmt);
     PostQuietly(TfVStringPrintf(fmt, ap));
     va_end(ap);
-    return boost::prior(TfDiagnosticMgr::GetInstance().GetErrorEnd());
 }
 
 void
@@ -482,55 +489,80 @@ TfDiagnosticMgr::GetCodeName(const TfEnum &code)
 }
 
 void
-TfDiagnosticMgr::_SetLogInfoForErrors(const std::string &logText) const
+TfDiagnosticMgr::_SetLogInfoForErrors(
+    std::vector<std::string> const &logText) const
 {
     ArchSetExtraLogInfoForErrors(
         TfStringPrintf("Thread %s Pending Diagnostics", 
             TfStringify(std::this_thread::get_id()).c_str()),
-        logText.empty() ? NULL : logText.c_str());
+        logText.empty() ? nullptr : &logText);
 }
 
 void
-TfDiagnosticMgr
-::_AppendErrorTextToString(ErrorIterator i, std::string &out)
+TfDiagnosticMgr::_LogText::AppendAndPublish(
+    ErrorIterator begin, ErrorIterator end)
 {
-    for (ErrorIterator end = GetErrorEnd(); i != end; ++i) {
-        out += _FormatDiagnostic(*i, i->_data->_info);
+    return _AppendAndPublishImpl(/*clear=*/false, begin, end);
+}
+
+void
+TfDiagnosticMgr::_LogText::RebuildAndPublish(
+    ErrorIterator begin, ErrorIterator end)
+{
+    return _AppendAndPublishImpl(/*clear=*/true, begin, end);
+}
+
+void
+TfDiagnosticMgr::_LogText::_AppendAndPublishImpl(
+    bool clear, ErrorIterator begin, ErrorIterator end)
+{
+    // The requirement at the Arch level for ArchSetExtraLogInfoForErrors is
+    // that the pointer we hand it must remain valid, and we can't mutate the
+    // structure it points to since if another thread crashes, Arch will read it
+    // to generate the crash report.  So instead we maintain two copies.  We
+    // update one copy to the new text anpd then publish it to Arch, effectively
+    // swapping out the old copy.  Then we update the old copy to match.  Next
+    // time through we do it again but with the data structures swapped, which
+    // is tracked by 'parity'.
+    auto *first = &texts.first;
+    auto *second = &texts.second;
+    if (parity)
+        std::swap(first, second);
+
+    // Update first.
+    if (clear)
+        first->clear();
+    for (ErrorIterator i = begin; i != end; ++i) {
+        first->push_back(_FormatDiagnostic(*i, i->_data->_info));
     }
+
+    // Publish.
+    ArchSetExtraLogInfoForErrors(
+        TfStringPrintf("Thread %s Pending Diagnostics", 
+                       TfStringify(std::this_thread::get_id()).c_str()),
+        first->empty() ? nullptr : first);
+
+    // Update second to match, arch is no longer looking at it.
+    if (clear)
+        second->clear();
+    for (ErrorIterator i = begin; i != end; ++i) {
+        second->push_back(_FormatDiagnostic(*i, i->_data->_info));
+    }
+
+    // Switch parity.
+    parity = !parity;
 }
 
 void
 TfDiagnosticMgr::_AppendErrorsToLogText(ErrorIterator i)
 {
-    // Copy the string.
-    boost::scoped_ptr<std::string> &oldStr = _logText.local();
-    boost::scoped_ptr<std::string>
-        newStr(oldStr ? new std::string(*oldStr) : new std::string());
-
-    // Write the errors.
-    _AppendErrorTextToString(i, *newStr);
-
-    // Set the log info.
-    _SetLogInfoForErrors(*newStr);
-
-    // Delete the old string by swapping it out for the new in the TLS.
-    oldStr.swap(newStr);
+    _logText.local().AppendAndPublish(i, GetErrorEnd());
 }
 
 void
 TfDiagnosticMgr::_RebuildErrorLogText()
 {
-    // Create a new string.
-    boost::scoped_ptr<std::string> newStr(new std::string());
-
-    // Write the errors.
-    _AppendErrorTextToString(GetErrorBegin(), *newStr);
-
-    // Set the log info.
-    _SetLogInfoForErrors(*newStr);
-
-    // Delete the old string by swapping it out for the new in the TLS.
-    _logText.local().swap(newStr);
+    _logText.local().RebuildAndPublish(GetErrorBegin(), GetErrorEnd());
 }
 
 static std::string
@@ -557,10 +589,12 @@ _FormatDiagnostic(const TfEnum &code, const TfCallContext &context,
                                 msg.c_str());
     }
 
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
     if (const TfPyExceptionState* exc =
             boost::any_cast<TfPyExceptionState>(&info)) {
         output += TfStringPrintf("%s\n", exc->GetExceptionString().c_str());
     }
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
     return output;
 }
@@ -580,3 +614,5 @@ _PrintDiagnostic(FILE *fout, const TfEnum &code, const TfCallContext &context,
 
     fprintf(fout, "%s", _FormatDiagnostic(code, context, msg, info).c_str());
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

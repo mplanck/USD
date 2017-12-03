@@ -28,15 +28,19 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
     TfType::Define<UsdGeomCamera,
         TfType::Bases< UsdGeomXformable > >();
     
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("Camera") to find
-    // TfType<UsdGeomCamera>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("Camera")
+    // to find TfType<UsdGeomCamera>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, UsdGeomCamera>("Camera");
 }
 
@@ -49,7 +53,7 @@ UsdGeomCamera::~UsdGeomCamera()
 UsdGeomCamera
 UsdGeomCamera::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomCamera();
     }
@@ -62,7 +66,7 @@ UsdGeomCamera::Define(
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("Camera");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomCamera();
     }
@@ -280,6 +284,40 @@ UsdGeomCamera::CreateStereoRoleAttr(VtValue const &defaultValue, bool writeSpars
                        writeSparsely);
 }
 
+UsdAttribute
+UsdGeomCamera::GetShutterOpenAttr() const
+{
+    return GetPrim().GetAttribute(UsdGeomTokens->shutterOpen);
+}
+
+UsdAttribute
+UsdGeomCamera::CreateShutterOpenAttr(VtValue const &defaultValue, bool writeSparsely) const
+{
+    return UsdSchemaBase::_CreateAttr(UsdGeomTokens->shutterOpen,
+                       SdfValueTypeNames->Double,
+                       /* custom = */ false,
+                       SdfVariabilityVarying,
+                       defaultValue,
+                       writeSparsely);
+}
+
+UsdAttribute
+UsdGeomCamera::GetShutterCloseAttr() const
+{
+    return GetPrim().GetAttribute(UsdGeomTokens->shutterClose);
+}
+
+UsdAttribute
+UsdGeomCamera::CreateShutterCloseAttr(VtValue const &defaultValue, bool writeSparsely) const
+{
+    return UsdSchemaBase::_CreateAttr(UsdGeomTokens->shutterClose,
+                       SdfValueTypeNames->Double,
+                       /* custom = */ false,
+                       SdfVariabilityVarying,
+                       defaultValue,
+                       writeSparsely);
+}
+
 namespace {
 static inline TfTokenVector
 _ConcatenateAttributeNames(const TfTokenVector& left,const TfTokenVector& right)
@@ -308,6 +346,8 @@ UsdGeomCamera::GetSchemaAttributeNames(bool includeInherited)
         UsdGeomTokens->fStop,
         UsdGeomTokens->focusDistance,
         UsdGeomTokens->stereoRole,
+        UsdGeomTokens->shutterOpen,
+        UsdGeomTokens->shutterClose,
     };
     static TfTokenVector allNames =
         _ConcatenateAttributeNames(
@@ -320,11 +360,18 @@ UsdGeomCamera::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 template<class T>
 static boost::optional<T> _GetValue(const UsdPrim &prim,
@@ -332,14 +379,14 @@ static boost::optional<T> _GetValue(const UsdPrim &prim,
                                     const UsdTimeCode &time)
 {
     const UsdAttribute attr = prim.GetAttribute(name);
-    if (not attr) {
+    if (!attr) {
         TF_WARN("%s attribute on prim %s missing.",
                 name.GetText(), prim.GetPath().GetText());
         return boost::none;
     }
     
     T value;
-    if (not attr.Get(&value, time)) {
+    if (!attr.Get(&value, time)) {
         TF_WARN("Failed to extract value from attribute %s at <%s>.",
                 name.GetText(), attr.GetPath().GetText());
         return boost::none;
@@ -409,38 +456,12 @@ _VectorVec4fToVtArray(const std::vector<GfVec4f> &vec)
     return result;
 }
 
-static
-std::vector<GfVec4f>
-_TransformClippingPlanes(const std::vector<GfVec4f> &clippingPlanes,
-                         const GfMatrix4d &inverseMatrix)
-{
-    std::vector<GfVec4f> result(clippingPlanes);
-
-    for (size_t i = 0; i < clippingPlanes.size(); i++) {
-        // Apply matrix to normal vectors of clipping planes
-        const GfVec3f normal = inverseMatrix.TransformDir(
-            GfVec3f(clippingPlanes[i][0],
-                    clippingPlanes[i][1],
-                    clippingPlanes[i][2]));
-
-        result[i][0] = normal[0];
-        result[i][1] = normal[1];
-        result[i][2] = normal[2];
-    }
-
-    return result;
-}
-
 GfCamera
-UsdGeomCamera::GetCamera(const UsdTimeCode &time, const bool isZup) const
+UsdGeomCamera::GetCamera(const UsdTimeCode &time) const
 {
     GfCamera camera;
 
-    // If USD has legacy z-Up encoded cameras, convert to y-Up encoded
-    // cameras.
     camera.SetTransform(
-        isZup ?
-        GfCamera::Z_UP_TO_Y_UP_MATRIX * ComputeLocalToWorldTransform(time) :
         ComputeLocalToWorldTransform(time));
 
     if (const boost::optional<TfToken> projection = _GetValue<TfToken>(
@@ -483,18 +504,7 @@ UsdGeomCamera::GetCamera(const UsdTimeCode &time, const bool isZup) const
         _GetValue<VtArray<GfVec4f> >(
             GetPrim(), UsdGeomTokens->clippingPlanes, time)) {
 
-        // If we have the clipping planes for a z-Up camera, we already
-        // applied a rotation by 90 degrees to the camera matrix. For the
-        // clipping planes to stay the same, we need to apply the inverse
-        // matrix to their normals.
-        if (isZup) {
-            camera.SetClippingPlanes(
-                _TransformClippingPlanes(
-                    _VtArrayVec4fToVector(*clippingPlanes),
-                    GfCamera::Y_UP_TO_Z_UP_MATRIX));
-        } else {
-            camera.SetClippingPlanes(_VtArrayVec4fToVector(*clippingPlanes));
-        }
+        camera.SetClippingPlanes(_VtArrayVec4fToVector(*clippingPlanes));
     }
 
     if (const boost::optional<float> fStop = _GetValue<float>(
@@ -536,3 +546,5 @@ UsdGeomCamera::SetFromCamera(const GfCamera &camera, const UsdTimeCode &time)
     GetFStopAttr().Set(camera.GetFStop(), time);
     GetFocusDistanceAttr().Set(camera.GetFocusDistance(), time);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

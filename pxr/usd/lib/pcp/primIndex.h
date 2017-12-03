@@ -24,6 +24,8 @@
 #ifndef PCP_PRIM_INDEX_H
 #define PCP_PRIM_INDEX_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/pcp/api.h"
 #include "pxr/usd/pcp/composeSite.h"
 #include "pxr/usd/pcp/errors.h"
 #include "pxr/usd/pcp/iterator.h"
@@ -34,9 +36,16 @@
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/hashmap.h"
 #include "pxr/base/tf/hashset.h"
+
 #include <boost/shared_ptr.hpp>
 #include <boost/unordered_map.hpp>
+
+#include <tbb/spin_rw_mutex.h>
+
+#include <functional>
 #include <map>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 SDF_DECLARE_HANDLES(SdfLayer);
 SDF_DECLARE_HANDLES(SdfPrimSpec);
@@ -52,28 +61,8 @@ class PcpPrimIndexOutputs;
 class PcpPayloadDecorator;
 class SdfPath;
 
-// A set of sites that a given site depends on.  Also notes if the type of
-// dependency.  The sites use a layer stack ref ptr so PcpLayerStackSite
-// isn't used.
-class PcpPrimIndexDependencies {
-public:
-    typedef std::pair<PcpLayerStackRefPtr, SdfPath> Site;
-    struct Hash {
-        size_t operator()(const Site& site) const;
-    };
-
-    /// Swap contents with \p r.
-    inline void swap(PcpPrimIndexDependencies &r) { sites.swap(r.sites); }
-
-    typedef boost::unordered_map<Site, PcpDependencyType, Hash> Map;
-    Map sites;
-};
-
-/// Free function version for generic code and ADL.
-inline void
-swap(PcpPrimIndexDependencies &l, PcpPrimIndexDependencies &r) { l.swap(r); } 
-
 /// \class PcpPrimIndex
+///
 /// PcpPrimIndex is an index of the all sites of scene description that
 /// contribute opinions to a specific prim, under composition
 /// semantics.
@@ -87,9 +76,12 @@ swap(PcpPrimIndexDependencies &l, PcpPrimIndexDependencies &r) { l.swap(r); }
 class PcpPrimIndex
 {
 public:
+    /// Default construct an empty, invalid prim index.
+    PCP_API
     PcpPrimIndex();
 
     /// Copy-construct a prim index.
+    PCP_API
     PcpPrimIndex(const PcpPrimIndex& rhs);
 
     /// Assignment.
@@ -99,33 +91,45 @@ public:
     }
 
     /// Swap the contents of this prim index with \p index.
+    PCP_API
     void Swap(PcpPrimIndex& rhs);
 
     /// Same as Swap(), but standard name.
     inline void swap(PcpPrimIndex &rhs) { Swap(rhs); }
 
+    /// Return true if this index is valid.
+    /// A default-constructed index is invalid.
+    bool IsValid() const { return bool(_graph); }
+
+    PCP_API
     void SetGraph(const PcpPrimIndex_GraphRefPtr& graph);
+    PCP_API
     PcpPrimIndex_GraphPtr GetGraph() const;
 
     /// Returns the root node of the prim index graph.
+    PCP_API
     PcpNodeRef GetRootNode() const;
 
     /// Returns the path of the prim whose opinions are represented by this 
     /// prim index.
+    PCP_API
     const SdfPath& GetPath() const;
 
     /// Returns true if this prim index contains any scene description
     /// opinions.
+    PCP_API
     bool HasSpecs() const;
 
     /// Returns true if the prim has an authored payload arc.
     /// The payload contents are only resolved and included
     /// if this prim's path is in the payload inclusion set
     /// provided in PcpPrimIndexInputs.
+    PCP_API
     bool HasPayload() const;
 
     /// Returns true if this prim index was composed in USD mode.
     /// \see PcpCache::IsUsd().
+    PCP_API
     bool IsUsd() const;
 
     /// Returns true if this prim index is instanceable.
@@ -133,19 +137,8 @@ public:
     /// guaranteed to have the same set of opinions, but may not have
     /// local opinions about name children.
     /// \see PcpInstanceKey
+    PCP_API
     bool IsInstanceable() const;
-
-    /// Get the set of asset paths used by direct arcs in this prim.
-    /// This set does not include asset paths used by ancestral arcs
-    /// (from namespace ancestors), which may also contribute opinions
-    /// to this prim.  It also includes any asset paths that were
-    /// requested by arcs, but could not be resolved.
-    std::vector<std::string> GetUsedAssetPaths() const;
-
-    /// Record a used asset path.
-    /// Only meant for internal use while constructing a PcpPrimIndex.
-    void AddUsedAssetPath(const std::string& assetPath);
-    void AddUsedAssetPaths(const std::vector<std::string>& assetPaths);
 
     /// \name Iteration
     /// @{
@@ -155,14 +148,17 @@ public:
     /// strong-to-weak order.
     /// 
     /// By default, this returns a range encompassing the entire index.
+    PCP_API
     PcpNodeRange GetNodeRange(PcpRangeType rangeType = PcpRangeTypeAll) const;
 
     /// Returns range of iterators that encompasses all prims, in
     /// strong-to-weak order.
+    PCP_API
     PcpPrimRange GetPrimRange(PcpRangeType rangeType = PcpRangeTypeAll) const;
 
     /// Returns range of iterators that encompasses all prims from the
     /// site of \p node. \p node must belong to this prim index.
+    PCP_API
     PcpPrimRange GetPrimRangeForNode(const PcpNodeRef& node) const;
 
     /// @}
@@ -172,11 +168,13 @@ public:
 
     /// Returns the node that brings opinions from \p primSpec into
     /// this prim index. If no such node exists, returns an invalid PcpNodeRef.
+    PCP_API
     PcpNodeRef GetNodeProvidingSpec(const SdfPrimSpecHandle& primSpec) const;
 
     /// Returns the node that brings opinions from the Sd prim spec at \p layer
     /// and \p path into this prim index. If no such node exists, returns an
     /// invalid PcpNodeRef.
+    PCP_API
     PcpNodeRef GetNodeProvidingSpec(
         const SdfLayerHandle& layer, const SdfPath& path) const;
 
@@ -191,6 +189,7 @@ public:
     }
 
     /// Prints various statistics about this prim index.
+    PCP_API
     void PrintStatistics() const;
 
     /// Dump the prim index contents to a string.
@@ -199,19 +198,18 @@ public:
     /// nodes will include information about the originating inherit node.
     /// If \p includeMaps is \c true, output for each node will include the
     /// mappings to the parent and root node.
+    PCP_API
     std::string DumpToString(
         bool includeInheritOriginInfo = true,
         bool includeMaps = true) const;
 
     /// Dump the prim index in dot format to the file named \p filename.
     /// See Dump(...) for information regarding arguments.
+    PCP_API
     void DumpToDotGraph(
         const std::string& filename,
         bool includeInheritOriginInfo = true,
         bool includeMaps = false) const;
-
-    /// Verify that this is index is well-formed.
-    void Validate();
 
     /// @}
 
@@ -221,12 +219,14 @@ public:
 
     /// Compute the prim child names for the given path. \p errors will 
     /// contain any errors encountered while performing this operation.
+    PCP_API
     void ComputePrimChildNames(TfTokenVector *nameOrder,
                                PcpTokenSet *prohibitedNameSet) const;
 
     /// Compute the prim property names for the given path. \p errors will
     /// contain any errors encountered while performing this operation.  The
     /// \p nameOrder vector must not contain any duplicate entries.
+    PCP_API
     void ComputePrimPropertyNames(TfTokenVector *nameOrder) const;
 
     /// Compose the authored prim variant selections.
@@ -236,12 +236,14 @@ public:
     /// if they are invalid.
     ///
     /// \note This result is not cached, but computed each time.
+    PCP_API
     SdfVariantSelectionMap ComposeAuthoredVariantSelections() const;
 
     /// Return the variant selecion applied for the named variant set.
     /// If none was applied, this returns an empty string.
     /// This can be different from the authored variant selection;
     /// for example, if the authored selection is invalid.
+    PCP_API
     std::string GetSelectionAppliedForVariantSet(
         const std::string &variantSet) const;
 
@@ -249,9 +251,9 @@ public:
 
 private:
     friend class PcpPrimIterator;
-    friend class Pcp_PrimIndexer;
-    friend void Pcp_BuildPrimStack(
-        PcpPrimIndex*, SdfSiteVector*, PcpNodeRefVector*);
+    friend struct Pcp_PrimIndexer;
+    friend void Pcp_RescanForSpecs(PcpPrimIndex*, bool usd,
+                                   bool updateHasSpecs);
 
     // The node graph representing the compositional structure of this prim.
     PcpPrimIndex_GraphRefPtr _graph;
@@ -263,52 +265,34 @@ private:
     // List of errors local to this prim, encountered during computation.
     // NULL if no errors were found (the expected common case).
     boost::scoped_ptr<PcpErrorVector> _localErrors;
-
-    // List of asset paths directly used by this prim.  
-    // This data cannot be derived purely from the
-    // graph since it includes asset paths that failed to resolve,
-    // and consequently did not contribute any nodes to the graph.
-    // NULL if this list is empty (the expected common case).
-    boost::scoped_ptr<std::vector<std::string> > _usedAssetPaths;
 };
 
 /// Free function version for generic code and ADL.
 inline void swap(PcpPrimIndex &l, PcpPrimIndex &r) { l.swap(r); }
 
 /// \class PcpPrimIndexOutputs
+///
 /// Outputs of the prim indexing procedure.
-struct PcpPrimIndexOutputs {
+///
+class PcpPrimIndexOutputs 
+{
+public:
     /// Prim index describing the composition structure for the associated
     /// prim.
     PcpPrimIndex primIndex;
 
-    /// Dependencies found during prim indexing. Note that these dependencies
-    /// may be keeping structures (e.g., layer stacks) in the above prim index 
-    /// alive and must live on at least as long as the prim index.
-    PcpPrimIndexDependencies dependencies;
-    SdfSiteVector dependencySites;
-    PcpNodeRefVector dependencyNodes;
-
-    /// Spooky dependency specs are those that were consulted in the process
-    /// of building this prim index, but which are not a namespace ancestor
-    /// of this prim due to relocations.
-    PcpPrimIndexDependencies spookyDependencies;
-    SdfSiteVector spookyDependencySites;
-    PcpNodeRefVector spookyDependencyNodes;
-
     /// List of all errors encountered during indexing.
     PcpErrorVector allErrors;
+
+    /// True if this prim index has a payload that we included during indexing
+    /// that wasn't previously in the cache's payload include set.
+    bool includedDiscoveredPayload = false;
     
     /// Swap content with \p r.
     inline void swap(PcpPrimIndexOutputs &r) {
         primIndex.swap(r.primIndex);
-        dependencies.swap(r.dependencies);
-        dependencySites.swap(r.dependencySites);
-        dependencyNodes.swap(r.dependencyNodes);
-        spookyDependencies.swap(r.spookyDependencies);
-        spookyDependencySites.swap(r.spookyDependencySites);
-        spookyDependencyNodes.swap(r.spookyDependencyNodes);
         allErrors.swap(r.allErrors);
+        std::swap(includedDiscoveredPayload, r.includedDiscoveredPayload);
     }
 };
 
@@ -316,17 +300,20 @@ struct PcpPrimIndexOutputs {
 inline void swap(PcpPrimIndexOutputs &l, PcpPrimIndexOutputs &r) { l.swap(r); }
 
 /// \class PcpPrimIndexInputs
+///
 /// Inputs for the prim indexing procedure.
+///
 class PcpPrimIndexInputs {
 public:
     PcpPrimIndexInputs() 
-        : cache(NULL)
-        , variantFallbacks(NULL)
-        , includedPayloads(NULL)
-        , parentIndex(NULL)
+        : cache(nullptr)
+        , variantFallbacks(nullptr)
+        , includedPayloads(nullptr)
+        , includedPayloadsMutex(nullptr)
+        , parentIndex(nullptr)
+        , payloadDecorator(nullptr)
         , cull(true)
         , usd(false) 
-        , payloadDecorator(NULL)
     { }
 
     /// Returns true if prim index computations using this parameters object
@@ -354,12 +341,24 @@ public:
     PcpPrimIndexInputs& IncludedPayloads(const PayloadSet* payloadSet)
     { includedPayloads = payloadSet; return *this; }
 
+    /// Optional mutex for accessing includedPayloads.
+    PcpPrimIndexInputs &IncludedPayloadsMutex(tbb::spin_rw_mutex *mutex)
+    { includedPayloadsMutex = mutex; return *this; }
+
+    /// Optional predicate evaluated when a not-yet-included payload is
+    /// discovered while indexing.  If the predicate returns true, indexing
+    /// includes the payload and sets the includedDiscoveredPayload bit in the
+    /// outputs.
+    PcpPrimIndexInputs &IncludePayloadPredicate(
+        std::function<bool (const SdfPath &)> predicate)
+    { includePayloadPredicate = predicate; return *this; }
+    
     /// Whether subtrees that contribute no opinions should be culled
     /// from the index.
     PcpPrimIndexInputs& Cull(bool doCulling = true)
     { cull = doCulling; return *this; }
 
-    /// Whether the prim stack and its dependencies should be computed, and
+    /// Whether the prim stack should be computed, and
     /// whether relocates, inherits, permissions, symmetry, or payloads should
     /// be considered during prim index computation,
     PcpPrimIndexInputs& USD(bool doUSD = true)
@@ -374,17 +373,18 @@ public:
     PcpCache* cache;
     const PcpVariantFallbackMap* variantFallbacks;
     const PayloadSet* includedPayloads;
+    tbb::spin_rw_mutex *includedPayloadsMutex;
+    std::function<bool (const SdfPath &)> includePayloadPredicate;
     const PcpPrimIndex *parentIndex;
-    bool cull;
-    bool usd;
     std::string targetSchema;
     PcpPayloadDecorator* payloadDecorator;
+    bool cull;
+    bool usd;
 };
 
 /// Compute an index for the given path. \p errors will contain any errors
-/// encountered while performing this operation. Any encountered dependencies
-/// on remote layer stacks will be appended to \p dependencies;  it must not 
-/// be \c NULL because it's what keeps the layer stacks alive.
+/// encountered while performing this operation.
+PCP_API
 void
 PcpComputePrimIndex(
     const SdfPath& primPath,
@@ -394,25 +394,22 @@ PcpComputePrimIndex(
     ArResolver* pathResolver = NULL);
 
 /// Returns true if the 'new' default standin behavior is enabled.
+PCP_API
 bool
 PcpIsNewDefaultStandinBehaviorEnabled();
 
-// Sets the prim stack in \p index and returns the sites of prims that
-// \p index depends on in \p dependencySites, as well as the nodes from which 
-// these prims originated in \p dependencyNodes.
+// Sets the prim stack in \p index.
 void
-Pcp_BuildPrimStack(
-    PcpPrimIndex* index,
-    SdfSiteVector* dependencySites,
-    PcpNodeRefVector* dependencyNodes);
+Pcp_RescanForSpecs(PcpPrimIndex* index, bool usd);
 
-// Updates the prim stack and related flags in \p index,  and returns the sites 
-// of prims that \p index depends on in \p dependencySites, as well as the 
-// nodes from which these prims originated in \p dependencyNodes.
-void
-Pcp_UpdatePrimStack(
-    PcpPrimIndex* index,
-    SdfSiteVector* dependencySites,
-    PcpNodeRefVector* dependencyNodes);
+// Returns true if \p index should be recomputed due to changes to
+// any computed asset paths that were used to find or open layers
+// when originally composing \p index. This may be due to scene
+// description changes or external changes to asset resolution that
+// may affect the computation of those asset paths.
+bool
+Pcp_NeedToRecomputeDueToAssetPathChange(const PcpPrimIndex& index);
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // PCP_PRIM_INDEX_H

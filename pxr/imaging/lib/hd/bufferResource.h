@@ -24,15 +24,20 @@
 #ifndef HD_BUFFER_RESOURCE_H
 #define HD_BUFFER_RESOURCE_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/resource.h"
-#include "pxr/imaging/hd/conversions.h"
 
 #include "pxr/base/tf/token.h"
 
 #include <boost/shared_ptr.hpp>
+#include <cstddef>
 #include <utility>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class HdBufferResource;
 
@@ -41,17 +46,20 @@ typedef boost::shared_ptr<HdBufferResource> HdBufferResourceSharedPtr;
 typedef std::vector<
     std::pair<TfToken, HdBufferResourceSharedPtr> > HdBufferResourceNamedList;
 
-/// A specific type of HdResource (GPU resource) representing an OpenGL buffer
-/// object.
+/// \class HdBufferResource
+///
+/// A specific type of HdResource (GPU resource) representing a buffer object.
 ///
 class HdBufferResource : public HdResource {
 public:
+    HD_API
     HdBufferResource(TfToken const &role,
                      int glDataType,
                      short numComponents,
                      int arraySize,
                      int offset,
                      int stride);
+    HD_API
     ~HdBufferResource();
 
     /// OpenGL data type; GL_UNSIGNED_INT, etc
@@ -62,43 +70,33 @@ public:
     short GetNumComponents() const {return _numComponents;}
 
     /// Returns the size of a single component.
-    /// For example: sizeof(GLuint)
-    size_t GetComponentSize() const {
-        return HdConversions::GetComponentSize(_glDataType);
-    }
+    HD_API 
+    size_t GetComponentSize() const;
 
-    /// Returns the interleaved offset (in bytes) of this data
-    int GetOffset() const { return _offset; }
+    /// Returns the interleaved offset (in bytes) of this data.
+    int GetOffset() const {return _offset;}
 
-    /// Returns the stride (in bytes) of underlying buffer
-    int GetStride() const { return _stride; }
+    /// Returns the stride (in bytes) of underlying buffer.
+    int GetStride() const {return _stride;}
 
     /// Returns the size of array if this resource is a static-sized array.
     /// returns 1 for non-array resource.
-    int GetArraySize() const { return _arraySize; }
+    int GetArraySize() const {return _arraySize;}
 
-    /// Sets the OpenGL name/identifier for this resource and its size.
-    /// also caches the gpu address of the buffer.
-    virtual void SetAllocation(GLuint id, GLsizeiptr size);
-
-    /// Returns the gpu address (if available. otherwise returns 0).
-    uint64_t GetGPUAddress() const { return _gpuAddr; }
-
-    /// Returns the texture buffer view
-    GLuint GetTextureBuffer();
-
-    /// Returns the GLSL type name string of this resource
+    /// Returns the type name string of this resource
     /// to be used in codegen.
+    HD_API
     TfToken GetGLTypeName() const;
 
-private:
+protected:
     int _glDataType;
     short _numComponents;
     int _arraySize;
     int _offset;
     int _stride;
-    uint64_t _gpuAddr;
-    GLuint _texId;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HD_BUFFER_RESOURCE_H

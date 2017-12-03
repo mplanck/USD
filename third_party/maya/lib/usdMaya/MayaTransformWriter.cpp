@@ -21,17 +21,23 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/MayaTransformWriter.h"
 #include "usdMaya/util.h"
+#include "usdMaya/usdWriteJob.h"
 
 #include "pxr/usd/usdGeom/xform.h"
 #include "pxr/usd/usdGeom/xformCommonAPI.h"
 #include "pxr/usd/usdGeom/xformable.h"
 #include "pxr/usd/usd/stage.h"
+#include "pxr/usd/usd/inherits.h"
 
 #include <maya/MFnTransform.h>
 #include <maya/MPoint.h>
 #include <maya/MMatrix.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 template <typename GfVec3_T>
 static void
@@ -130,8 +136,8 @@ computeXFormOps(
         //
         // This to make sure static channels are setting their default while
         // animating ones are actually animating
-        if ((usdTime == UsdTimeCode::Default() and hasStatic and not hasAnimated) or
-            (usdTime != UsdTimeCode::Default() and hasAnimated)) {
+        if ((usdTime == UsdTimeCode::Default() && hasStatic && !hasAnimated) ||
+            (usdTime != UsdTimeCode::Default() && hasAnimated)) {
             setXformOp(xformops[channelIdx], value, usdTime);
         }
     }
@@ -149,8 +155,8 @@ _GatherAnimChannel(
         MString parentName, 
         MString xName, MString yName, MString zName, 
         std::vector<AnimChannel>* oAnimChanList, 
-        bool isWritingAnimation, 
-        bool setOpName = true)
+        bool isWritingAnimation,
+        bool setOpName)
 {
     AnimChannel chan;
     chan.opType = opType;
@@ -188,12 +194,12 @@ _GatherAnimChannel(
         // If we allow animation and either the parentsample or local sample is
         // not 0 then we havea ANIMATED sample else we have a scale and the
         // value is NOT 1 or if the value is NOT 0 then we have a static xform
-        if ((parentSample != 0 or PxrUsdMayaUtil::getSampledType(chan.plug[i], true) != 0) and
+        if ((parentSample != 0 || PxrUsdMayaUtil::getSampledType(chan.plug[i], true) != 0) && 
              isWritingAnimation) {
             chan.sampleType[i] = ANIMATED; 
             validComponents++;
         } 
-        else if (not GfIsClose(chan.defValue[i], nullValue[i], 1e-9)) {
+        else if (!GfIsClose(chan.defValue[i], nullValue[i], 1e-7)) {
             chan.sampleType[i] = STATIC; 
             validComponents++;
         }
@@ -270,15 +276,15 @@ void MayaTransformWriter::pushTransformStack(
     // additional xform (compensation translates for pivots, rotateAxis or
     // shear) we are not conforming anymore 
     bool conformsToCommonAPI = true;
-    
+
     // Keep track of where we have rotate and scale Pivots and their inverse so
     // that we can combine them later if possible
     unsigned int rotPivotIdx = -1, rotPivotINVIdx = -1, scalePivotIdx = -1, scalePivotINVIdx = -1;
     
     // Check if the Maya prim inheritTransform
     MPlug inheritPlug = iTrans.findPlug("inheritsTransform");
-    if (not inheritPlug.isNull()) {
-        if(not inheritPlug.asBool()) {
+    if (!inheritPlug.isNull()) {
+        if(!inheritPlug.asBool()) {
             usdXformable.SetResetXformStack(true);
         }
     }
@@ -287,12 +293,12 @@ void MayaTransformWriter::pushTransformStack(
     _GatherAnimChannel(TRANSLATE, iTrans, "translate", "X", "Y", "Z", &mAnimChanList, writeAnim, false);
 
     // inspect the rotate pivot translate
-    if (_GatherAnimChannel(TRANSLATE, iTrans, "rotatePivotTranslate", "X", "Y", "Z", &mAnimChanList, writeAnim)) {
+    if (_GatherAnimChannel(TRANSLATE, iTrans, "rotatePivotTranslate", "X", "Y", "Z", &mAnimChanList, writeAnim, true)) {
         conformsToCommonAPI = false;
     }
 
     // inspect the rotate pivot
-    bool hasRotatePivot = _GatherAnimChannel(TRANSLATE, iTrans, "rotatePivot", "X", "Y", "Z", &mAnimChanList, writeAnim);
+    bool hasRotatePivot = _GatherAnimChannel(TRANSLATE, iTrans, "rotatePivot", "X", "Y", "Z", &mAnimChanList, writeAnim, true);
     if (hasRotatePivot) {
         rotPivotIdx = mAnimChanList.size()-1;
     }
@@ -301,7 +307,7 @@ void MayaTransformWriter::pushTransformStack(
     _GatherAnimChannel(ROTATE, iTrans, "rotate", "X", "Y", "Z", &mAnimChanList, writeAnim, false);
 
     // inspect the rotateAxis/orientation
-    if (_GatherAnimChannel(ROTATE, iTrans, "rotateAxis", "X", "Y", "Z", &mAnimChanList, writeAnim)) {
+    if (_GatherAnimChannel(ROTATE, iTrans, "rotateAxis", "X", "Y", "Z", &mAnimChanList, writeAnim, true)) {
         conformsToCommonAPI = false;
     }
 
@@ -317,18 +323,18 @@ void MayaTransformWriter::pushTransformStack(
     }
 
     // inspect the scale pivot translation
-    if (_GatherAnimChannel(TRANSLATE, iTrans, "scalePivotTranslate", "X", "Y", "Z", &mAnimChanList, writeAnim)) {
+    if (_GatherAnimChannel(TRANSLATE, iTrans, "scalePivotTranslate", "X", "Y", "Z", &mAnimChanList, writeAnim, true)) {
         conformsToCommonAPI = false;
     }
 
     // inspect the scale pivot point
-    bool hasScalePivot = _GatherAnimChannel(TRANSLATE, iTrans, "scalePivot", "X", "Y", "Z", &mAnimChanList, writeAnim);
+    bool hasScalePivot = _GatherAnimChannel(TRANSLATE, iTrans, "scalePivot", "X", "Y", "Z", &mAnimChanList, writeAnim, true);
     if (hasScalePivot) {
         scalePivotIdx = mAnimChanList.size()-1;
     }
 
     // inspect the shear. Even if we have one xform on the xform list, it represents a share so we should name it
-    if (_GatherAnimChannel(SHEAR, iTrans, "shear", "XY", "XZ", "YZ", &mAnimChanList, writeAnim)) {
+    if (_GatherAnimChannel(SHEAR, iTrans, "shear", "XY", "XZ", "YZ", &mAnimChanList, writeAnim, true)) {
         conformsToCommonAPI = false;
     }
 
@@ -351,26 +357,26 @@ void MayaTransformWriter::pushTransformStack(
         conformsToCommonAPI = false;
     }
 
-    if (conformsToCommonAPI and hasRotatePivot and hasScalePivot) {
+    if (conformsToCommonAPI && hasRotatePivot && hasScalePivot) {
         AnimChannel rotPivChan, scalePivChan;
         rotPivChan = mAnimChanList[rotPivotIdx];
         scalePivChan = mAnimChanList[scalePivotIdx];
         // If they have different sampleType or are ANIMATED, does not conformsToCommonAPI anymore
         for (unsigned int i = 0;i<3;i++) {
-            if (rotPivChan.sampleType[i] != scalePivChan.sampleType[i] or 
+            if (rotPivChan.sampleType[i] != scalePivChan.sampleType[i] ||
                     rotPivChan.sampleType[i] == ANIMATED) {
                 conformsToCommonAPI = false;
             }
         }
 
         // If The defaultValue is not the same, does not conformsToCommonAPI anymore
-        if (not GfIsClose(rotPivChan.defValue, scalePivChan.defValue, 1e-9)) {
+        if (!GfIsClose(rotPivChan.defValue, scalePivChan.defValue, 1e-9)) {
             conformsToCommonAPI = false;
         }
 
         // If opType, usdType or precision are not the same, does not conformsToCommonAPI anymore
-        if (rotPivChan.opType != scalePivChan.opType or 
-                rotPivChan.usdOpType != scalePivChan.usdOpType or 
+        if (rotPivChan.opType != scalePivChan.opType           || 
+                rotPivChan.usdOpType != scalePivChan.usdOpType || 
                 rotPivChan.precision != scalePivChan.precision) {
             conformsToCommonAPI = false;
         }
@@ -403,72 +409,154 @@ void MayaTransformWriter::pushTransformStack(
 }
 
 MayaTransformWriter::MayaTransformWriter(
-        MDagPath& iDag, 
-        UsdStageRefPtr stage, 
-        const JobExportArgs& iArgs) :
-    MayaPrimWriter(iDag, stage, iArgs),
+        const MDagPath& iDag,
+        const SdfPath& uPath,
+        bool instanceSource,
+        usdWriteJobCtx& jobCtx) :
+    MayaPrimWriter(iDag, uPath, jobCtx),
     mXformDagPath(iDag),
-    mIsShapeAnimated(false)
-
-{    
-    // Merge shape and transform
-    // If is a transform, then do not write
-    // Return if has a single shape directly below xform 
-    if (getArgs().mergeTransformAndShape) {
-        if (iDag.hasFn(MFn::kTransform)) { // if is an actual transform
-            unsigned int numberOfShapesDirectlyBelow = 0;
-            iDag.numberOfShapesDirectlyBelow(numberOfShapesDirectlyBelow);
-            if (numberOfShapesDirectlyBelow == 1) {
-                setValid(false); // no need to iterate over this Writer, as not writing it out
-                mXformDagPath = MDagPath(); // make path invalid
+    mIsShapeAnimated(false),
+    mIsInstanceSource(instanceSource)
+{
+    auto isInstance = false;
+    auto hasTransform = iDag.hasFn(MFn::kTransform);
+    auto hasOnlyOneShapeBelow = [&jobCtx] (const MDagPath& path) {
+        auto numberOfShapesDirectlyBelow = 0u;
+        path.numberOfShapesDirectlyBelow(numberOfShapesDirectlyBelow);
+        if (numberOfShapesDirectlyBelow != 1) {
+            return false;
+        }
+        const auto childCount = path.childCount();
+        if (childCount == 1) {
+            return true;
+        }
+        // Make sure that the other objects are exportable - ie, still want
+        // to collapse if it has two shapes below, but one of them is an
+        // intermediateObject shape
+        MDagPath childDag(path);
+        auto numExportableChildren = 0u;
+        for (auto i = 0u; i < childCount; ++i) {
+            childDag.push(path.child(i));
+            if (jobCtx.needToTraverse(childDag)) {
+                ++numExportableChildren;
+                if (numExportableChildren > 1) {
+                    return false;
+                }
             }
-        } else { // must be a shape then
-            // Use the parent transform if there is only a single shape under the shape's xform
-            mXformDagPath.pop();
-            unsigned int numberOfShapesDirectlyBelow = 0;
-            mXformDagPath.numberOfShapesDirectlyBelow(numberOfShapesDirectlyBelow);
-            if (numberOfShapesDirectlyBelow == 1) {
-                // Use the parent path (xform) instead of the shape path
-                setUsdPath( getUsdPath().GetParentPath() );
+            childDag.pop();
+        }
+        return (numExportableChildren == 1);
+    };
+
+    auto setup_merged_shape = [this, &isInstance, &iDag, &hasTransform, &hasOnlyOneShapeBelow] () {
+        // Use the parent transform if there is only a single shape under the shape's xform
+        this->mXformDagPath.pop();
+        if (hasOnlyOneShapeBelow(mXformDagPath)) {
+            // Use the parent path (xform) instead of the shape path
+            this->setUsdPath( getUsdPath().GetParentPath() );
+            hasTransform = true;
+        } else if (isInstance) {
+            this->mXformDagPath = iDag;
+        } else {
+            this->mXformDagPath = MDagPath(); // make path invalid
+        }
+    };
+
+    auto invalidate_transform = [this] () {
+        this->setValid(false); // no need to iterate over this Writer, as not writing it out
+        this->mXformDagPath = MDagPath(); // make path invalid
+    };
+
+    // it's more straightforward to separate code
+    if (mIsInstanceSource) {
+        if (!hasTransform) {
+            mXformDagPath = MDagPath();
+        }
+    } else if (getArgs().exportInstances) {
+        if (hasTransform) {
+            if (hasOnlyOneShapeBelow(iDag)) {
+                auto copyDag = iDag;
+                copyDag.extendToShapeDirectlyBelow(0);
+                if (copyDag.isInstanced()) {
+                    invalidate_transform();
+                } else if (getArgs().mergeTransformAndShape) {
+                    invalidate_transform();
+                }
+            }
+        } else {
+            if (iDag.isInstanced()) {
+                isInstance = true;
+                setup_merged_shape();
+            } else if (getArgs().mergeTransformAndShape) {
+                setup_merged_shape();
             } else {
-                mXformDagPath = MDagPath(); // make path invalid
+                mXformDagPath = MDagPath();
             }
         }
     } else {
-        if (!iDag.hasFn(MFn::kTransform)) { // if is NOT an actual transform
-            mXformDagPath = MDagPath(); // make path invalid
+        // Merge shape and transform
+        // If is a transform, then do not write
+        // Return if has a single shape directly below xform
+        if (getArgs().mergeTransformAndShape) {
+            if (hasTransform) { // if is an actual transform
+                if (hasOnlyOneShapeBelow(iDag)) {
+                    invalidate_transform();
+                }
+            } else { // must be a shape then
+                setup_merged_shape();
+            }
+        } else {
+            if (!hasTransform) { // if is NOT an actual transform
+                mXformDagPath = MDagPath(); // make path invalid
+            }
         }
     }
 
     // Determine if transform is animated
-    if ( mXformDagPath.isValid()) {
-        MFnTransform transFn(mXformDagPath);
+    if (mXformDagPath.isValid()) {
         UsdGeomXform primSchema = UsdGeomXform::Define(getUsdStage(), getUsdPath());
-        // Create a vector of AnimChannels based on the Maya transformation
-        // ordering
-        pushTransformStack(transFn, primSchema, iArgs.exportAnimation);
+        mUsdPrim = primSchema.GetPrim();
+        if (!mUsdPrim.IsValid()) {
+            setValid(false);
+            return;
+        }
+        if (!mIsInstanceSource) {
+            if (hasTransform) {
+                MFnTransform transFn(mXformDagPath);
+                // Create a vector of AnimChannels based on the Maya transformation
+                // ordering
+                pushTransformStack(transFn, primSchema, getArgs().exportAnimation);
+            }
+
+            if (isInstance) {
+                const auto masterPath = mWriteJobCtx.getMasterPath(getDagPath());
+                if (!masterPath.IsEmpty()){
+                    mUsdPrim.GetInherits().AddInherit(masterPath);
+                    mUsdPrim.SetInstanceable(true);
+                }
+            }
+        }
     }
 
     // Determine if shape is animated
-    if ( !getDagPath().hasFn(MFn::kTransform)) { // if is a shape
+    // note that we can't use hasTransform, because we need to test the original
+    // dag, not the transform (if mergeTransformAndShape is on)!
+    if (!getDagPath().hasFn(MFn::kTransform)) { // if is a shape
         MObject obj = getDagPath().node();
-        if (iArgs.exportAnimation)
+        if (getArgs().exportAnimation) {
             mIsShapeAnimated = PxrUsdMayaUtil::isAnimated(obj);
+        }
     }
 }
 
 //virtual 
-UsdPrim MayaTransformWriter::write(const UsdTimeCode &usdTime)
+void MayaTransformWriter::write(const UsdTimeCode &usdTime)
 {
-    TF_AXIOM( isValid() ); // should always be true if this code is reached
-    // Write to USD
-    UsdGeomXform primSchema = UsdGeomXform::Define(getUsdStage(), getUsdPath());
-    TF_AXIOM(primSchema);
-    
-    // Set attrs
-    writeTransformAttrs(usdTime, primSchema);
-
-    return primSchema.GetPrim();
+    if (!mIsInstanceSource) {
+        UsdGeomXform primSchema(mUsdPrim);
+        // Set attrs
+        writeTransformAttrs(usdTime, primSchema);
+    }
 }
 
 bool MayaTransformWriter::writeTransformAttrs(
@@ -481,4 +569,7 @@ bool MayaTransformWriter::writeTransformAttrs(
     computeXFormOps(xformSchema, mAnimChanList, usdTime);
     return true;
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

@@ -21,6 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
+#include "pxr/base/tf/api.h"
 #include "pxr/base/tf/token.h"
 
 #include "pxr/base/tf/hashset.h"
@@ -46,6 +50,8 @@
 using std::vector;
 using std::string;
 using std::pair;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 char const *TfToken::_emptyStr = "";
 
@@ -155,7 +161,7 @@ struct Tf_TokenRegistry
             if (--rep->_refCount != 0)
                 return;
             
-            if (not _sets[setNum].erase(*rep)) {
+            if (!_sets[setNum].erase(*rep)) {
                 repFoundInSet = false;
                 repString = rep->_str;
             }            
@@ -220,11 +226,11 @@ private:
             // No entry present, add a new entry.
             TfAutoMallocTag noname("TfToken");
             _RepPtr rep = &(*_sets[setNum].insert(TfToken::_Rep(s)).first);
-            rep->_isCounted = not makeImmortal;
+            rep->_isCounted = !makeImmortal;
             rep->_setNum = setNum;
-            if (not makeImmortal)
+            if (!makeImmortal)
                 rep->_refCount = 1;
-            return _RepPtrAndBits(rep, not makeImmortal);
+            return _RepPtrAndBits(rep, !makeImmortal);
         }
     }
 
@@ -335,7 +341,9 @@ operator <<(std::ostream &stream, const TfToken& token)
     return stream << token.GetText();
 }
 
-void TfDumpTokenStats()
+TF_API void TfDumpTokenStats()
 {
     Tf_TokenRegistry::_GetInstance()._DumpStats();
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

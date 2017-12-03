@@ -26,6 +26,9 @@
 
 #include "pxr/base/tf/stl.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 // -------------------------------------------------------------------------- //
 // HdTask Definitions 
 // -------------------------------------------------------------------------- //
@@ -42,7 +45,9 @@ void
 HdTask::Execute(HdTaskContext* ctx)
 {
     _Execute(ctx);
-    _ExecuteChildren(ctx);
+    TF_FOR_ALL(task, _children) {
+        (*task)->Execute(ctx);
+    }
 }
 
 void
@@ -50,20 +55,15 @@ HdTask::Sync(HdTaskContext* ctx)
 {
     _Sync(ctx);
     _SyncChildren(ctx, &_children);
+    TF_FOR_ALL(task, _children) {
+        (*task)->Sync(ctx);
+    }
     _MarkClean();
 }
 
 void
 HdTask::_MarkClean()
 {
-}
-
-void
-HdTask::_ExecuteChildren(HdTaskContext* ctx)
-{
-    TF_FOR_ALL(task, _children) {
-        (*task)->Execute(ctx);
-    }
 }
 
 void
@@ -94,12 +94,12 @@ HdSceneTask::_SyncChildren(HdTaskContext* ctx, HdTaskSharedPtrVector* children)
 {
     // TODO: CYCLE DETECTION!
     //
-    HdChangeTracker::DirtyBits bits = 
+    HdDirtyBits bits =
         _delegate->GetRenderIndex().GetChangeTracker().GetTaskDirtyBits(_id);
 
     if (bits & HdChangeTracker::DirtyChildren) {
         VtValue v = _delegate->Get(_id, HdTokens->children);
-        if (not TF_VERIFY(v.IsHolding<SdfPathVector>())) {
+        if (!TF_VERIFY(v.IsHolding<SdfPathVector>())) {
             return;
         }
 
@@ -110,19 +110,16 @@ HdSceneTask::_SyncChildren(HdTaskContext* ctx, HdTaskSharedPtrVector* children)
 
         TF_FOR_ALL(i, childIds) {
             HdTaskSharedPtr const& task = _delegate->GetRenderIndex().GetTask(*i);
-            if (not TF_VERIFY(task)) {
+            if (!TF_VERIFY(task)) {
                 continue;
             }
             children->push_back(task);
         }
     }
-
-    TF_FOR_ALL(task, *children) {
-        (*task)->Sync(ctx);
-    }
 }
 
-HdChangeTracker::DirtyBits HdSceneTask::_GetTaskDirtyBits()
+HdDirtyBits
+HdSceneTask::_GetTaskDirtyBits()
 {
     SdfPath const& id = GetId();
     HdSceneDelegate* delegate = GetDelegate();
@@ -131,7 +128,8 @@ HdChangeTracker::DirtyBits HdSceneTask::_GetTaskDirtyBits()
     return changeTracker.GetTaskDirtyBits(id);
 }
 
-void HdSceneTask::_GetTaskDirtyState(TfToken const& collectionId, _TaskDirtyState* dirtyState)
+void
+HdSceneTask::_GetTaskDirtyState(TfToken const& collectionId, _TaskDirtyState* dirtyState)
 {
     TF_DEV_AXIOM(dirtyState != nullptr);
 
@@ -142,3 +140,6 @@ void HdSceneTask::_GetTaskDirtyState(TfToken const& collectionId, _TaskDirtyStat
     dirtyState->bits              = changeTracker.GetTaskDirtyBits(id);
     dirtyState->collectionVersion = changeTracker.GetCollectionVersion(collectionId);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

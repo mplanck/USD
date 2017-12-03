@@ -21,8 +21,9 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/usd/sdf/types.h"
 
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/attributeSpec.h"
 #include "pxr/usd/sdf/listOp.h"
 #include "pxr/usd/sdf/mapperArgSpec.h"
@@ -54,6 +55,10 @@
 
 using namespace boost::python;
 using std::string;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 struct Sdf_TimeSampleMapConverter {
 public:
@@ -159,7 +164,7 @@ public:
         }
         else {
             std::pair<iterator, bool> i = x.insert(value_type(key, value));
-            if (not i.second and i.first != iterator()) {
+            if (!i.second && i.first != iterator()) {
                 i.first->second = value;
             }
         }
@@ -172,7 +177,7 @@ public:
         if (i != x.end()) {
             return i->second;
         }
-        else if (not def.empty()) {
+        else if (!def.empty()) {
             SdfChangeBlock block;
             return x[key] = def;
         }
@@ -292,15 +297,13 @@ _SdfValueBlockHash(const SdfValueBlock &self)
     return boost::hash<SdfValueBlock>()(self);  
 }
 
-namespace {
-
 SdfValueTypeName
 _FindType(const std::string& typeName)
 {
     return SdfSchema::GetInstance().FindType(typeName);
 }
 
-}
+} // anonymous namespace 
 
 void wrapTypes()
 {
@@ -347,9 +350,6 @@ void wrapTypes()
         VtValueFromPython<_SDF_UNITSLIST_ENUM(elem)>();
     BOOST_PP_LIST_FOR_EACH(_WRAP_ENUM, ~, _SDF_UNITS)
     #undef _WRAP_ENUM
-
-
-    class_<SdfMapperParametersMap>("MapperParametersMap");
 
     SdfPyWrapListProxy<SdfNameOrderProxy>();
     SdfPyWrapListProxy<SdfSubLayerProxy>();
@@ -417,8 +417,8 @@ void wrapTypes()
         .def(self == self)
         .def(self != self)
 
-        .def("__repr__", ::_UnregisteredValueRepr)
-        .def("__hash__", ::_UnregisteredValueHash)
+        .def("__repr__", _UnregisteredValueRepr)
+        .def("__hash__", _UnregisteredValueHash)
         ;
 
     VtValueFromPython<SdfUnregisteredValue>();
@@ -525,7 +525,7 @@ void wrapTypes()
     class_<SdfValueBlock>("ValueBlock")
         .def(self == self)
         .def(self != self)
-        .def("__repr__", ::_SdfValueBlockRepr)
-        .def("__hash__", ::_SdfValueBlockHash);
+        .def("__repr__", _SdfValueBlockRepr)
+        .def("__hash__", _SdfValueBlockHash);
     VtValueFromPython<SdfValueBlock>();
 }

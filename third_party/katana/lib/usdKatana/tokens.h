@@ -23,6 +23,9 @@
 //
 #ifndef USDKATANA_TOKENS_H
 #define USDKATANA_TOKENS_H
+
+/// \file usdKatana/tokens.h
+
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 // 
 // This is an automatically generated file (by usdGenSchema.py).
@@ -30,9 +33,11 @@
 // 
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
+#include "pxr/pxr.h"
+#include "usdKatana/api.h"
 #include "pxr/base/tf/staticTokens.h"
 
-/// \file usdKatana/tokens.h
+PXR_NAMESPACE_OPEN_SCOPE
 
 /// \hideinitializer
 #define USDKATANA_TOKENS \
@@ -44,7 +49,8 @@
     ((katanaVisible, "katana:visible"))
 
 /// \anchor UsdKatanaTokens
-/// \brief <b>UsdKatanaTokens</b> provides static, efficient TfToken's for
+///
+/// <b>UsdKatanaTokens</b> provides static, efficient TfToken's for
 /// use in all public USD API
 ///
 /// These tokens are auto-generated from the module's schema, representing
@@ -68,6 +74,8 @@
 /// \li <b>katanaPrimName</b> - UsdKatanaLookAPI
 /// \li <b>katanaType</b> - UsdKatanaBlindDataObject
 /// \li <b>katanaVisible</b> - UsdKatanaBlindDataObject
-TF_DECLARE_PUBLIC_TOKENS(UsdKatanaTokens, USDKATANA_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(UsdKatanaTokens, USDKATANA_API, USDKATANA_TOKENS);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -21,10 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readPrim.h"
 #include "usdKatana/readXformable.h"
 #include "usdKatana/usdInPrivateData.h"
+#include "usdKatana/utils.h"
 
 #include "pxr/usd/usdGeom/xform.h"
 
@@ -33,6 +35,9 @@
 #include <FnLogging/FnLogging.h>
 
 #include <sstream>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 FnLogSetup("PxrUsdKatanaReadXformable");
 
@@ -48,7 +53,7 @@ PxrUsdKatanaReadXformable(
     // Calculate and set the xform attribute.
     //
 
-    double currentTime = data.GetUsdInArgs()->GetCurrentTime();
+    double currentTime = data.GetCurrentTime();
 
     // Get the ordered xform ops for the prim.
     //
@@ -57,6 +62,8 @@ PxrUsdKatanaReadXformable(
         xformable.GetOrderedXformOps(&resetsXformStack);
 
     FnKat::GroupBuilder gb;
+
+    const bool isMotionBackward = data.IsMotionBackward();
 
     // For each xform op, construct a matrix containing the 
     // transformation data for each time sample it has.
@@ -80,7 +87,9 @@ PxrUsdKatanaReadXformable(
 
             // Convert to vector.
             const double *matArray = mat.GetArray();
-            std::vector<double> &matVec = matBuilder.get(fabs(relSampleTime));
+            std::vector<double> &matVec = matBuilder.get(isMotionBackward ?
+                PxrUsdKatanaUtils::ReverseTimeSample(relSampleTime) : relSampleTime);
+
             matVec.resize(16);
             for (int i = 0; i < 16; ++i)
             {
@@ -96,7 +105,7 @@ PxrUsdKatanaReadXformable(
 
     // Only set an 'xform' attribute if xform ops were found.
     //
-    if (not orderedXformOps.empty())
+    if (!orderedXformOps.empty())
     {
         FnKat::GroupBuilder xformGb;
         xformGb.setGroupInherit(false);
@@ -117,3 +126,6 @@ PxrUsdKatanaReadXformable(
         attrs.set("xform", xformGb.build());
     }
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

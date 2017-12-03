@@ -24,6 +24,8 @@
 #ifndef USDIMAGING_VALUE_CACHE_H
 #define USDIMAGING_VALUE_CACHE_H
 
+#include "pxr/pxr.h"
+#include "pxr/usdImaging/usdImaging/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/pxOsd/subdivTags.h"
 
@@ -40,8 +42,14 @@
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_queue.h>
 
+PXR_NAMESPACE_OPEN_SCOPE
 
+
+
+/// \class UsdImagingValueCache
+///
 /// A heterogeneous value container without type erasure.
+///
 class UsdImagingValueCache : boost::noncopyable {
 public:
     typedef PxOsdSubdivTags SubdivTags;
@@ -50,7 +58,7 @@ public:
         TfToken name;
         TfToken interpolation;
         bool operator==(PrimvarInfo const& rhs) {
-            return rhs.name == name and
+            return rhs.name == name &&
                    rhs.interpolation == interpolation;
         }
     };
@@ -68,10 +76,10 @@ public:
         {}
 
         inline bool operator==(Key const& rhs) const {
-            return _path == rhs._path and _attribute == rhs._attribute;
+            return _path == rhs._path && _attribute == rhs._attribute;
         }
         inline bool operator!=(Key const& rhs) const {
-            return not (*this == rhs);
+            return !(*this == rhs);
         }
 
         struct Hash {
@@ -189,7 +197,7 @@ private:
     /// value was passed into the first _Extract.
     template <typename T>
     bool _Extract(Key const& key, T* value) {
-        if (not TF_VERIFY(not _locked)) {
+        if (!TF_VERIFY(!_locked)) {
             return false;
         }
       
@@ -215,7 +223,7 @@ private:
     /// Not thread safe
     template <typename T>
     void _Erase(Key const& key) {
-        if (not TF_VERIFY(not _locked)) {
+        if (!TF_VERIFY(!_locked)) {
             return;
         }
 
@@ -515,5 +523,8 @@ private:
         *cache = &_sdfPathCache;
     }
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USDIMAGING_VALUE_CACHE_H

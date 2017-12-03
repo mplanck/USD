@@ -32,6 +32,7 @@
 #include "pxr/imaging/hd/indirectDrawBatch.h"
 #include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/renderContextCaps.h"
+#include "pxr/imaging/hd/resourceRegistry.h"
 #include "pxr/imaging/hd/tokens.h"
 
 #include "pxr/base/gf/matrix4f.h"
@@ -44,6 +45,9 @@
 #include <boost/bind.hpp>
 #include <boost/functional/hash.hpp>
 #include <boost/make_shared.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 HdCommandBuffer::HdCommandBuffer()
     : _visibleSize(0)
@@ -73,17 +77,19 @@ _NewDrawBatch(HdDrawItemInstance * drawItemInstance)
 }
 
 void
-HdCommandBuffer::PrepareDraw(HdRenderPassStateSharedPtr const &renderPassState)
+HdCommandBuffer::PrepareDraw(HdRenderPassStateSharedPtr const &renderPassState,
+                             HdResourceRegistrySharedPtr const &resourceRegistry)
 {
     HD_TRACE_FUNCTION();
 
     TF_FOR_ALL(batchIt, _drawBatches) {
-        (*batchIt)->PrepareDraw(renderPassState);
+        (*batchIt)->PrepareDraw(renderPassState, resourceRegistry);
     }
 }
 
 void
-HdCommandBuffer::ExecuteDraw(HdRenderPassStateSharedPtr const &renderPassState)
+HdCommandBuffer::ExecuteDraw(HdRenderPassStateSharedPtr const &renderPassState,
+                             HdResourceRegistrySharedPtr const &resourceRegistry)
 {
     HD_TRACE_FUNCTION();
 
@@ -99,11 +105,11 @@ HdCommandBuffer::ExecuteDraw(HdRenderPassStateSharedPtr const &renderPassState)
     // draw batches
     //
     TF_FOR_ALL(batchIt, _drawBatches) {
-        (*batchIt)->ExecuteDraw(renderPassState);
+        (*batchIt)->ExecuteDraw(renderPassState, resourceRegistry);
     }
     HD_PERF_COUNTER_SET(HdPerfTokens->drawBatches, _drawBatches.size());
 
-    if (not glBindBuffer) {
+    if (!glBindBuffer) {
         // useful when testing with GL drawing disabled
         HD_PERF_COUNTER_SET(HdTokens->itemsDrawn, _visibleSize);
     }
@@ -127,7 +133,7 @@ HdCommandBuffer::RebuildDrawBatchesIfNeeded(unsigned currentShaderBindingsVersio
         = (currentShaderBindingsVersion != _shaderBindingsVersion);
 
     for (auto const& batch : _drawBatches) {
-        if (not batch->Validate(deepValidation) and not batch->Rebuild()) {
+        if (!batch->Validate(deepValidation) && !batch->Rebuild()) {
             TRACE_SCOPE("Invalid Batches");
             _RebuildDrawBatches();
             _shaderBindingsVersion = currentShaderBindingsVersion;
@@ -163,14 +169,14 @@ HdCommandBuffer::_RebuildDrawBatches()
         HdDrawItemInstance* drawItemInstance = &_drawItemInstances[i];
 
         Hd_DrawBatchSharedPtr batch;
-        HdShaderSharedPtr const &geometricShader
+        HdShaderCodeSharedPtr const &geometricShader
             = drawItem->GetGeometricShader();
         TF_VERIFY(geometricShader);
 
         size_t key = geometricShader ? geometricShader->ComputeHash() : 0;
         boost::hash_combine(key, drawItem->GetBufferArraysHash());
 
-        if (not bindlessTexture) {
+        if (!bindlessTexture) {
             // Geometric, RenderPass and Lighting shaders should never break
             // batches, however surface shaders can. We consider the surface 
             // parameters to be part of the batch key here for that reason.
@@ -184,7 +190,7 @@ HdCommandBuffer::_RebuildDrawBatches()
                 //, drawItem->GetRprimID().GetText());
 
         TfMapLookup(batchMap, key, &batch);
-        if (not batch or not batch->Append(drawItemInstance)) {
+        if (!batch || !batch->Append(drawItemInstance)) {
             batch = _NewDrawBatch(drawItemInstance);
             _drawBatches.push_back(batch);
             batchMap[key] = batch;
@@ -210,7 +216,7 @@ HdCommandBuffer::SyncDrawItemVisibility(unsigned visChangeCount)
     tbb::enumerable_thread_specific<size_t> visCounts;
 
     WorkParallelForN(_drawItemInstances.size()/N+1,
-      [&visCounts, this](size_t start, size_t end) {
+      [&visCounts, this, N](size_t start, size_t end) {
         TRACE_SCOPE("SetVis");
         start *= N;
         end = std::min(end*N, _drawItemInstances.size());
@@ -226,8 +232,8 @@ HdCommandBuffer::SyncDrawItemVisibility(unsigned visChangeCount)
 
             // however, if this is an instancing prim and visible, it always has
             // to be called since instanceCount may changes over time.
-            if ((_drawItemInstances[i].IsVisible() != visible) or
-                (visible and item->HasInstancer())) {
+            if ((_drawItemInstances[i].IsVisible() != visible) || 
+                (visible && item->HasInstancer())) {
                 _drawItemInstances[i].SetVisible(visible);
             }
             if (visible) {
@@ -251,7 +257,7 @@ HdCommandBuffer::FrustumCull(GfMatrix4d const &viewProjMatrix)
 
     const bool 
         mtCullingDisabled = TfDebug::IsEnabled(HD_DISABLE_MULTITHREADED_CULLING)
-        or _drawItems.size() < 10000;
+        || _drawItems.size() < 10000;
 
     struct _Worker {
         static
@@ -262,17 +268,17 @@ HdCommandBuffer::FrustumCull(GfMatrix4d const &viewProjMatrix)
             for(size_t i = begin; i < end; i++) {
                 HdDrawItemInstance& itemInstance = (*drawItemInstances)[i];
                 HdDrawItem const* item = itemInstance.GetDrawItem();
-                bool visible = item->GetVisible() and
+                bool visible = item->GetVisible() && 
                     item->IntersectsViewVolume(viewProjMatrix);
-                if ((itemInstance.IsVisible() != visible) or
-                    (visible and item->HasInstancer())) {
+                if ((itemInstance.IsVisible() != visible) || 
+                    (visible && item->HasInstancer())) {
                     itemInstance.SetVisible(visible);
                 }
             }
         }
     };
 
-    if (not mtCullingDisabled) {
+    if (!mtCullingDisabled) {
         WorkParallelForN(_drawItemInstances.size(), 
                          boost::bind(&_Worker::cull, &_drawItemInstances, 
                          viewProjMatrix, _1, _2));
@@ -290,3 +296,6 @@ HdCommandBuffer::FrustumCull(GfMatrix4d const &viewProjMatrix)
         }
     }
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

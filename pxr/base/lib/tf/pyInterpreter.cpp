@@ -21,6 +21,9 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/pyError.h"
 #include "pxr/base/tf/pyInterpreter.h"
 #include "pxr/base/tf/pyLock.h"
@@ -28,8 +31,10 @@
 #include "pxr/base/tf/scriptModuleLoader.h"
 #include "pxr/base/tf/stringUtils.h"
 
+#include "pxr/base/arch/fileSystem.h"
 #include "pxr/base/arch/symbols.h"
 #include "pxr/base/arch/systemInfo.h"
+#include "pxr/base/arch/threads.h"
 
 #include <boost/python.hpp>
 #include <boost/python/detail/api_placeholder.hpp>
@@ -42,6 +47,8 @@
 using std::string;
 
 using namespace boost::python;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 void
 TfPyInitialize()
@@ -59,13 +66,24 @@ TfPyInitialize()
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     if (!Py_IsInitialized()) {
+
+        if (!ArchIsMainThread() && !PyEval_ThreadsInitialized()) {
+            // Python claims that PyEval_InitThreads "should be called in the
+            // main thread before creating a second thread or engaging in any
+            // other thread operations."  So we'll issue a warning here.
+            TF_WARN("Calling PyEval_InitThreads() for the first time outside "
+                    "the 'main thread'.  Python doc says not to do this.");
+        }
+
+        static std::string programName(ArchGetExecutablePath());
+
         // Initialize Python threading.  This grabs the GIL.  We'll release it
         // at the end of this function.
         PyEval_InitThreads();
 
         // Setting the program name is necessary in order for python to 
         // find the correct built-in modules. 
-        Py_SetProgramName(const_cast<char*>(strdup(ArchGetExecutablePath().c_str())));
+        Py_SetProgramName(const_cast<char*>(programName.c_str()));
 
         // We're here when this is a C++ program initializing python (i.e. this
         // is a case of "embedding" a python interpreter, as opposed to
@@ -73,14 +91,17 @@ TfPyInitialize()
         //
         // In this case we don't want python to change the sigint handler.  Save
         // it before calling Py_Initialize and restore it after.
+#if !defined(ARCH_OS_WINDOWS)
         struct sigaction origSigintHandler;
         sigaction(SIGINT, NULL, &origSigintHandler);
-        
+#endif
         Py_Initialize();
 
+#if !defined(ARCH_OS_WINDOWS)
         // Restore original sigint handler.
         sigaction(SIGINT, &origSigintHandler, NULL);
-        
+#endif
+
         char emptyArg[] = {'\0'};
         char *empty[] = {emptyArg};
         PySys_SetArgv(1, empty);
@@ -91,8 +112,19 @@ TfPyInitialize()
         // TfPyInitialize().
         TfScriptModuleLoader::GetInstance().LoadModules();
 
-        // Release the GIL.
-        PyEval_ReleaseLock();
+        // Release the GIL and restore thread state.
+        // When TfPyInitialize returns, we expect GIL is released 
+        // and python's internal PyThreadState is NULL
+        // Previously this only released the GIL without resetting the ThreadState
+        // This can lead to a situation where python executes without the GIL
+        // PyGILState_Ensure checks the current thread state and decides
+        // to take the lock based on that; so if the GIL is released but the
+        // current thread is valid it leads to cases where python executes
+        // without holding the GIL and mismatched lock/release calls in TfPyLock 
+        // (See the discussion in 141041)
+        
+        PyThreadState* currentState = PyGILState_GetThisThreadState();
+        PyEval_ReleaseThread(currentState);
 
         // Say we're done initializing python.
         initialized = true;
@@ -137,8 +169,8 @@ boost::python::handle<>
 TfPyRunFile(const std::string &filename, int start,
             object const &globals, object const &locals)
 {
-    FILE *f = fopen(filename.c_str(), "rt");
-    if (not f) {
+    FILE *f = ArchOpenFile(filename.c_str(), "r");
+    if (!f) {
         TF_CODING_ERROR("Could not open file '%s'!", filename.c_str());
         return handle<>();
     }
@@ -187,7 +219,7 @@ TfPyGetModulePath(const std::string & moduleName)
     std::string cmd =
         TfStringPrintf("imp.find_module('%s')[1]\n", moduleName.c_str());
     handle<> result = TfPyRunString(cmd, Py_eval_input);
-    if (not result)
+    if (!result)
         return std::string();
 
     // XXX close file
@@ -197,3 +229,4 @@ TfPyGetModulePath(const std::string & moduleName)
     return getString.check() ? getString() : string();
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

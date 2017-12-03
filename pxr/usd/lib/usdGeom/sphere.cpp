@@ -28,15 +28,19 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
     TfType::Define<UsdGeomSphere,
         TfType::Bases< UsdGeomGprim > >();
     
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("Sphere") to find
-    // TfType<UsdGeomSphere>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("Sphere")
+    // to find TfType<UsdGeomSphere>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, UsdGeomSphere>("Sphere");
 }
 
@@ -49,7 +53,7 @@ UsdGeomSphere::~UsdGeomSphere()
 UsdGeomSphere
 UsdGeomSphere::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomSphere();
     }
@@ -62,7 +66,7 @@ UsdGeomSphere::Define(
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("Sphere");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomSphere();
     }
@@ -158,8 +162,13 @@ UsdGeomSphere::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--

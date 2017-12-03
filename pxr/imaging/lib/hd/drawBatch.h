@@ -24,11 +24,13 @@
 #ifndef HD_DRAW_BATCH_H
 #define HD_DRAW_BATCH_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 
 #include "pxr/imaging/hd/resourceBinder.h" // XXX: including private header
 #include "pxr/imaging/hd/repr.h"
-#include "pxr/imaging/hd/shader.h"
+#include "pxr/imaging/hd/shaderCode.h"
 #include "pxr/imaging/garch/gl.h"
 #include "pxr/base/gf/matrix4f.h"
 #include "pxr/base/gf/range3d.h"
@@ -36,6 +38,9 @@
 
 #include <boost/shared_ptr.hpp>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class HdDrawItem;
 class HdDrawItemInstance;
@@ -46,7 +51,10 @@ typedef boost::shared_ptr<class HdGLSLProgram> HdGLSLProgramSharedPtr;
 typedef boost::shared_ptr<class HdRenderPassState> HdRenderPassStateSharedPtr;
 typedef std::vector<Hd_DrawBatchSharedPtr> Hd_DrawBatchSharedPtrVector;
 typedef std::vector<class HdBindingRequest> HdBindingRequestVector;
+typedef boost::shared_ptr<class HdResourceRegistry> HdResourceRegistrySharedPtr;
 
+/// \class Hd_DrawBatch
+///
 /// A drawing batch.
 ///
 /// This is the finest grained element of drawing, representing potentially
@@ -55,17 +63,21 @@ typedef std::vector<class HdBindingRequest> HdBindingRequestVector;
 ///
 class Hd_DrawBatch {
 public:
+    HD_API
     Hd_DrawBatch(HdDrawItemInstance * drawItemInstance);
 
+    HD_API
     virtual ~Hd_DrawBatch();
 
     /// Attempts to append \a drawItemInstance to the batch, returning \a false
     /// if the item could not be appended, e.g. if there was an aggregation
     /// conflict.
+    HD_API
     bool Append(HdDrawItemInstance * drawItemInstance);
 
     /// Attempt to rebuild the batch in-place, returns false if draw items are
     /// no longer compatible.
+    HD_API
     bool Rebuild();
 
     /// Validates that all batches are referring up to date bufferarrays.
@@ -73,30 +85,39 @@ public:
     virtual bool Validate(bool deepValidation) = 0;
 
     /// Prepare draw commands and apply view frustum culling for this batch.
-    virtual void PrepareDraw(HdRenderPassStateSharedPtr const &renderPassState) = 0;
+    virtual void PrepareDraw(
+        HdRenderPassStateSharedPtr const &renderPassState,
+        HdResourceRegistrySharedPtr const &resourceRegistry) = 0;
 
     /// Executes the drawing commands for this batch.
-    virtual void ExecuteDraw(HdRenderPassStateSharedPtr const &renderPassState) = 0;
+    virtual void ExecuteDraw(
+        HdRenderPassStateSharedPtr const &renderPassState,
+        HdResourceRegistrySharedPtr const & resourceRegistry) = 0;
 
     /// Let the batch know that one of it's draw item instances has changed
     /// NOTE: This callback is called from multiple threads, so needs to be
     /// threadsafe.
+    HD_API
     virtual void DrawItemInstanceChanged(HdDrawItemInstance const* instance);
 
 protected:
+    HD_API
     virtual void _Init(HdDrawItemInstance * drawItemInstance);
 
+    /// \class _DrawingProgram
+    ///
     /// This wraps glsl code generation and keeps track of
     /// binding assigments for bindable resources.
+    ///
     class _DrawingProgram {
     public:
         _DrawingProgram() {}
 
-        void CompileShader(
+        HD_API
+        bool CompileShader(
                 HdDrawItem const *drawItem,
-                Hd_GeometricShaderSharedPtr const &geometricShader,
-                HdShaderSharedPtrVector const &shaders,
-                bool indirect);
+                bool indirect,
+                HdResourceRegistrySharedPtr const &resourceRegistry);
 
         HdGLSLProgramSharedPtr GetGLSLProgram() const {
             return _glslProgram;
@@ -104,32 +125,84 @@ protected:
 
         /// Returns the resouce binder, which is used for buffer resource
         /// bindings at draw time.
-        const Hd_ResourceBinder &GetBinder() const { return _resourceBinder; }
+        const Hd_ResourceBinder &GetBinder() const { 
+            return _resourceBinder; 
+        }
 
         void Reset() {
             _glslProgram.reset();
+            _surfaceShader.reset();
+            _geometricShader.reset();
             _resourceBinder = Hd_ResourceBinder();
+            _shaders.clear();
+        }
+        
+        void SetSurfaceShader(HdShaderCodeSharedPtr shader) {
+            _surfaceShader = shader;
+        }
+
+        const HdShaderCodeSharedPtr &GetSurfaceShader() {
+            return _surfaceShader; 
+        }
+
+        void SetGeometricShader(Hd_GeometricShaderSharedPtr shader) {
+            _geometricShader = shader;
+        }
+
+        const Hd_GeometricShaderSharedPtr &GetGeometricShader() { 
+            return _geometricShader; 
+        }
+
+        /// Set shaders (lighting/renderpass). In the case of Geometric Shaders 
+        /// or Surface shaders you can use the specific setters.
+        void SetShaders(HdShaderCodeSharedPtrVector shaders) {
+            _shaders = shaders; 
+        }
+
+        /// Returns array of shaders, this will not include the surface shader
+        /// passed via SetSurfaceShader (or the geometric shader).
+        const HdShaderCodeSharedPtrVector &GetShaders() const {
+            return _shaders; 
+        }
+
+        /// Returns array of composed shaders, this include the shaders passed
+        /// via SetShaders and the shader passed to SetSurfaceShader.
+        HdShaderCodeSharedPtrVector GetComposedShaders() const {
+            HdShaderCodeSharedPtrVector shaders = _shaders;
+            if (_surfaceShader) {
+                shaders.push_back(_surfaceShader);
+            }
+            return shaders;
         }
 
     protected:
         // overrides populate customBindings and enableInstanceDraw which
         // will be used to determine if glVertexAttribDivisor needs to be
         // enabled or not.
+        HD_API
         virtual void _GetCustomBindings(
             HdBindingRequestVector *customBindings,
             bool *enableInstanceDraw) const;
 
+        HD_API
         virtual bool _Link(HdGLSLProgramSharedPtr const & glslProgram);
 
     private:
         HdGLSLProgramSharedPtr _glslProgram;
         Hd_ResourceBinder _resourceBinder;
+        HdShaderCodeSharedPtrVector _shaders;
+        Hd_GeometricShaderSharedPtr _geometricShader;
+        HdShaderCodeSharedPtr _surfaceShader;
     };
 
+    HD_API
     _DrawingProgram & _GetDrawingProgram(
-        HdRenderPassStateSharedPtr const &state, bool indirect);
+        HdRenderPassStateSharedPtr const &state, 
+        bool indirect,
+        HdResourceRegistrySharedPtr const &resourceRegistry);
 
 protected:
+    HD_API
     static bool _IsAggregated(HdDrawItem const *drawItem0,
                               HdDrawItem const *drawItem1);
 
@@ -137,7 +210,10 @@ protected:
 
 private:
     _DrawingProgram _program;
-    HdShader::ID _shaderHash;
+    HdShaderCode::ID _shaderHash;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // HD_DRAW_BATCH_H

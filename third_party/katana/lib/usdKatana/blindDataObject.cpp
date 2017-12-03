@@ -28,15 +28,19 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
     TfType::Define<UsdKatanaBlindDataObject,
         TfType::Bases< UsdSchemaBase > >();
     
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("BlindDataObject") to find
-    // TfType<UsdKatanaBlindDataObject>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("BlindDataObject")
+    // to find TfType<UsdKatanaBlindDataObject>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, UsdKatanaBlindDataObject>("BlindDataObject");
 }
 
@@ -49,7 +53,7 @@ UsdKatanaBlindDataObject::~UsdKatanaBlindDataObject()
 UsdKatanaBlindDataObject
 UsdKatanaBlindDataObject::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdKatanaBlindDataObject();
     }
@@ -62,7 +66,7 @@ UsdKatanaBlindDataObject::Define(
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("BlindDataObject");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdKatanaBlindDataObject();
     }
@@ -158,13 +162,20 @@ UsdKatanaBlindDataObject::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
 using std::string;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
@@ -295,3 +306,4 @@ UsdKatanaBlindDataObject::IsKbdAttribute(const UsdProperty &attr)
     return TfStringStartsWith(attr.GetName(), _tokens->kbdNamespace);
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

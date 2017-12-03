@@ -21,35 +21,46 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glf/testGLContext.h
-///
 #ifndef GLF_TEST_GL_CONTEXT_H
 #define GLF_TEST_GL_CONTEXT_H
 
-#include "pxr/imaging/glf/glContext.h"
+/// \file glf/testGLContext.h
 
-class Glf_TestGLContextPrivate;
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
+#include "pxr/imaging/glf/glContext.h"
 
 #include <boost/shared_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+class Glf_TestGLContextPrivate;
+
 typedef boost::shared_ptr<class GlfTestGLContext> GlfTestGLContextSharedPtr;
 
-/// \class GlfTestGLContext testGLContext.h "pxr/imaging/glf/testGLContext_H
-/// \brief Testing support class for GlfGLContext.
+/// \class GlfTestGLContext
+///
+/// Testing support class for GlfGLContext.
 ///
 class GlfTestGLContext : public GlfGLContext {
 public:
+    GLF_API
     static void RegisterGLContextCallbacks();
 
     // GlfGLContext overrides
+    GLF_API
     virtual bool IsValid() const;
 
+    GLF_API
     static GlfTestGLContextSharedPtr Create( GlfTestGLContextSharedPtr const & share );
 
 protected:
     // GlfGLContext overrides
+    GLF_API
     virtual void _MakeCurrent();
+    GLF_API
     virtual bool _IsSharing(const GlfGLContextSharedPtr& rhs) const;
+    GLF_API
     virtual bool _IsEqual(const GlfGLContextSharedPtr& rhs) const;
 
 private:
@@ -60,5 +71,8 @@ private:
 private:
     Glf_TestGLContextPrivate * _context;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // GLF_TEST_GL_CONTEXT_H

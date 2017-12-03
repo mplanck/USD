@@ -24,12 +24,19 @@
 #ifndef USDIMAGING_MESH_ADAPTER_H
 #define USDIMAGING_MESH_ADAPTER_H
 
+#include "pxr/pxr.h"
+#include "pxr/usdImaging/usdImaging/api.h"
 #include "pxr/usdImaging/usdImaging/primAdapter.h"
 #include "pxr/usdImaging/usdImaging/gprimAdapter.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class HdSubdivTags;
 class PxOsdSubdivTags;
 
+/// \class UsdImagingMeshAdapter
+///
 /// Delegate support for UsdGeomMesh.
 ///
 class UsdImagingMeshAdapter : public UsdImagingGprimAdapter {
@@ -40,43 +47,37 @@ public:
     UsdImagingMeshAdapter()
         : UsdImagingGprimAdapter()
     {}
+    USDIMAGING_API
     virtual ~UsdImagingMeshAdapter();
 
+    USDIMAGING_API
     virtual SdfPath Populate(UsdPrim const& prim,
                      UsdImagingIndexProxy* index,
                      UsdImagingInstancerContext const* instancerContext = NULL);
+
+    USDIMAGING_API
+    virtual bool IsSupported(HdRenderIndex* renderIndex);
 
     // ---------------------------------------------------------------------- //
     /// \name Parallel Setup and Resolve
     // ---------------------------------------------------------------------- //
 
-    virtual void TrackVariabilityPrep(UsdPrim const& prim,
-                                      SdfPath const& cachePath,
-                                      int requestedBits,
-                                      UsdImagingInstancerContext const* 
-                                          instancerContext = NULL);
 
     /// Thread Safe.
+    USDIMAGING_API
     virtual void TrackVariability(UsdPrim const& prim,
                                   SdfPath const& cachePath,
-                                  int requestedBits,
-                                  int* dirtyBits,
+                                  HdDirtyBits* timeVaryingBits,
                                   UsdImagingInstancerContext const* 
                                       instancerContext = NULL);
 
-    virtual void UpdateForTimePrep(UsdPrim const& prim,
-                                   SdfPath const& cachePath, 
-                                   UsdTimeCode time,
-                                   int requestedBits,
-                                   UsdImagingInstancerContext const* 
-                                       instancerContext = NULL);
 
     /// Thread Safe.
+    USDIMAGING_API
     virtual void UpdateForTime(UsdPrim const& prim,
                                SdfPath const& cachePath, 
                                UsdTimeCode time,
-                               int requestedBits,
-                               int* dirtyBits,
+                               HdDirtyBits requestedBits,
                                UsdImagingInstancerContext const* 
                                    instancerContext = NULL);
 
@@ -84,9 +85,10 @@ public:
     /// \name Change Processing
     // ---------------------------------------------------------------------- //
 
-    virtual int ProcessPropertyChange(UsdPrim const& prim,
-                                      SdfPath const& cachePath,
-                                      TfToken const& propertyName);
+    USDIMAGING_API
+    virtual HdDirtyBits ProcessPropertyChange(UsdPrim const& prim,
+                                              SdfPath const& cachePath,
+                                              TfToken const& propertyName);
 
 private:
     void _GetPoints(UsdPrim const&, VtValue* value, UsdTimeCode time);
@@ -94,5 +96,7 @@ private:
     void _GetSubdivTags(UsdPrim const& prim, SubdivTags* tags, UsdTimeCode time);
 };
 
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USDIMAGING_MESH_ADAPTER_H

@@ -24,6 +24,8 @@
 #ifndef {{ Upper(tokensPrefix) }}_TOKENS_H
 #define {{ Upper(tokensPrefix) }}_TOKENS_H
 
+/// \file {{ libraryName }}/tokens.h
+
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 // 
 // This is an automatically generated file (by usdGenSchema.py).
@@ -31,10 +33,16 @@
 // 
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
+{% if useExportAPI %}
+#include "pxr/pxr.h"
+#include "{{ libraryPath }}/api.h"
+{% endif %}
 #include "pxr/base/tf/staticTokens.h"
 
-/// \file {{ libraryPath }}/tokens.h
+{% if useExportAPI %}
+{{ namespaceOpen }}
 
+{% endif %}
 /// \hideinitializer
 #define {{ Upper(tokensPrefix) }}_TOKENS \
 {% for token in tokens %}
@@ -45,7 +53,8 @@
 {% endfor %}
 
 /// \anchor {{ tokensPrefix }}Tokens
-/// \brief <b>{{ tokensPrefix }}Tokens</b> provides static, efficient TfToken's for
+///
+/// <b>{{ tokensPrefix }}Tokens</b> provides static, efficient TfToken's for
 /// use in all public USD API
 ///
 /// These tokens are auto-generated from the module's schema, representing
@@ -66,6 +75,10 @@
 {% for token in tokens %}
 /// \li <b>{{ token.id }}</b> - {{ token.desc }}
 {% endfor %}
-TF_DECLARE_PUBLIC_TOKENS({{ tokensPrefix }}Tokens, {{ Upper(tokensPrefix) }}_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS({{ tokensPrefix }}Tokens, {% if useExportAPI %}{{ Upper(libraryName) }}_API, {% endif %}{{ Upper(tokensPrefix) }}_TOKENS);
+{% if useExportAPI %}
+
+{{ namespaceClose }}
+{% endif %}
 
 #endif

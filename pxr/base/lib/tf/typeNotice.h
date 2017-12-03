@@ -24,11 +24,16 @@
 #ifndef COMMON_TF_TYPE_NOTICE_H
 #define COMMON_TF_TYPE_NOTICE_H
 
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/notice.h"
 #include "pxr/base/tf/type.h"
 
-/// TfNotice sent after a TfType is declared.
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// \class TfTypeWasDeclaredNotice
 ///
+/// TfNotice sent after a TfType is declared.
 class TfTypeWasDeclaredNotice : public TfNotice
 {
 public:
@@ -41,5 +46,7 @@ public:
 private:
     TfType _type;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // COMMON_TF_TYPE_NOTICE_H

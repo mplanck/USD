@@ -24,12 +24,16 @@
 #ifndef PXRUSDKATANA_USDIN_PLUGINREGISTRY_H
 #define PXRUSDKATANA_USDIN_PLUGINREGISTRY_H
 
+#include "pxr/pxr.h"
 #include "usdKatana/usdInPrivateData.h"
 
 #include "pxr/usd/usd/prim.h"
 #include "pxr/base/tf/type.h"
 
 #include <FnGeolib/op/FnGeolibOp.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 /// \brief Maintains the registry for usd types and kind.
 class PxrUsdKatanaUsdInPluginRegistry
@@ -117,6 +121,41 @@ public:
             const TfToken& kind,
             std::string* opName);
 
+
+    /// \brief The signature for a plug-in "location decorator" function.
+    /// These can be registered to run at every location after other ops have
+    /// executed.
+    typedef void (*LocationDecoratorFnc)(
+            FnKat::GeolibCookInterface& interface,
+            FnKat::GroupAttribute opArgs,
+            PxrUsdKatanaUsdInPrivateData* privateData);
+    
+    /// \brief Register a plug-in function which will be called for every
+    /// katana location created from a UsdPrim. This allows for specialization
+    /// beyond specific types and kinds 
+    static void RegisterLocationDecoratorFnc(LocationDecoratorFnc fnc);
+    
+    /// \brief Run the registered plug-in functions at a katana location
+    /// and UsdPrim. It returns opArgs -- which may be altered by the executed
+    /// functions.
+    static FnKat::GroupAttribute ExecuteLocationDecoratorFncs(
+            FnKat::GeolibCookInterface& interface,
+            FnKat::GroupAttribute opArgs,
+            PxrUsdKatanaUsdInPrivateData* privateData);
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
 private:
     static void _RegisterUsdType(
             const std::string& tfTypeName, 
@@ -162,5 +201,43 @@ void T::cook(FnKat::GeolibCookInterface& interface) \
 void _PxrUsdKatana_PrimReaderFn_##T(\
         const PxrUsdKatanaUsdInPrivateData& argsName,\
         Foundry::Katana::GeolibCookInterface &interfaceName )\
+
+
+/// \def PXRUSDKATANA_USDIN_PLUGIN_DECLARE_WITH_FLUSH(T)
+/// \brief Declares a plugin of opType which also includes a flush function T.
+#define PXRUSDKATANA_USDIN_PLUGIN_DECLARE_WITH_FLUSH(T) \
+class T : public FnKat::GeolibOp\
+{\
+public:\
+    static void setup(FnKat::GeolibSetupInterface& interface);\
+    static void cook(FnKat::GeolibCookInterface& interface);\
+    static void flush();\
+};\
+
+/// \def PXRUSDKATANA_USDIN_PLUGIN_DEFINE_WITH_FLUSH(T, argsName, interfaceName) 
+/// \brief Defines a plugin of opType T with inclusion of a flush function.  
+#define PXRUSDKATANA_USDIN_PLUGIN_DEFINE_WITH_FLUSH(T, argsName, interfaceName, flushFnc) \
+void T::setup(FnKat::GeolibSetupInterface& interface) {\
+    interface.setThreading(FnKat::GeolibSetupInterface::ThreadModeConcurrent);\
+}\
+void T::flush() {\
+    flushFnc();\
+}\
+void _PxrUsdKatana_PrimReaderFn_##T(\
+        const PxrUsdKatanaUsdInPrivateData&,\
+        Foundry::Katana::GeolibCookInterface &);\
+void T::cook(FnKat::GeolibCookInterface& interface) \
+{\
+    if (PxrUsdKatanaUsdInPrivateData* args \
+            = static_cast<PxrUsdKatanaUsdInPrivateData*>(interface.getPrivateData())) {\
+        _PxrUsdKatana_PrimReaderFn_##T(*args, interface);\
+    }\
+}\
+void _PxrUsdKatana_PrimReaderFn_##T(\
+        const PxrUsdKatanaUsdInPrivateData& argsName,\
+        Foundry::Katana::GeolibCookInterface &interfaceName )\
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDKATANA_USDIN_PLUGINREGISTRY_H

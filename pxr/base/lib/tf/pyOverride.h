@@ -21,25 +21,27 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#if !defined(BOOST_PP_IS_ITERATING)
-
 #ifndef TF_PYOVERRIDE_H
 #define TF_PYOVERRIDE_H
+
+#include "pxr/pxr.h"
 
 #include "pxr/base/tf/pyLock.h"
 #include "pxr/base/tf/pyObjWrapper.h"
 
 #include <boost/python/override.hpp>
 
-///
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \class TfPyMethodResult
-/// \brief A reimplementation of boost::python::detail::method_result
+///
+/// A reimplementation of boost::python::detail::method_result.
 ///
 /// This class is reimplemented from the boost class simply because the
 /// provided class only allows construction from it's friended class
-/// boost::python::override, which we also reimplement below. see
-/// TfPyOverride for more details
+/// boost::python::override, which we also reimplement below.
 ///
+/// \see TfPyOverride
 class TfPyMethodResult
 {
 private:
@@ -95,9 +97,9 @@ private:
     mutable boost::python::handle<> m_obj;
 };
 
-///
 /// \class TfPyOverride
-/// \brief A reimplementation of boost::python::override
+///
+/// A reimplementation of boost::python::override.
 ///
 /// This class is reimplemented from the boost class simply because the
 /// provided class only allows construction from, ultimately,
@@ -106,65 +108,45 @@ private:
 /// lives not on the directly wrapped C++ class, but a wrapped ancestor.
 /// So we provide our own version, TfPyOverride, with a public constructor.
 ///
-/// Note that clients must have the python GIL when constructing a 
+/// Note that clients must have the python GIL when constructing a
 /// TfPyOverride object.
 ///
 class TfPyOverride : public TfPyObjWrapper
 {
+    // Helper to generate Py_BuildValue-style format strings at compile time.
+    template <typename Arg>
+    constexpr static char _PyObjArg()
+    {
+        return 'O';
+    }
+
 public:
     /// Clients must hold the GIL to construct.
     TfPyOverride(boost::python::handle<> callable)
         : TfPyObjWrapper(boost::python::object(callable))
     {}
 
-    /// Call the override.  Clients need not hold the GIL to invoke the call
-    /// operator.
+    /// Call the override.
+    /// Clients need not hold the GIL to invoke the call operator.
+    template <typename... Args>
     TfPyMethodResult
-    operator()() const
+    operator()(Args const&... args) const
     {
         TfPyLock lock;
+        // Use the Args parameter pack together with the _PyObjArg helper to
+        // unpack the right number of 'O' elements into the format string.
+        static const char pyCallFormat[] =
+            { '(', _PyObjArg<Args>()..., ')', '\0' };
 
         TfPyMethodResult x(
             PyEval_CallFunction(
-                this->ptr()
-              , const_cast<char*>("()")
-            ));
+                this->ptr(),
+                const_cast<char*>(pyCallFormat),
+                boost::python::converter::arg_to_python<Args>(args).get()...));
         return x;
     }
-
-# define BOOST_PYTHON_fast_arg_to_python_get(z, n, _)   \
-    , boost::python::converter::arg_to_python<A##n>(a##n).get()
-
-# define BOOST_PP_ITERATION_PARAMS_1 (3, (1, BOOST_PYTHON_MAX_ARITY, "pxr/base/tf/pyOverride.h"))
-# include BOOST_PP_ITERATE()
-
-# undef BOOST_PYTHON_fast_arg_to_python_get
-
 };
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // TF_PYOVERRIDE_H
-
-#else
-
-# define N BOOST_PP_ITERATION()
-
-template <
-    BOOST_PP_ENUM_PARAMS_Z(1, N, class A)
-    >
-TfPyMethodResult
-operator()( BOOST_PP_ENUM_BINARY_PARAMS_Z(1, N, A, const& a) ) const
-{
-    TfPyLock lock;
-
-    TfPyMethodResult x(
-        PyEval_CallFunction(
-            this->ptr()
-          , const_cast<char*>("(" BOOST_PP_REPEAT_1ST(N, BOOST_PYTHON_FIXED, "O") ")")
-            BOOST_PP_REPEAT_1ST(N, BOOST_PYTHON_fast_arg_to_python_get, nil)
-        ));
-    return x;
-}
-
-# undef N
-
-#endif 

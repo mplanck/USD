@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/usdReadJob.h"
 
 #include "usdMaya/primReaderArgs.h"
@@ -34,14 +35,13 @@
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/usd/sdf/layer.h"
-#include "pxr/usd/sdf/listOp.h"
 #include "pxr/usd/sdf/path.h"
 #include "pxr/usd/kind/registry.h"
 #include "pxr/usd/usd/modelAPI.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
 #include "pxr/usd/usd/stageCacheContext.h"
-#include "pxr/usd/usd/treeIterator.h"
+#include "pxr/usd/usd/primRange.h"
 #include "pxr/usd/usdGeom/camera.h"
 #include "pxr/usd/usdGeom/gprim.h"
 #include "pxr/usd/usdUtils/pipeline.h"
@@ -58,8 +58,12 @@
 #include <string>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_DEFINE_PRIVATE_TOKENS(_tokens,
     ((PointInstancerTypeName, "PxPointInstancer"))
+    ((XformTypeName, "Xform"))
     ((GeomRootName, "Geom"))
     ((ScopePrimTypeName, "Scope"))
 
@@ -91,49 +95,12 @@ _ShouldImportAsSubAssembly(const UsdPrim& prim)
     UsdModelAPI usdModel(prim);
     usdModel.GetKind(&kind);
 
-    if (KindRegistry::IsA(kind, KindTokens->component) or
+    if (KindRegistry::IsA(kind, KindTokens->component) ||
             KindRegistry::IsA(kind, KindTokens->assembly)) {
         return true;
     }
 
     return false;
-}
-
-static
-std::string
-_GetReferencedAssetPath(const UsdPrim& prim)
-{
-    std::string result;
-
-    // XXX: Revisit this once UsdReferences has a getter.
-    SdfReferenceListOp refsListOp;
-    if (not prim.GetMetadata(SdfFieldKeys->References, &refsListOp)) {
-        return result;
-    }
-
-    SdfReferenceVector refs;
-    if (refsListOp.IsExplicit()) {
-        refs = refsListOp.GetExplicitItems();
-    } else {
-        refs = refsListOp.GetAddedItems();
-    }
-
-    if (refs.size() < 1) {
-        return result;
-    }
-
-    result = refs.begin()->GetAssetPath();
-
-    if (refs.size() > 1) {
-        std::string warningMsg = TfStringPrintf(
-            "Unexpected number of references (%zu) for USD prim \"%s\". "
-            "Only using first reference.",
-            refs.size(),
-            prim.GetPath().GetText());
-        MGlobal::displayWarning(warningMsg.c_str());
-    }
-
-    return result;
 }
 
 static
@@ -158,8 +125,8 @@ static
 bool
 _IsPxrGeomRoot(const UsdPrim& prim)
 {
-    if (prim.GetName() == _tokens->GeomRootName and
-            prim.GetParent() and prim.GetParent().IsModel()) {
+    if (prim.GetName() == _tokens->GeomRootName &&
+            prim.GetParent() && prim.GetParent().IsModel()) {
         return true;
     }
 
@@ -179,7 +146,7 @@ _CreateParentTransformNodes(const UsdPrim& usdPrim,
                             PxrUsdMayaPrimReaderContext* context)
 {
     const UsdPrim parentPrim = usdPrim.GetParent();
-    if (not parentPrim or
+    if (!parentPrim ||
             parentPrim == usdPrim.GetStage()->GetPseudoRoot()) {
         return true;
     }
@@ -193,7 +160,7 @@ _CreateParentTransformNodes(const UsdPrim& usdPrim,
     // usdPrim's parent does not have a Maya node yet, so create all of *its*
     // parents before we create a node for the parent itself.
     bool success = _CreateParentTransformNodes(parentPrim, args, context);
-    if (not success) {
+    if (!success) {
         return false;
     }
 
@@ -222,15 +189,18 @@ usdReadJob::_ProcessProxyPrims(
         PxrUsdMayaPrimReaderArgs args(proxyPrim,
                                       mArgs.shadingMode,
                                       mArgs.defaultMeshScheme,
-                                      mArgs.readAnimData);
+                                      mArgs.readAnimData,
+                                      mArgs.useCustomFrameRange,
+                                      mArgs.startTime,
+                                      mArgs.endTime);
         PxrUsdMayaPrimReaderContext ctx(&mNewNodeRegistry);
 
-        if (not _CreateParentTransformNodes(proxyPrim, args, &ctx)) {
+        if (!_CreateParentTransformNodes(proxyPrim, args, &ctx)) {
             return false;
         }
 
         MObject parentNode = ctx.GetMayaNode(proxyPrim.GetPath().GetParentPath(), false);
-        if (not PxrUsdMayaTranslatorModelAssembly::ReadAsProxy(proxyPrim,
+        if (!PxrUsdMayaTranslatorModelAssembly::ReadAsProxy(proxyPrim,
                                                                mVariants,
                                                                parentNode,
                                                                args,
@@ -242,7 +212,7 @@ usdReadJob::_ProcessProxyPrims(
 
     // Author exclude paths on the top-level proxy using the list of collapse
     // points we found.
-    if (not collapsePointPathStrings.empty()) {
+    if (!collapsePointPathStrings.empty()) {
         MStatus status;
         PxrUsdMayaPrimReaderContext ctx(&mNewNodeRegistry);
 
@@ -278,30 +248,24 @@ usdReadJob::_ProcessSubAssemblyPrims(const std::vector<UsdPrim>& subAssemblyPrim
         PxrUsdMayaPrimReaderArgs args(subAssemblyPrim,
                                       mArgs.shadingMode,
                                       mArgs.defaultMeshScheme,
-                                      mArgs.readAnimData);
+                                      mArgs.readAnimData,
+                                      mArgs.useCustomFrameRange,
+                                      mArgs.startTime,
+                                      mArgs.endTime);
         PxrUsdMayaPrimReaderContext ctx(&mNewNodeRegistry);
 
+        // We use the file path of the file currently being imported and
+        // the path to the prim within that file when creating the
+        // subassembly.
         std::string subAssemblyUsdFilePath = mFileName;
         SdfPath subAssemblyUsdPrimPath = subAssemblyPrim.GetPath();
 
-        // If a primPath wasn't specified when importing the top-level USD
-        // and the subassembly prim being considered has a reference, make
-        // the nested assembly node point to that referenced file directly
-        // rather than to the top-level file.
-        if (mPrimPath.empty()) {
-            std::string refAssetPath = _GetReferencedAssetPath(subAssemblyPrim);
-            if (not refAssetPath.empty()) {
-                subAssemblyUsdFilePath = refAssetPath;
-                subAssemblyUsdPrimPath = SdfPath();
-            }
-        }
-
-        if (not _CreateParentTransformNodes(subAssemblyPrim, args, &ctx)) {
+        if (!_CreateParentTransformNodes(subAssemblyPrim, args, &ctx)) {
             return false;
         }
 
         MObject parentNode = ctx.GetMayaNode(subAssemblyPrim.GetPath().GetParentPath(), false);
-        if (not PxrUsdMayaTranslatorModelAssembly::Read(subAssemblyPrim,
+        if (!PxrUsdMayaTranslatorModelAssembly::Read(subAssemblyPrim,
                                                         subAssemblyUsdFilePath,
                                                         subAssemblyUsdPrimPath,
                                                         parentNode,
@@ -324,10 +288,13 @@ usdReadJob::_ProcessCameraPrims(const std::vector<UsdPrim>& cameraPrims)
         PxrUsdMayaPrimReaderArgs args(cameraPrim,
                                       mArgs.shadingMode,
                                       mArgs.defaultMeshScheme,
-                                      mArgs.readAnimData);
+                                      mArgs.readAnimData,
+                                      mArgs.useCustomFrameRange,
+                                      mArgs.startTime,
+                                      mArgs.endTime);
         PxrUsdMayaPrimReaderContext ctx(&mNewNodeRegistry);
 
-        if (not _CreateParentTransformNodes(cameraPrim, args, &ctx)) {
+        if (!_CreateParentTransformNodes(cameraPrim, args, &ctx)) {
             return false;
         }
 
@@ -341,7 +308,7 @@ usdReadJob::_ProcessCameraPrims(const std::vector<UsdPrim>& cameraPrims)
 }
 
 bool
-usdReadJob::_DoImportWithProxies(UsdTreeIterator& primIt)
+usdReadJob::_DoImportWithProxies(UsdPrimRange& range)
 {
     MStatus status;
 
@@ -357,7 +324,7 @@ usdReadJob::_DoImportWithProxies(UsdTreeIterator& primIt)
     UsdPrim pxrGeomRoot;
     std::vector<std::string> collapsePointPathStrings;
 
-    for(; primIt; ++primIt) {
+    for(auto primIt = range.begin(); primIt != range.end(); ++primIt) {
         const UsdPrim& prim = *primIt;
 
         if (prim.IsA<UsdGeomCamera>()) {
@@ -388,30 +355,37 @@ usdReadJob::_DoImportWithProxies(UsdTreeIterator& primIt)
                 TfStringPrintf("Scope \"%s\". Skipping all children.",
                                prim.GetPath().GetText()).c_str());
             primIt.PruneChildren();
-        } else {
+        } else if (prim.GetTypeName() != _tokens->XformTypeName) {
+            // Don't complain about Xform prims being unsupported. For the
+            // "Expanded" representation of assemblies, we'll only create the
+            // transforms we need to in order to reach supported prims.
             MGlobal::displayWarning(
-                TfStringPrintf("Unsupported USD prim type \"%s\" for \"%s\". Skipping...",
+                TfStringPrintf("Prim type \"%s\" unsupported in 'Expanded' "
+                               "representation for prim \"%s\". Skipping...",
                                prim.GetTypeName().GetText(),
                                prim.GetPath().GetText()).c_str());
         }
     }
 
     // Create the proxy nodes and author exclude paths on the geom root proxy.
-    if (not _ProcessProxyPrims(proxyPrims,
+    if (!_ProcessProxyPrims(proxyPrims,
                                pxrGeomRoot,
                                collapsePointPathStrings)) {
         return false;
     }
 
     // Create all sub-assembly nodes.
-    if (not _ProcessSubAssemblyPrims(subAssemblyPrims)) {
+    if (!_ProcessSubAssemblyPrims(subAssemblyPrims)) {
         return false;
     }
 
     // Create all camera nodes.
-    if (not _ProcessCameraPrims(cameraPrims)) {
+    if (!_ProcessCameraPrims(cameraPrims)) {
         return false;
     }
 
     return true;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

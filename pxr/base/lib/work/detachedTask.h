@@ -24,15 +24,18 @@
 #ifndef WORK_DETACHEDTASK_H
 #define WORK_DETACHEDTASK_H
 
-///
-///\file work/detachedTask.h
+/// \file work/detachedTask.h
 
+#include "pxr/pxr.h"
 #include "pxr/base/tf/errorMark.h"
+#include "pxr/base/work/api.h"
 
 #include <tbb/task.h>
 
 #include <type_traits>
 #include <utility>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 template <class Fn>
 struct Work_DetachedInvoker : public tbb::task {
@@ -48,17 +51,19 @@ private:
     Fn _fn;
 };
 
-/// \brief Invoke \p fn asynchronously, discard any errors it produces, and
-/// provide no way to wait for it to complete.
+WORK_API tbb::task_group_context &Work_GetDetachedTaskGroupContext();
+
+/// Invoke \p fn asynchronously, discard any errors it produces, and provide
+/// no way to wait for it to complete.
 template <class Fn>
 void WorkRunDetachedTask(Fn &&fn)
 {
-    tbb::task_group_context &Work_GetDetachedTaskGroupContext();
-
     using FnType = typename std::remove_reference<Fn>::type;
     tbb::task::enqueue(
         *new (tbb::task::allocate_root(Work_GetDetachedTaskGroupContext()))
         Work_DetachedInvoker<FnType>(std::forward<Fn>(fn)));
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // WORK_DETACHEDTASK_H

@@ -23,6 +23,7 @@
 //
 /// \file wrapLayer.cpp
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/layer.h"
 #include "pxr/usd/sdf/layerUtils.h"
 #include "pxr/usd/sdf/attributeSpec.h"
@@ -30,7 +31,6 @@
 #include "pxr/usd/sdf/pyChildrenProxy.h"
 #include "pxr/usd/sdf/pyUtils.h"
 #include "pxr/usd/sdf/relationshipSpec.h"
-
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/makePyConstructor.h"
 #include "pxr/base/tf/pyFunction.h"
@@ -42,6 +42,10 @@
 #include <boost/python/overloads.hpp>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 typedef SdfPyChildrenProxy<SdfLayer::RootPrimsView> RootPrimsProxy;
 
@@ -188,7 +192,7 @@ private:
         if (index == -1) {
             index = size;
         }
-        if (index < 0 or index > size) {
+        if (index < 0 || index > size) {
             TfPyThrowIndexError("Index out of range");
         }
         GetLayer()->SetSubLayerOffset(value, index);
@@ -218,7 +222,7 @@ private:
 
         std::string result;
         TF_FOR_ALL(it, values) {
-            if (not result.empty()) {
+            if (!result.empty()) {
                 result += ", ";
             }
             result += TfPyRepr(*it);
@@ -244,8 +248,8 @@ _ExtractFileFormatArguments(
     SdfLayer::FileFormatArguments* args)
 {
     std::string errMsg;
-    if (not SdfFileFormatArgumentsFromPython(dict, args, &errMsg)) {
-        TF_CODING_ERROR(errMsg.c_str());
+    if (!SdfFileFormatArgumentsFromPython(dict, args, &errMsg)) {
+        TF_CODING_ERROR("%s", errMsg.c_str());
         return false;
     }
     return true;
@@ -273,7 +277,7 @@ _Export(
     const boost::python::dict& dict)
 {
     SdfLayer::FileFormatArguments args;
-    if (not _ExtractFileFormatArguments(dict, &args)) {
+    if (!_ExtractFileFormatArguments(dict, &args)) {
         return false;
     }
 
@@ -375,7 +379,7 @@ _CreateNew(
     const boost::python::dict& dict = boost::python::dict())
 {
     SdfLayer::FileFormatArguments args;
-    if (not _ExtractFileFormatArguments(dict, &args)) {
+    if (!_ExtractFileFormatArguments(dict, &args)) {
         return SdfLayerRefPtr();
     }
 
@@ -390,7 +394,7 @@ _New(
     const boost::python::dict& dict = boost::python::dict())
 {
     SdfLayer::FileFormatArguments args;
-    if (not _ExtractFileFormatArguments(dict, &args)) {
+    if (!_ExtractFileFormatArguments(dict, &args)) {
         return SdfLayerRefPtr();
     }
 
@@ -403,7 +407,7 @@ _FindOrOpen(
     const boost::python::dict& dict)
 {
     SdfLayer::FileFormatArguments args;
-    if (not _ExtractFileFormatArguments(dict, &args)) {
+    if (!_ExtractFileFormatArguments(dict, &args)) {
         return SdfLayerRefPtr();
     }
 
@@ -416,7 +420,7 @@ _Find(
     const boost::python::dict& dict)
 {
     SdfLayer::FileFormatArguments args;
-    if (not _ExtractFileFormatArguments(dict, &args)) {
+    if (!_ExtractFileFormatArguments(dict, &args)) {
         return SdfLayerHandle();
     }
 
@@ -430,7 +434,7 @@ _FindRelativeToLayer(
     const boost::python::dict& dict)
 {
     SdfLayer::FileFormatArguments args;
-    if (not _ExtractFileFormatArguments(dict, &args)) {
+    if (!_ExtractFileFormatArguments(dict, &args)) {
         return SdfLayerHandle();
     }
 
@@ -444,13 +448,15 @@ _FindOrOpenRelativeToLayer(
     const boost::python::dict& dict)
 {
     SdfLayer::FileFormatArguments args;
-    if (not _ExtractFileFormatArguments(dict, &args)) {
+    if (!_ExtractFileFormatArguments(dict, &args)) {
         return SdfLayerHandle();
     }
 
     std::string mutableLayerPath(layerPath);
     return SdfFindOrOpenRelativeToLayer(anchor, &mutableLayerPath, args);
 }
+
+} // anonymous namespace 
 
 void wrapLayer()
 {
@@ -500,7 +506,8 @@ void wrapLayer()
 
         .def("OpenAsAnonymous", This::OpenAsAnonymous,
              ( arg("filePath") = std::string(),
-               arg("metadataOnly") = false ),
+               arg("metadataOnly") = false,
+               arg("tag") = std::string() ),
              return_value_policy<TfPyRefPtrFactory<ThisHandle> >())
         .staticmethod("OpenAsAnonymous")
 
@@ -609,6 +616,23 @@ void wrapLayer()
              "Return list of muted layers.\n")
              .staticmethod("GetMutedLayers")
 
+        .add_property("colorConfiguration",
+            &This::GetColorConfiguration,
+            &This::SetColorConfiguration,
+            "The color configuration asset-path of this layer.")
+
+        .def("HasColorConfiguration", &This::HasColorConfiguration)
+        .def("ClearColorConfiguration", &This::ClearColorConfiguration)
+
+        .add_property("colorManagementSystem",
+            &This::GetColorManagementSystem,
+            &This::SetColorManagementSystem,
+            "The name of the color management system used to interpret the "
+            "colorConfiguration asset.")
+
+        .def("HasColorManagementSystem", &This::HasColorManagementSystem)
+        .def("ClearColorManagementSystem", &This::ClearColorManagementSystem)
+
         .add_property("comment",
             &This::GetComment,
             &This::SetComment,
@@ -709,7 +733,7 @@ void wrapLayer()
             "The pseudo-root of the layer.")
 
         .add_property("rootPrims",
-            &::_WrapGetRootPrims,
+            &_WrapGetRootPrims,
             "The root prims of this layer, as an ordered dictionary.\n\n"
             "The prims may be accessed by index or by name.\n"
             "Although this property claims it is read only, you can modify "
@@ -742,7 +766,7 @@ void wrapLayer()
             "of this list.")
 
         .add_property("subLayerOffsets",
-            &::_WrapGetSubLayerOffsets,
+            &_WrapGetSubLayerOffsets,
             "The sublayer offsets of this layer, as a list.  Although this "
             "property is claimed to be read only, you can modify the contents "
             "of this list by assigning new layer offsets to specific indices.")
@@ -795,9 +819,11 @@ void wrapLayer()
         .add_property("permissionToEdit", &This::PermissionToEdit, 
               "Return true if permitted to be edited (modified), false otherwise.\n")
 
-        .def("ApplyRootPrimOrder", &::_ApplyRootPrimOrder,
+        .def("ApplyRootPrimOrder", &_ApplyRootPrimOrder,
                  return_value_policy<TfPySequenceToList>())
 
+        .setattr("ColorConfigurationKey", SdfFieldKeys->ColorConfiguration)
+        .setattr("ColorManagementSystemKey", SdfFieldKeys->ColorManagementSystem)
         .setattr("CommentKey", SdfFieldKeys->Comment)
         .setattr("DocumentationKey", SdfFieldKeys->Documentation)
         .setattr("HasOwnedSubLayers", SdfFieldKeys->HasOwnedSubLayers)
@@ -836,3 +862,5 @@ void wrapLayer()
         TfPyContainerConversions::variable_capacity_policy>();
 
 }
+
+TF_REFPTR_CONST_VOLATILE_GET(SdfLayer)

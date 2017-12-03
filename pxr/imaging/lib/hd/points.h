@@ -23,18 +23,17 @@
 //
 #ifndef HD_POINTS_H
 #define HD_POINTS_H
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
-#include "pxr/imaging/hd/drawingCoord.h"
-#include "pxr/imaging/hd/enums.h"
-#include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/rprim.h"
 
-#include "pxr/usd/sdf/path.h"
-#include "pxr/base/vt/array.h"
+PXR_NAMESPACE_OPEN_SCOPE
 
-#include <boost/shared_ptr.hpp>
-
-/// descriptor to configure a drawItem for a repr
+/// \class HdPointsReprDesc
+///
+/// Descriptor to configure a drawItem for a repr.
 ///
 struct HdPointsReprDesc {
     HdPointsReprDesc(
@@ -42,44 +41,44 @@ struct HdPointsReprDesc {
         : geomStyle(geomStyle)
         {}
 
-    HdPointsGeomStyle geomStyle:1;
+    HdPointsGeomStyle geomStyle;
 };
 
-/// Points.
+/// Hydra Schema for a point cloud.
 ///
 class HdPoints: public HdRprim {
 public:
-    HD_MALLOC_TAG_NEW("new HdPoints");
-    HdPoints(HdSceneDelegate* delegate, SdfPath const& id,
-             SdfPath const& surfaceShaderId,
-             SdfPath const& instancerId = SdfPath());
+    HD_API
+    virtual ~HdPoints();
 
     /// Configure geometric style of drawItems for \p reprName
+    HD_API
     static void ConfigureRepr(TfToken const &reprName,
-                              HdPointsReprDesc desc);
-
-    /// Return the dirtyBits mask to be tracked for \p reprName
-    static int GetDirtyBitsMask(TfToken const &reprName);
+                              const HdPointsReprDesc &desc);
 
 protected:
-    virtual HdReprSharedPtr const & _GetRepr(
-        TfToken const &reprName, HdChangeTracker::DirtyBits *dirtyBitsState);
-
-    void _PopulateVertexPrimVars(HdDrawItem *drawItem,
-                                 HdChangeTracker::DirtyBits *dirtyBitsState);
-
-    virtual HdChangeTracker::DirtyBits _GetInitialDirtyBits() const final override;
-
-private:
-    enum DrawingCoord {
-        InstancePrimVar = HdDrawingCoord::CustomSlotsBegin
-    };
-
-    void _UpdateDrawItem(HdDrawItem *drawItem,
-                         HdChangeTracker::DirtyBits *dirtyBits);
+    /// Constructor. instancerId, if specified, is the instancer which uses
+    /// this point cloud as a prototype.
+    HD_API
+    HdPoints(SdfPath const& id,
+             SdfPath const& instancerId = SdfPath());
 
     typedef _ReprDescConfigs<HdPointsReprDesc> _PointsReprConfig;
+
+    HD_API
+    static _PointsReprConfig::DescArray _GetReprDesc(TfToken const &reprName);
+
+private:
+
+    // Class can not be default constructed or copied.
+    HdPoints()                             = delete;
+    HdPoints(const HdPoints &)             = delete;
+    HdPoints &operator =(const HdPoints &) = delete;
+
     static _PointsReprConfig _reprDescConfig;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // HD_POINTS_H

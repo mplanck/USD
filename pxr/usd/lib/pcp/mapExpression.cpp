@@ -21,20 +21,19 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/mapExpression.h"
 #include "pxr/usd/pcp/mapFunction.h"
 #include "pxr/usd/pcp/layerStack.h"
 
 #include "pxr/base/tracelite/trace.h"
 
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-#include <tbb/spin_mutex.h>
-#include <unordered_map>
-#else
 #include <tbb/concurrent_hash_map.h>
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 
-class Pcp_VariableImpl;
+PXR_NAMESPACE_OPEN_SCOPE
+
+struct Pcp_VariableImpl;
 
 // Add a mapping from </> to </> if the function does not already have one.
 static PcpMapFunction
@@ -60,7 +59,7 @@ PcpMapExpression::PcpMapExpression()
 bool
 PcpMapExpression::IsNull() const
 {
-    return not _node;
+    return !_node;
 }
 
 void
@@ -93,7 +92,14 @@ PcpMapExpression::Constant( const Value & value )
 PcpMapExpression
 PcpMapExpression::Compose(const PcpMapExpression &f) const
 {
-    if (_node->key.op == _OpConstant and f._node->key.op == _OpConstant) {
+    // Fast path short-circuits for identities
+    if (IsConstantIdentity()) {
+        return f;
+    }
+    if (f.IsConstantIdentity()) {
+        return *this;
+    }
+    if (_node->key.op == _OpConstant && f._node->key.op == _OpConstant) {
         // Apply constant folding
         return Constant( Evaluate().Compose( f.Evaluate() ) );
     }
@@ -103,6 +109,10 @@ PcpMapExpression::Compose(const PcpMapExpression &f) const
 PcpMapExpression
 PcpMapExpression::Inverse() const
 {
+    // Fast path short-circuits for identities
+    if (IsConstantIdentity()) {
+        return *this;
+    }
     if (_node->key.op == _OpConstant) {
         // Apply constant folding
         return Constant( Evaluate().GetInverse() );
@@ -113,6 +123,10 @@ PcpMapExpression::Inverse() const
 PcpMapExpression
 PcpMapExpression::AddRootIdentity() const
 {
+    // Fast path short-circuits for identities
+    if (IsConstantIdentity()) {
+        return *this;
+    }
     if (_node->key.op == _OpConstant) {
         // Apply constant folding
         return Constant( _AddRootIdentity(Evaluate()) );
@@ -174,24 +188,10 @@ struct _KeyHashEq
 {
     inline bool equal(const Key &l, const Key &r) const { return l == r; }
     inline size_t hash(const Key &k) const { return k.GetHash(); }
-
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    inline size_t operator()(const Key &k) const { return hash(k); }
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 };
 
 } // anon
 
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-struct PcpMapExpression::_Node::_NodeMap
-{
-    typedef PcpMapExpression::_Node::Key Key;
-    typedef std::unordered_map<
-        Key, PcpMapExpression::_Node *, _KeyHashEq<Key> > MapType;
-    MapType map;
-    tbb::spin_mutex mutex;
-};
-#else 
 struct PcpMapExpression::_Node::_NodeMap
 {
     typedef PcpMapExpression::_Node::Key Key;
@@ -200,7 +200,6 @@ struct PcpMapExpression::_Node::_NodeMap
     typedef MapType::accessor accessor;
     MapType map;
 };
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 
 TfStaticData<PcpMapExpression::_Node::_NodeMap>
 PcpMapExpression::_Node::_nodeRegistry;
@@ -231,14 +230,14 @@ PcpMapExpression::_Node::_ExpressionTreeAlwaysHasIdentity(const Key& key)
         //
         // In this case, the expression tree will only have an identity
         // mapping if *both* subtrees being composed have an identity.
-        return (key.arg1 and key.arg1->expressionTreeAlwaysHasIdentity and
-                key.arg2 and key.arg2->expressionTreeAlwaysHasIdentity);
+        return (key.arg1 && key.arg1->expressionTreeAlwaysHasIdentity &&
+                key.arg2 && key.arg2->expressionTreeAlwaysHasIdentity);
 
     default:
         // For any other operation, if either of the subtrees has an
         // identity mapping, so does this tree.
-        return (key.arg1 and key.arg1->expressionTreeAlwaysHasIdentity) or
-               (key.arg2 and key.arg2->expressionTreeAlwaysHasIdentity);
+        return (key.arg1 && key.arg1->expressionTreeAlwaysHasIdentity) ||
+               (key.arg2 && key.arg2->expressionTreeAlwaysHasIdentity);
     }
 }
 
@@ -253,27 +252,8 @@ PcpMapExpression::_Node::New( _Op op_,
 
     if (key.op != _OpVariable) {
         // Check for existing instance to re-use
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-        tbb::spin_mutex::scoped_lock lock(_nodeRegistry->mutex);
-
-        std::pair<_NodeMap::MapType::iterator, bool> accessor = 
-            _nodeRegistry->map.insert(std::make_pair(key, nullptr));
-        if (accessor.second or
-            accessor.first->second->_refCount.fetch_and_increment() == 0) {
-            // Either there was no node in the table, or there was but it had
-            // begun dying (another client dropped its refcount to 0).  We have
-            // to create a new node in the table.  When the client that is
-            // killing the other node it looks for itself in the table, it will
-            // either not find itself or will find a different node and so won't
-            // remove it.
-            _NodeRefPtr newNode(new _Node(key));
-            accessor.first->second = newNode.get();
-            return newNode;
-        }
-        return _NodeRefPtr(accessor.first->second, /*add_ref =*/ false);
-#else
         _NodeMap::accessor accessor;
-        if (_nodeRegistry->map.insert(accessor, key) or
+        if (_nodeRegistry->map.insert(accessor, key) ||
             accessor->second->_refCount.fetch_and_increment() == 0) {
             // Either there was no node in the table, or there was but it had
             // begun dying (another client dropped its refcount to 0).  We have
@@ -286,7 +266,6 @@ PcpMapExpression::_Node::New( _Op op_,
             return newNode;
         }
         return _NodeRefPtr(accessor->second, /*add_ref =*/ false);
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
     }
     return _NodeRefPtr(new _Node(key));
 }
@@ -318,29 +297,19 @@ PcpMapExpression::_Node::~_Node()
     }
 
     if (key.op != _OpVariable) {
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-        tbb::spin_mutex::scoped_lock lock(_nodeRegistry->mutex);
-        // Remove from node map if present.
-        _NodeMap::MapType::iterator accessor = _nodeRegistry->map.find(key);
-        if (accessor != _nodeRegistry->map.end() and
-            accessor->second == this) {
-            _nodeRegistry->map.erase(accessor);
-        }
-#else
         // Remove from node map if present.
         _NodeMap::accessor accessor;
-        if (_nodeRegistry->map.find(accessor, key) and
+        if (_nodeRegistry->map.find(accessor, key) &&
             accessor->second == this) {
             _nodeRegistry->map.erase(accessor);
         }
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
     }
 }
 
 const PcpMapExpression::Value &
 PcpMapExpression::_Node::EvaluateAndCache() const
 {
-    if (not _cachedValue) {
+    if (!_cachedValue) {
         TRACE_SCOPE("PcpMapExpression::_Node::EvaluateAndCache - cache miss");
         _cachedValue.reset(_EvaluateUncached());
     }
@@ -408,9 +377,9 @@ bool
 PcpMapExpression::_Node::Key::operator==(const Key &key) const
 {
     return op == key.op
-        and arg1 == key.arg1
-        and arg2 == key.arg2
-        and valueForConstant == key.valueForConstant;
+        && arg1 == key.arg1
+        && arg2 == key.arg2
+        && valueForConstant == key.valueForConstant;
 }
 
 void
@@ -425,3 +394,5 @@ intrusive_ptr_release(PcpMapExpression::_Node* p)
     if (p->_refCount.fetch_and_decrement() == 1)
         delete p;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

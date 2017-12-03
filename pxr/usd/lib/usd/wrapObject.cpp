@@ -21,13 +21,15 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/object.h"
 
-#include "pxr/usd/usd/conversions.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/wrapUtils.h"
 
 #include "pxr/base/tf/ostreamMethods.h"
+
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -43,6 +45,10 @@ using std::string;
 using std::vector;
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static TfPyObjWrapper
 _GetMetadata(const UsdObject &self, const TfToken &key)
@@ -65,14 +71,14 @@ _GetMetadataByDictKey(
 static bool _SetMetadata(const UsdObject &self, const TfToken& key,
                          object obj) {
     VtValue value;
-    return UsdPythonToMetadataValue(key, /*keyPath*/TfToken(), obj, &value) and
+    return UsdPythonToMetadataValue(key, /*keyPath*/TfToken(), obj, &value) &&
         self.SetMetadata(key, value);
 }
 
 static bool _SetMetadataByDictKey(const UsdObject &self, const TfToken& key,
                                   const TfToken &keyPath, object obj) {
     VtValue value;
-    return UsdPythonToMetadataValue(key, keyPath, obj, &value) and
+    return UsdPythonToMetadataValue(key, keyPath, obj, &value) &&
         self.SetMetadataByDictKey(key, keyPath, value);
 }
 
@@ -88,7 +94,7 @@ static TfPyObjWrapper _GetCustomDataByKey(
 static void _SetCustomData(UsdObject &self, object obj) {
     VtValue value;
     if (UsdPythonToMetadataValue(
-            SdfFieldKeys->CustomData, TfToken(), obj, &value) and
+            SdfFieldKeys->CustomData, TfToken(), obj, &value) &&
         value.IsHolding<VtDictionary>()) {
         self.SetCustomData(value.UncheckedGet<VtDictionary>());
     }
@@ -115,7 +121,7 @@ static TfPyObjWrapper _GetAssetInfoByKey(
 static void _SetAssetInfo(UsdObject &self, object obj) {
     VtValue value;
     if (UsdPythonToMetadataValue(
-            SdfFieldKeys->AssetInfo, TfToken(), obj, &value) and
+            SdfFieldKeys->AssetInfo, TfToken(), obj, &value) &&
         value.IsHolding<VtDictionary>()) {
         self.SetAssetInfo(value.UncheckedGet<VtDictionary>());
     }
@@ -145,14 +151,15 @@ __getattribute__(object selfObj, const char *name) {
     // Allow attribute lookups if the attribute name starts with '__', if the
     // object's prim is valid, or if the attribute is one of a specific
     // whitelist.
-    if ((name[0] == '_' and name[1] == '_') or
-        extract<UsdObject &>(selfObj)().GetPrim().IsValid() or
-        strcmp(name, "IsValid") == 0 or
-        strcmp(name, "IsDefined") == 0 or
-        strcmp(name, "GetDescription") == 0 or
-        strcmp(name, "GetPrim") == 0 or
-        strcmp(name, "GetPath") == 0 or
-        strcmp(name, "GetPrimPath") == 0) {
+    if ((name[0] == '_' && name[1] == '_') ||
+        extract<UsdObject &>(selfObj)().GetPrim().IsValid() ||
+        strcmp(name, "IsValid") == 0 ||
+        strcmp(name, "IsDefined") == 0 ||
+        strcmp(name, "GetDescription") == 0 ||
+        strcmp(name, "GetPrim") == 0 ||
+        strcmp(name, "GetPath") == 0 ||
+        strcmp(name, "GetPrimPath") == 0 ||
+        strcmp(name, "IsPseudoRoot") == 0){
         // Dispatch to object's __getattribute__.
         return (*_object__getattribute__)(selfObj, name);
     } else {
@@ -163,6 +170,8 @@ __getattribute__(object selfObj, const char *name) {
     // Unreachable.
     return object();
 }
+
+} // anonymous namespace 
 
 void wrapUsdObject()
 {

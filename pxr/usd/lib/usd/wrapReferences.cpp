@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/references.h"
 
 #include <boost/python/class.hpp>
@@ -30,29 +31,40 @@ using std::string;
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 void wrapUsdReferences()
 {
     class_<UsdReferences>("References", no_init)
-        .def("Add", (bool (UsdReferences::*)(const SdfReference &))
-             &UsdReferences::Add, arg("ref"))
-        .def("Add", (bool (UsdReferences::*)(const string &, const SdfPath &,
-                                             const SdfLayerOffset &))
-             &UsdReferences::Add, (arg("assetPath"), arg("primPath"),
-                                   arg("layerOffset")=SdfLayerOffset()))
-        .def("Add", (bool (UsdReferences::*)(const string &,
-                                             const SdfLayerOffset &))
-             &UsdReferences::Add, (arg("assetPath"),
-                                   arg("layerOffset")=SdfLayerOffset()))
-        .def("AddInternal",
-             &UsdReferences::AddInternal, 
-                                  (arg("primPath"),
-                                   arg("layerOffset")=SdfLayerOffset()))
+        .def("AddReference",
+             (bool (UsdReferences::*)(const SdfReference &, UsdListPosition))
+             &UsdReferences::AddReference,
+             (arg("ref"),
+              arg("position")=UsdListPositionTempDefault))
+        .def("AddReference",
+             (bool (UsdReferences::*)(const string &, const SdfPath &,
+                                      const SdfLayerOffset &, UsdListPosition))
+             &UsdReferences::AddReference,
+             (arg("assetPath"), arg("primPath"),
+              arg("layerOffset")=SdfLayerOffset(),
+              arg("position")=UsdListPositionTempDefault))
+        .def("AddReference",(bool (UsdReferences::*)(const string &,
+                                                     const SdfLayerOffset &,
+                                                     UsdListPosition))
+             &UsdReferences::AddReference,
+             (arg("assetPath"),
+              arg("layerOffset")=SdfLayerOffset(),
+              arg("position")=UsdListPositionTempDefault))
+        .def("AddInternalReference",
+             &UsdReferences::AddInternalReference, 
+             (arg("primPath"),
+              arg("layerOffset")=SdfLayerOffset(),
+              arg("position")=UsdListPositionTempDefault))
 
-        .def("Remove", &UsdReferences::Remove, arg("ref"))
-        .def("Clear", &UsdReferences::Clear)
-        .def("SetItems", &UsdReferences::SetItems)
+        .def("RemoveReference", &UsdReferences::RemoveReference, arg("ref"))
+        .def("ClearReferences", &UsdReferences::ClearReferences)
+        .def("SetReferences", &UsdReferences::SetReferences)
         .def("GetPrim", (UsdPrim (UsdReferences::*)()) &UsdReferences::GetPrim)
         .def(!self)
         ;
 }
-

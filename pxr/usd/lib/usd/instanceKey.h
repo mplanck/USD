@@ -24,6 +24,7 @@
 #ifndef USD_INSTANCE_KEY_H
 #define USD_INSTANCE_KEY_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/clip.h"
 #include "pxr/usd/usd/primData.h"
 
@@ -32,12 +33,17 @@
 #include <string>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 class PcpPrimIndex;
 
 /// \class Usd_InstanceKey
+///
 /// Instancing key for prims. Instanceable prims that share the same
 /// instance key are guaranteed to have the same opinions for name children
 /// and properties and thus can share the same master.
+///
 class Usd_InstanceKey
 {
 public:
@@ -61,5 +67,8 @@ private:
     PcpInstanceKey _pcpInstanceKey;
     std::vector<Usd_ResolvedClipInfo> _clipInfo;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_INSTANCE_KEY_H

@@ -21,17 +21,20 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file vt/array.h
-///
 #ifndef VT_ARRAY_H
 #define VT_ARRAY_H
 
+/// \file vt/array.h
+
+#include "pxr/pxr.h"
+#include "pxr/base/vt/api.h"
 #include "pxr/base/vt/hash.h"
 #include "pxr/base/vt/operators.h"
 #include "pxr/base/vt/streamOut.h"
 #include "pxr/base/vt/traits.h"
 #include "pxr/base/vt/types.h"
 
+#include "pxr/base/arch/pragmas.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/mallocTag.h"
@@ -52,8 +55,11 @@
 
 #include <boost/functional/hash.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \class VtArray 
-/// \brief Represents an arbitrary dimensional rectangular container class.
+///
+/// Represents an arbitrary dimensional rectangular container class.
 ///
 /// Originally, VtArray was built to mimic the arrays in menv2x's MDL language,
 /// but since VtArray has typed elements, the multidimensionality has found
@@ -108,12 +114,6 @@ class VtArray {
 
     typedef boost::container::vector<ELEM> _VecType;
 
-    // VtArray should derive from boost::equality_comparable, but because of
-    // gcc's awesomeness, that increases the size of VtArray by a pointer.
-    // Which is stupid, because equality_comparable is empty, and in fact, ONLY
-    // creates friend free functions.  So instead, we manually provide != in
-    // terms of ==.
-
   public:
 
     /// Type this array holds.
@@ -162,10 +162,10 @@ class VtArray {
 
     /// @}
 
-    /// \brief Create a size=0 array.
+    /// Create a size=0 array.
     VtArray() {}
 
-    /// \brief Create a size=n array.
+    /// Create a size=n array.
     explicit VtArray(unsigned int n)
     {
         resize(n);
@@ -174,63 +174,63 @@ class VtArray {
     /// \addtogroup STL_API
     /// @{
     
-    /// \brief Return an iterator to the start of the array.  Iterators are
+    /// Return an iterator to the start of the array.  Iterators are
     /// currently linear regardless of dimension.
     iterator begin() { return iterator(data()); }
-    /// \brief Returns an iterator to the end of the array.  Iterators are
+    /// Returns an iterator to the end of the array.  Iterators are
     /// currently linear regardless of dimension.
     iterator end() { return iterator(data() + size()); }
 
-    /// \brief Return a const iterator to the start of the array.  Iterators
+    /// Return a const iterator to the start of the array.  Iterators
     /// are currently linear regardless of dimension.
     const_iterator begin() const { return const_iterator(data()); }
-    /// \brief Return a const iterator to the end of the array.  Iterators are
+    /// Return a const iterator to the end of the array.  Iterators are
     /// currently linear regardless of dimension.
     const_iterator end() const { return const_iterator(data() + size()); }
 
-    /// \brief Return a const iterator to the start of the array.  Iterators
+    /// Return a const iterator to the start of the array.  Iterators
     /// are currently linear regardless of dimension.
     const_iterator cbegin() const { return begin(); }
-    /// \brief Return a const iterator to the end of the array.  Iterators are
+    /// Return a const iterator to the end of the array.  Iterators are
     /// currently linear regardless of dimension.
     const_iterator cend() const { return end(); }
 
-    /// \brief Return a reverse iterator to the end of the array.  Iterators are
+    /// Return a reverse iterator to the end of the array.  Iterators are
     /// currently linear regardless of dimension.
     reverse_iterator rbegin() { return reverse_iterator(end()); }
-    /// \brief Return a reverse iterator to the start of the array.  Iterators
+    /// Return a reverse iterator to the start of the array.  Iterators
     /// are currently linear regardless of dimension.
     reverse_iterator rend() { return reverse_iterator(begin()); }
 
-    /// \brief Return a const reverse iterator to the end of the array.
+    /// Return a const reverse iterator to the end of the array.
     /// Iterators are currently linear regardless of dimension.
     const_reverse_iterator rbegin() const {
         return const_reverse_iterator(end());
     }
-    /// \brief Return a const reverse iterator to the start of the array.
+    /// Return a const reverse iterator to the start of the array.
     /// Iterators are currently linear regardless of dimension.
     const_reverse_iterator rend() const {
         return const_reverse_iterator(begin());
     }
 
-    /// \brief Return a const reverse iterator to the end of the array.
+    /// Return a const reverse iterator to the end of the array.
     /// Iterators are currently linear regardless of dimension.
     const_reverse_iterator crbegin() const { return rbegin(); }
-    /// \brief Return a const reverse iterator to the start of the array.
+    /// Return a const reverse iterator to the start of the array.
     /// Iterators are currently linear regardless of dimension.
     const_reverse_iterator crend() const { return rend(); }
 
-    /// \brief Return a pointer to this array's data.
+    /// Return a pointer to this array's data.
     pointer data() { _Detach(); return _data ? _data->vec.data() : NULL; }
-    /// \brief Return a const pointer to this array's data.
+    /// Return a const pointer to this array's data.
     const_pointer data() const { return _data ? _data->vec.data() : NULL; }
-    /// \brief Return a const pointer to the data held by this array.
+    /// Return a const pointer to the data held by this array.
     const_pointer cdata() const { return data(); }
 
-    /// \brief Append an element to array.
+    /// Append an element to array.
     void push_back(ElementType const &elem) {
         if (Vt_ArrayStackCheck(size(), _GetReserved())) {
-            if (not _data)
+            if (!_data)
                 _data.reset(new _Data());
             else
                 _Detach();
@@ -240,7 +240,7 @@ class VtArray {
         }
     }
 
-    /// \brief Remove the last element of an array.
+    /// Remove the last element of an array.
     void pop_back() {
         if (Vt_ArrayStackCheck(size(), _GetReserved())) {
             _Detach();
@@ -250,16 +250,16 @@ class VtArray {
         }
     }
 
-    /// \brief Return the total number of elements in this array.
+    /// Return the total number of elements in this array.
     size_t size() const { return _data ? _data->vec.size() : 0; }
 
-    /// \brief Equivalent to size() == 0.
+    /// Equivalent to size() == 0.
     bool empty() const { return size() == 0; }
     
-    /// \brief Ensure enough memory is allocated to hold \p num elements.
+    /// Ensure enough memory is allocated to hold \p num elements.
     void reserve(size_t num) {
         if (num >= size()) {
-            if (not _data)
+            if (!_data)
                 _data.reset(new _Data);
             else
                 _Detach();
@@ -267,21 +267,21 @@ class VtArray {
         }
     }
 
-    /// \brief Return a reference to the first element in this array.  Invokes
+    /// Return a reference to the first element in this array.  Invokes
     /// undefined behavior if the array is empty.
     reference front() { return *begin(); }
-    /// \brief Return a const reference to the first element in this array.
+    /// Return a const reference to the first element in this array.
     /// Invokes undefined behavior if the array is empty.
     const_reference front() const { return *begin(); }
 
-    /// \brief Return a reference to the last element in this array.  Invokes
+    /// Return a reference to the last element in this array.  Invokes
     /// undefined behavior if the array is empty.
     reference back() { return *rbegin(); }
-    /// \brief Return a const reference to the last element in this array.
+    /// Return a const reference to the last element in this array.
     /// Invokes undefined behavior if the array is empty.
     const_reference back() const { return *rbegin(); }
 
-    /// \brief Resize this array.
+    /// Resize this array.
     /// Preserves existing data that remains, value-initializes any newly added
     /// data.  For example, resize(10) on an array of size 5 would change the
     /// size to 10, the first 5 elements would be left unchanged and the last
@@ -297,7 +297,7 @@ class VtArray {
 
         TfAutoMallocTag tag("VtArray::reshape");
 
-        if (not _data)
+        if (!_data)
             _data.reset(new _Data);
 
         if (_data->IsUnique()) {
@@ -315,13 +315,13 @@ class VtArray {
         }
     }        
 
-    /// \brief Equivalent to resize(0).
+    /// Equivalent to resize(0).
     void clear()
     {
         _data.reset();
     }
 
-    /// \brief Assign array contents.
+    /// Assign array contents.
     /// Equivalent to:
     /// \code
     /// array.resize(std::distance(first, last));
@@ -333,7 +333,7 @@ class VtArray {
         std::copy(first, last, begin());
     }
 
-    /// \brief Assign array contents.
+    /// Assign array contents.
     /// Equivalent to:
     /// \code
     /// array.resize(n);
@@ -344,54 +344,61 @@ class VtArray {
         std::fill(begin(), end(), fill);
     }
 
-    /// \brief Swap the contents of this array with \p other.
+    /// Swap the contents of this array with \p other.
     void swap(VtArray &other) { 
         _data.swap(other._data);
     }
 
     /// @}
 
-    /// \brief Allows usage of [i].
+    /// Allows usage of [i].
     ElementType &operator[](size_t index) {
         return data()[index];
     }
 
-    /// \brief Allows usage of [i].
+    /// Allows usage of [i].
     ElementType const &operator[](size_t index) const {
         return data()[index];
     }
 
-    /// \brief Tests if two arrays are identical, i.e. that they share
+    /// Tests if two arrays are identical, i.e. that they share
     /// the same underlying copy-on-write data.  See also operator==().
     bool IsIdentical(VtArray const & other) const {
         return _data == other._data;
     }
 
-    /// \brief Tests two arrays for equality.  See also IsIdentical().
+    /// Tests two arrays for equality.  See also IsIdentical().
     bool operator == (VtArray const & other) const {
-        return IsIdentical(other) or 
+        return IsIdentical(other) || 
             (Vt_ArrayCompareSize(size(), _GetReserved(),
-                                 other.size(), other._GetReserved()) and
+                                 other.size(), other._GetReserved()) &&
              std::equal(begin(), end(), other.begin()));
     }
 
-    /// \brief Tests two arrays for inequality.
+    /// Tests two arrays for inequality.
     bool operator != (VtArray const &other) const {
-        return not (*this == other);
+        return !(*this == other);
     }
 
+ARCH_PRAGMA_PUSH
+ARCH_PRAGMA_FORCING_TO_BOOL
+ARCH_PRAGMA_UNSAFE_USE_OF_BOOL
+ARCH_PRAGMA_UNARY_MINUS_ON_UNSIGNED
     VTOPERATOR_CPPARRAY(+)
     VTOPERATOR_CPPARRAY(-)
     VTOPERATOR_CPPARRAY(*)
     VTOPERATOR_CPPARRAY(/)
     VTOPERATOR_CPPARRAY(%)
     VTOPERATOR_CPPARRAY_UNARY(-)
+ARCH_PRAGMA_POP
 
   public:
     // XXX -- Public so VtValue::_ArrayHelper<T,U>::GetReserved() has access.
     Vt_Reserved* _GetReserved() {
-        if (not _data) {
+        if (!_data) {
             _data.reset(new _Data);
+        } else {
+            _Detach();
         }
         return &_data->reserved;
     }
@@ -413,20 +420,20 @@ class VtArray {
         const_pointer _p;
     };
 
-    /// \brief Outputs a comma-separated list of the values in the array.
+    /// Outputs a comma-separated list of the values in the array.
     friend std::ostream &operator <<(std::ostream &out, const VtArray &self) {
         VtArray::_Streamer streamer(self.cdata());
         VtStreamOutArray(&streamer, self.size(), self._GetReserved(), out);
         return out;
     }
 
-    /// \brief Swap array contents.
+    /// Swap array contents.
     friend void swap(VtArray &lhs, VtArray &rhs) {
         lhs.swap(rhs);
     }
 
     void _Detach() {
-        if (_data and not _data->IsUnique())
+        if (_data && !_data->IsUnique())
             _data.reset(new _Data(*_data));
     }
 
@@ -484,6 +491,10 @@ template <typename T>
 struct VtIsArray< VtArray <T> > : public VtTrueType {};
 
 // free functions for operators combining scalar and array types
+ARCH_PRAGMA_PUSH
+ARCH_PRAGMA_FORCING_TO_BOOL
+ARCH_PRAGMA_UNSAFE_USE_OF_BOOL
+ARCH_PRAGMA_UNARY_MINUS_ON_UNSIGNED
 VTOPERATOR_CPPSCALAR(+)
 VTOPERATOR_CPPSCALAR(-)
 VTOPERATOR_CPPSCALAR(*)
@@ -491,5 +502,8 @@ VTOPERATOR_CPPSCALAR_DOUBLE(*)
 VTOPERATOR_CPPSCALAR(/)
 VTOPERATOR_CPPSCALAR_DOUBLE(/)
 VTOPERATOR_CPPSCALAR(%)
+ARCH_PRAGMA_POP
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // VT_ARRAY_H

@@ -24,11 +24,12 @@
 #ifndef WORK_ARENA_DISPATCHER_H
 #define WORK_ARENA_DISPATCHER_H
 
-///
-///\file work/arenaDispatcher.h
+/// \file work/arenaDispatcher.h
 
+#include "pxr/pxr.h"
 #include "pxr/base/work/dispatcher.h"
 #include "pxr/base/work/threadLimits.h"
+#include "pxr/base/work/api.h"
 
 #include <tbb/task_arena.h>
 
@@ -36,16 +37,17 @@
 #include <type_traits>
 #include <utility>
 
+PXR_NAMESPACE_OPEN_SCOPE
 
 /// \class WorkArenaDispatcher
 ///
-/// This is a specialization of the WorkDispatcher. It uses an isolated arena
+/// This is a specialization of the WorkDispatcher that uses an isolated arena
 /// to Run() all its tasks in. The WorkArenaDispatcher is useful where it must
-/// be guaranteed that a specific set of tasks shall not be stolen by any other
-/// dispatcher, or where stealing from other dispatchers could cause lock
-/// dependencies that may lead to deadlocks.
-/// Note that a regular WorkDispatcher can provide better throughput, and should
-/// thus be the preferred over the WorkArenaDispatcher.
+/// be guaranteed that a specific set of tasks shall not be stolen by any
+/// other dispatcher, or where stealing from other dispatchers could cause
+/// lock dependencies that may lead to deadlocks. Note that a regular
+/// WorkDispatcher can provide better throughput, and should thus be the
+/// preferred over the WorkArenaDispatcher.
 ///
 /// The interface of the WorkArenaDispatcher, and thread-safety notes about its
 /// API are identical to those of the WorkDispatcher.
@@ -55,10 +57,10 @@ class WorkArenaDispatcher
 public:
     /// Constructs a new dispatcher. The internal arena will mirror the
     /// global concurrency limit setting.
-    WorkArenaDispatcher() : _arena(WorkGetConcurrencyLimit()) {}
+    WorkArenaDispatcher() : _arena(_GetArena()) {}
 
     /// Wait() for any pending tasks to complete, then destroy the dispatcher.
-    ~WorkArenaDispatcher();
+    WORK_API ~WorkArenaDispatcher();
 
     WorkArenaDispatcher(WorkArenaDispatcher const &) = delete;
     WorkArenaDispatcher &operator=(WorkArenaDispatcher const &) = delete;
@@ -81,7 +83,7 @@ public:
 
     template <class Callable, class ... Args>
     inline void Run(Callable &&c, Args&&... args) {
-        _arena.execute(
+        _arena->execute(
             _MakeRunner(&_dispatcher,
                         std::bind(std::forward<Callable>(c),
                                   std::forward<Args>(args)...)));
@@ -90,15 +92,17 @@ public:
 #endif // doxygen
 
     /// Block until the work started by Run() completes.
-    void Wait();
+    WORK_API void Wait();
 
     /// Cancel remaining work and return immediately.
     ///
     /// This call does not block.  Call Wait() after Cancel() to wait for
     /// pending tasks to complete.
-    void Cancel();
+    WORK_API void Cancel();
 
 private:
+    WORK_API tbb::task_arena *_GetArena() const;
+    
     template <class Fn>
     struct _Runner {
         _Runner(WorkDispatcher *wd, Fn &&fn) : _wd(wd), _fn(std::move(fn)) {}
@@ -118,12 +122,14 @@ private:
     }
 
     // The task arena.
-    tbb::task_arena _arena;
+    tbb::task_arena *_arena;
 
     // The dispatcher.
     WorkDispatcher _dispatcher;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // WORK_ARENA_DISPATCHER_H

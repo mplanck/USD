@@ -21,44 +21,71 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 #
+
+# Save the current value of BUILD_SHARED_LIBS and restore it at
+# the end of this file, since some of the Find* modules invoked
+# below may wind up stomping over this value.
+set(build_shared_libs "${BUILD_SHARED_LIBS}")
+
 # Core USD Package Requirements 
 # ----------------------------------------------
-# --Python.  We are generally but not completely 2.6 compliant.
-find_package(PythonLibs 2.7 REQUIRED)
-find_package(PythonInterp 2.7 REQUIRED)
 
-# --Boost
-find_package(Boost
-    COMPONENTS
-        iostreams
-        python
-        regex
-        system
-        program_options
-    REQUIRED
-)
-# --Double Conversion
-find_package(DoubleConversion REQUIRED)
+# Threads.  Save the libraries needed in PXR_THREAD_LIBS;  we may modify
+# them later.  We need the threads package because some platforms require
+# it when using C++ functions from #include <thread>.
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+find_package(Threads REQUIRED)
+set(PXR_THREAD_LIBS "${CMAKE_THREAD_LIBS_INIT}")
+
+if(PXR_ENABLE_PYTHON_SUPPORT)
+    # --Python.  We are generally but not completely 2.6 compliant.
+    add_definitions(-DPXR_PYTHON_SUPPORT_ENABLED)
+    find_package(PythonInterp 2.7 REQUIRED)
+    find_package(PythonLibs 2.7 REQUIRED)
+
+    # --Boost
+    find_package(Boost
+        COMPONENTS
+            date_time
+            program_options
+            python
+            regex
+            system
+        REQUIRED
+    )
+
+    # --Jinja2
+    find_package(Jinja2)
+else()
+    find_package(PythonInterp 2.7 REQUIRED)
+ 
+    # --Boost
+    find_package(Boost
+        COMPONENTS
+            date_time
+            program_options
+            regex
+            system
+        REQUIRED
+    )
+endif()
 
 # --TBB
-# Debug is the default in Release for some bizarro reason, turn it off.
-set(TBB_USE_DEBUG_BUILD OFF)
-find_package(TBB REQUIRED)
-
-# --OpenEXR
-find_package(OpenEXR REQUIRED)
-
-# --pthread
-find_package(Threads REQUIRED)
+find_package(TBB REQUIRED COMPONENTS tbb)
+add_definitions(${TBB_DEFINITIONS})
 
 # --math
-find_library(M_LIB m)
-
-# --Jinja2
-find_package(Jinja2)
+if(WIN32)
+    # Math functions are linked automatically by including math.h on Windows.
+    set(M_LIB "")
+else()
+    find_library(M_LIB m)
+endif()
 
 if (NOT PXR_MALLOC_LIBRARY)
-    message(STATUS "Using default system allocator because PXR_MALLOC_LIBRARY is unspecified") 
+    if (NOT WIN32)
+        message(STATUS "Using default system allocator because PXR_MALLOC_LIBRARY is unspecified")
+    endif()
 endif()
 
 # Developer Options Package Requirements
@@ -76,6 +103,8 @@ endif()
 # ----------------------------------------------
 
 if (PXR_BUILD_IMAGING)
+    # --OpenEXR
+    find_package(OpenEXR REQUIRED)
     # --OpenImageIO
     find_package(OpenImageIO REQUIRED)
     # --OpenGL
@@ -84,19 +113,28 @@ if (PXR_BUILD_IMAGING)
     # --Opensubdiv
     find_package(OpenSubdiv 3 REQUIRED)
     # --Ptex
-    find_package(PTex REQUIRED)
+    if (PXR_ENABLE_PTEX_SUPPORT)
+        find_package(PTex REQUIRED)
+        add_definitions(-DPXR_PTEX_SUPPORT_ENABLED)
+    endif()
     # --X11
-    find_package(X11)
-    # --Qt
-    find_package(Qt4)
-    if (QT4_FOUND)
-        find_package(PySideTools REQUIRED)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_package(X11)
+    endif()
+    if (PXR_ENABLE_PYTHON_SUPPORT)
+        # --PySide
+        find_package(PySide)
+        # --PyOpenGL
+        find_package(PyOpenGL)
+    endif()
+    # --Embree
+    if (PXR_BUILD_EMBREE_PLUGIN)
+        find_package(Embree REQUIRED)
     endif()
 endif()
 
 # Third Party Plugin Package Requirements
 # ----------------------------------------------
-
 if (PXR_BUILD_KATANA_PLUGIN)
     find_package(KatanaAPI REQUIRED)
     find_package(Boost
@@ -108,14 +146,24 @@ endif()
 
 if (PXR_BUILD_MAYA_PLUGIN)
     find_package(Maya REQUIRED)
-    find_package(GLUT REQUIRED)
+endif()
+
+if (PXR_BUILD_HOUDINI_PLUGIN)
+    find_package(Houdini REQUIRED)
 endif()
 
 if (PXR_BUILD_ALEMBIC_PLUGIN)
     find_package(Alembic REQUIRED)
-    find_package(HDF5 REQUIRED
-        COMPONENTS
-            HL
-        REQUIRED
-    )
+    find_package(OpenEXR REQUIRED)
+    if (PXR_ENABLE_HDF5_SUPPORT)
+        find_package(HDF5 REQUIRED
+            COMPONENTS
+                HL
+            REQUIRED
+        )
+    endif()
 endif()
+
+# ----------------------------------------------
+
+set(BUILD_SHARED_LIBS "${build_shared_libs}")

@@ -22,12 +22,16 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/imaging/hd/perfLog.h"
+#include "pxr/imaging/hd/resourceRegistry.h"
 
 #include "pxr/usd/sdf/path.h"
 
 #include "pxr/base/tf/getenv.h"
 #include "pxr/base/tf/instantiateSingleton.h"
 #include "pxr/base/tf/stl.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_INSTANTIATE_SINGLETON(HdPerfLog);
 
@@ -56,7 +60,7 @@ HdPerfLog::AddCacheHit(TfToken const& name,
                  SdfPath const& id,
                  TfToken const& tag)
 {
-    if (ARCH_LIKELY(not _enabled))
+    if (ARCH_LIKELY(!_enabled))
         return;
     _Lock lock(_mutex);
     _cacheMap[name].AddHit();
@@ -72,7 +76,7 @@ HdPerfLog::AddCacheMiss(TfToken const& name,
                   SdfPath const& id,
                   TfToken const& tag)
 {
-    if (ARCH_LIKELY(not _enabled))
+    if (ARCH_LIKELY(!_enabled))
         return;
     _Lock lock(_mutex);
     _cacheMap[name].AddMiss();
@@ -86,7 +90,7 @@ HdPerfLog::AddCacheMiss(TfToken const& name,
 void
 HdPerfLog::ResetCache(TfToken const& name)
 {
-    if (ARCH_LIKELY(not _enabled))
+    if (ARCH_LIKELY(!_enabled))
         return;
     _Lock lock(_mutex);
     _cacheMap[name].Reset();
@@ -149,7 +153,7 @@ HdPerfLog::GetCounterNames()
 void
 HdPerfLog::IncrementCounter(TfToken const& name)
 {
-    if (ARCH_LIKELY(not _enabled)) 
+    if (ARCH_LIKELY(!_enabled)) 
         return;
     _Lock lock(_mutex);
     TF_DEBUG(HD_COUNTER_CHANGED).Msg("Counter changed %s: %f -> %f\n",
@@ -162,7 +166,7 @@ HdPerfLog::IncrementCounter(TfToken const& name)
 void
 HdPerfLog::DecrementCounter(TfToken const& name)
 {
-    if (ARCH_LIKELY(not _enabled)) 
+    if (ARCH_LIKELY(!_enabled)) 
         return;
     _Lock lock(_mutex);
     TF_DEBUG(HD_COUNTER_CHANGED).Msg("Counter changed %s: %f -> %f\n",
@@ -175,7 +179,7 @@ HdPerfLog::DecrementCounter(TfToken const& name)
 void
 HdPerfLog::SetCounter(TfToken const& name, double value)
 {
-    if (ARCH_LIKELY(not _enabled)) 
+    if (ARCH_LIKELY(!_enabled)) 
         return;
     _Lock lock(_mutex);
     TF_DEBUG(HD_COUNTER_CHANGED).Msg("Counter changed %s: %f -> %f\n",
@@ -188,7 +192,7 @@ HdPerfLog::SetCounter(TfToken const& name, double value)
 void
 HdPerfLog::AddCounter(TfToken const &name, double value)
 {
-    if (ARCH_LIKELY(not _enabled))
+    if (ARCH_LIKELY(!_enabled))
         return;
     _Lock lock(_mutex);
     TF_DEBUG(HD_COUNTER_CHANGED).Msg("Counter changed %s %f -> %f\n",
@@ -201,7 +205,7 @@ HdPerfLog::AddCounter(TfToken const &name, double value)
 void
 HdPerfLog::SubtractCounter(TfToken const &name, double value)
 {
-    if (ARCH_LIKELY(not _enabled))
+    if (ARCH_LIKELY(!_enabled))
         return;
     _Lock lock(_mutex);
     TF_DEBUG(HD_COUNTER_CHANGED).Msg("Counter changed %s %f -> %f\n",
@@ -221,7 +225,7 @@ HdPerfLog::GetCounter(TfToken const& name)
 void
 HdPerfLog::ResetCounters()
 {
-    if (ARCH_LIKELY(not _enabled))
+    if (ARCH_LIKELY(!_enabled))
         return;
     _Lock lock(_mutex);
     TF_FOR_ALL(counterIt, _counterMap) {
@@ -231,4 +235,31 @@ HdPerfLog::ResetCounters()
         counterIt->second = 0;
     }
 }
+
+void 
+HdPerfLog::AddResourceRegistry(
+    HdResourceRegistrySharedPtr const &resourceRegistry)
+{
+    _resourceRegistryVector.push_back(resourceRegistry);
+}
+
+void 
+HdPerfLog::RemoveResourceRegistry(
+    HdResourceRegistrySharedPtr const &resourceRegistry)
+{
+    _resourceRegistryVector.erase(
+        std::remove(_resourceRegistryVector.begin(),
+                    _resourceRegistryVector.end(), 
+                    resourceRegistry), 
+        _resourceRegistryVector.end());
+}
+
+std::vector<HdResourceRegistrySharedPtr> const&
+HdPerfLog::GetResourceRegistryVector()
+{
+    return _resourceRegistryVector;
+}
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

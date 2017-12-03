@@ -24,46 +24,55 @@
 #ifndef GF_GAMMA_H
 #define GF_GAMMA_H
 
+#include "pxr/pxr.h"
+#include "pxr/base/gf/api.h"
+
+/// \file gf/gamma.h
+/// Utilities to map colors between gamma spaces.
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 class GfVec3f;
 class GfVec3d;
 class GfVec4f;
 class GfVec4d;
 
-/*!
- * \file gf/gamma.h
- * \brief Utilities to map colors between gamma spaces.
- */
-
-/// Return a new vector with each component of \p v
-/// raised to the power \p gamma
+/// Return a new vector with each component of \p v raised to the power \p
+/// gamma
+GF_API
 GfVec3f GfApplyGamma(const GfVec3f &v, double gamma);
 
-/// Return a new vector with each component of \p v
-/// raised to the power \p gamma
+/// Return a new vector with each component of \p v raised to the power \p
+/// gamma
+GF_API
 GfVec3d GfApplyGamma(const GfVec3d &v, double gamma);
 
-/// Return a new vector with the first three components of \p v
-/// raised to the power \p gamma and the fourth component unchanged.
+/// Return a new vector with the first three components of \p v raised to the
+/// power \p gamma and the fourth component unchanged.
+GF_API
 GfVec4f GfApplyGamma(const GfVec4f &v, double gamma);
 
-/// Return a new vector with the first three components of \p v
-/// raised to the power \p gamma and the fourth component unchanged.
+/// Return a new vector with the first three components of \p v raised to the
+/// power \p gamma and the fourth component unchanged.
+GF_API
 GfVec4d GfApplyGamma(const GfVec4d &v, double gamma);
 
 /// Return the system display gamma
+GF_API
 double GfGetDisplayGamma();
 
-/// Given a vec, \p v, representing an energy-linear RGB(A) color,
-/// return a vec of the same type converted to the system's display gamma
-/// This is instantiated for GfVec3f, GfVec4d, GfVec3d, and GfVec4d
+/// Given a vec, \p v, representing an energy-linear RGB(A) color, return a
+/// vec of the same type converted to the system's display gamma This is
+/// instantiated for GfVec3f, GfVec4d, GfVec3d, and GfVec4d
 template <class T>
 T GfConvertLinearToDisplay(const T& v);
 
 /// Given a vec, \p v, representing an RGB(A) color in the system's display
-/// gamma space, return an energy-linear vec of the same type.
-/// This is instantiated for GfVec3f, GfVec4d, GfVec3d, and GfVec4d
+/// gamma space, return an energy-linear vec of the same type. This is
+/// instantiated for GfVec3f, GfVec4d, GfVec3d, and GfVec4d
 template <class T>
 T GfConvertDisplayToLinear(const T& v);
 
+PXR_NAMESPACE_CLOSE_SCOPE
 
-#endif /* GF_GAMMA_H */
+#endif // GF_GAMMA_H 

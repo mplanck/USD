@@ -24,45 +24,56 @@
 #ifndef USD_INHERITS_H
 #define USD_INHERITS_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/prim.h"
 
 #include "pxr/usd/sdf/declareHandles.h"
 #include "pxr/usd/sdf/path.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 SDF_DECLARE_HANDLES(SdfPrimSpec);
 
+/// \class UsdInherits
+///
 /// A proxy class for applying listOp edits to the inherit paths list for a
 /// prim.
+///
 class UsdInherits {
     friend class UsdPrim;
 
     explicit UsdInherits(const UsdPrim& prim) : _prim(prim) {}
 
 public:
-
-    /// Add a path to the inheritPaths listOp at the current EditTarget.
-    bool Add(const SdfPath &primPath);
+    /// Adds a path to the inheritPaths listOp at the current EditTarget,
+    /// in the position specified by \p position.
+    USD_API
+    bool AddInherit(const SdfPath &primPath,
+                    UsdListPosition position=UsdListPositionTempDefault);
 
     /// Removes the specified path from the inheritPaths listOp at the
     /// current EditTarget.
-    bool Remove(const SdfPath &primPath);
+    USD_API
+    bool RemoveInherit(const SdfPath &primPath);
 
     /// Removes the authored inheritPaths listOp edits at the current edit
     /// target.
-    bool Clear();
+    USD_API
+    bool ClearInherits();
 
     /// Explicitly set the inherited paths, potentially blocking weaker opinions
     /// that add or remove items, returning true on success, false if the edit
     /// could not be performed.
-    bool SetItems(const SdfPathVector& items);
+    USD_API
+    bool SetInherits(const SdfPathVector& items);
 
     /// Return the prim this object is bound to.
     const UsdPrim &GetPrim() const { return _prim; }
     UsdPrim GetPrim() { return _prim; }
 
-    // TODO: use safe bool idiom
-    operator bool() { return bool(_prim); }
+    explicit operator bool() { return bool(_prim); }
 
     // ---------------------------------------------------------------------- //
     // Private Methods and Members
@@ -73,4 +84,6 @@ private:
     UsdPrim _prim;
 };
 
-#endif //USD_INHERITS_H
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // USD_INHERITS_H

@@ -24,6 +24,8 @@
 #ifndef HD_PERF_H
 #define HD_PERF_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/debugCodes.h"
 
@@ -34,11 +36,16 @@
 #include "pxr/base/tf/token.h"
 
 #include <boost/noncopyable.hpp>
+#include <boost/shared_ptr.hpp>
 #include "pxr/base/tf/hashmap.h"
 
 #include <mutex>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 class SdfPath;
+typedef boost::shared_ptr<class HdResourceRegistry> HdResourceRegistrySharedPtr;
 
 // XXX: it would be nice to move this into Trace or use the existing Trace
 // counter mechanism, however we are restricted to TraceLite in the rocks.
@@ -51,17 +58,6 @@ class SdfPath;
 #define HD_TRACE_FUNCTION() TRACE_FUNCTION()
 // Emits a trace scope with the specified tag.
 #define HD_TRACE_SCOPE(tag) TRACE_SCOPE(tag)
-
-// Creates an auto-mallocTag with the function, including template params.
-#define HD_MALLOC_TAG_FUNCTION() \
-    TfAutoMallocTag2 tagFunc("Hd", __PRETTY_FUNCTION__);
-// Creates an auto-mallocTag with the given named tag.
-#define HD_MALLOC_TAG(x) \
-    TfAutoMallocTag2 tag2("Hd", x);
-
-// Overrides operator new/delete and injects malloc tags.
-#define HD_MALLOC_TAG_NEW(x) \
-    TF_MALLOC_TAG_NEW("Hd", x);
 
 // Adds a cache hit for the given cache name, the id is provided for debugging,
 // see HdPerfLog for details.
@@ -94,64 +90,82 @@ class SdfPath;
 // PERFORMANCE LOG                                                            //
 //----------------------------------------------------------------------------//
 
+/// \class HdPerfLog
+///
 /// Performance counter monitoring.
 ///
 class HdPerfLog : public boost::noncopyable {
 public:
-
+    HD_API
     static HdPerfLog& GetInstance() {
         return TfSingleton<HdPerfLog>::GetInstance();
     }
 
     /// Tracks a cache hit for the named cache, the id and tag are reported
     /// when debug logging is enabled.
+    HD_API
     void AddCacheHit(TfToken const& name,
                      SdfPath const& id,
                      TfToken const& tag=TfToken());
 
     /// Tracks a cache miss for the named cache, the id and tag are reported
     /// when debug logging is enabled.
+    HD_API
     void AddCacheMiss(TfToken const& name,
                       SdfPath const& id,
                       TfToken const& tag=TfToken());
 
+    HD_API
     void ResetCache(TfToken const& name);
 
     /// Gets the hit ratio (numHits / totalRequests) of a cache performance
     /// counter.
+    HD_API
     double GetCacheHitRatio(TfToken const& name);
 
     /// Gets the number of hit hits for a cache performance counter.
+    HD_API
     size_t GetCacheHits(TfToken const& name);
 
     /// Gets the number of hit misses for a cache performance counter.
+    HD_API
     size_t GetCacheMisses(TfToken const& name);
 
     /// Returns the names of all cache performance counters.
+    HD_API
     TfTokenVector GetCacheNames();
 
     /// Returns a vector of all performance counter names.
+    HD_API
     TfTokenVector GetCounterNames();
 
     /// Increments a named counter by 1.0.
+    HD_API
     void IncrementCounter(TfToken const& name);
 
     /// Decrements a named counter by 1.0.
+    HD_API
     void DecrementCounter(TfToken const& name);
 
     /// Sets the value of a named counter.
+    HD_API
     void SetCounter(TfToken const& name, double value);
 
     /// Adds value to a named counter.
+    HD_API
     void AddCounter(TfToken const& name, double value);
 
     /// Subtracts value to a named counter.
+    HD_API
     void SubtractCounter(TfToken const& name, double value);
 
     /// Returns the current value of a named counter.
+    HD_API
     double GetCounter(TfToken const& name);
 
-    /// Reset all conter values to 0.0. Note that this doesn't reset cache counters.
+    /// Reset all conter values to 0.0. 
+    /// Note that this doesn't reset cache counters.
+    HD_API
     void ResetCounters();
 
     /// Enable performance logging.
@@ -159,6 +173,20 @@ public:
 
     /// Disable performance logging.
     void Disable() { _enabled = false; }
+
+    /// Add a resource registry to the tracking.
+    HD_API
+    void AddResourceRegistry(
+        HdResourceRegistrySharedPtr const &resourceRegistry);
+
+    /// Remove Resource Registry from the tracking.
+    HD_API
+    void RemoveResourceRegistry(
+        HdResourceRegistrySharedPtr const &resourceRegistry);
+
+    /// Returns a vector of resource registry.
+    HD_API
+    std::vector<HdResourceRegistrySharedPtr> const& GetResourceRegistryVector();
 
 private:
     friend class TfSingleton<HdPerfLog>;
@@ -193,10 +221,17 @@ private:
     typedef TfHashMap<TfToken, double, TfToken::HashFunctor> _CounterMap;
     _CounterMap _counterMap;
 
+    // Resource registry vector.
+    std::vector<HdResourceRegistrySharedPtr> _resourceRegistryVector;
+
     // Enable / disable performance tracking.
     bool _enabled;
     std::mutex _mutex;
     typedef std::lock_guard<std::mutex> _Lock;
 };
+
+HD_API_TEMPLATE_CLASS(TfSingleton<HdPerfLog>);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // HD_PERF_H

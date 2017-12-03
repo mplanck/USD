@@ -21,18 +21,28 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/primReaderArgs.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 PxrUsdMayaPrimReaderArgs::PxrUsdMayaPrimReaderArgs(
         const UsdPrim& prim,
         const TfToken& shadingMode,
         const TfToken& defaultMeshScheme,
-        const bool readAnimData)
+        const bool readAnimData,
+        const bool useCustomFrameRange,
+        const double startTime,
+        const double endTime)
     : 
         _prim(prim),
         _shadingMode(shadingMode),
         _defaultMeshScheme(defaultMeshScheme),
-        _readAnimData(readAnimData)
+        _readAnimData(readAnimData),
+        _useCustomFrameRange(useCustomFrameRange),
+        _startTime(startTime),
+        _endTime(endTime)
 {
 }
 const UsdPrim&
@@ -55,3 +65,21 @@ PxrUsdMayaPrimReaderArgs::GetReadAnimData() const
 {
     return _readAnimData;
 }
+bool 
+PxrUsdMayaPrimReaderArgs::HasCustomFrameRange() const
+{
+    return _useCustomFrameRange;
+}
+double 
+PxrUsdMayaPrimReaderArgs::GetStartTime() const
+{
+    return _startTime;
+}
+double 
+PxrUsdMayaPrimReaderArgs::GetEndTime() const
+{
+    return _endTime;
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

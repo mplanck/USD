@@ -24,6 +24,7 @@
 #ifndef USDIMAGING_UNIT_TEST_HELPER
 #define USDIMAGING_UNIT_TEST_HELPER
 
+#include "pxr/pxr.h"
 #include "pxr/usdImaging/usdImaging/delegate.h"
 
 #include "pxr/imaging/hd/changeTracker.h"
@@ -32,32 +33,44 @@
 #include "pxr/imaging/hd/renderPass.h"
 #include "pxr/imaging/hd/rprim.h"
 
+#include "pxr/imaging/hdSt/renderDelegate.h"
+
 #include <string>
 #include <boost/shared_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<HdRenderPass> HdRenderPassSharedPtr;
 
+/// \class UsdImaging_TestDriver
+///
 /// A unit test driver that exercises the core engine.
 ///
 /// \note This test driver does NOT assume OpenGL is available; in the even
 /// that is is not available, all OpenGL calls become no-ops, but all other work
 /// is performed as usual.
 ///
-class UsdImaging_TestDriver {
-    void _Init(UsdStageRefPtr const& usdStage, TfToken const &reprName);
+class UsdImaging_TestDriver final {
 public:
     UsdImaging_TestDriver(std::string const& usdFilePath);
-    UsdImaging_TestDriver(std::string const& usdFilePath, 
-                          TfToken const &reprName);
+    UsdImaging_TestDriver(std::string const& usdFilePath,
+                          TfToken const &collectioName,
+                          TfToken const &reprName,
+                          TfTokenVector const &renderTags);
     UsdImaging_TestDriver(UsdStageRefPtr const& usdStage);
-    UsdImaging_TestDriver(UsdStageRefPtr const& usdStage, 
-                          TfToken const &reprName);
+    UsdImaging_TestDriver(UsdStageRefPtr const& usdStage,
+                          TfToken const &collectioName,
+                          TfToken const &reprName,
+                          TfTokenVector const &renderTags);
+
+    ~UsdImaging_TestDriver();
 
     void Draw();
     void SetTime(double time);
 
     /// Marks an rprim in the RenderIndex as dirty with the given dirty flags.
-    void MarkRprimDirty(SdfPath path, HdChangeTracker::DirtyBits flag);
+    void MarkRprimDirty(SdfPath path, HdDirtyBits flag);
 
     /// Set camera to renderpass
     void SetCamera(GfMatrix4d const &modelViewMatrix,
@@ -77,12 +90,36 @@ public:
     UsdStageRefPtr const& GetStage();
 
 private:
-
     HdEngine _engine;
-    UsdImagingDelegate _delegate;
+    HdStRenderDelegate   _renderDelegate;
+    HdRenderIndex       *_renderIndex;
+    UsdImagingDelegate  *_delegate;
     HdRenderPassSharedPtr _geometryPass;
     HdRenderPassStateSharedPtr _renderPassState;
     UsdStageRefPtr _stage;
+
+    void _Init(UsdStageRefPtr const& usdStage,
+               TfToken const &collectionName,
+               TfToken const &reprName,
+               TfTokenVector const &renderTags);
 };
+
+/// A simple drawing task that just executes a render pass.
+class UsdImaging_DrawTask final : public HdTask
+{
+public:
+    UsdImaging_DrawTask(HdRenderPassSharedPtr const &renderPass,
+                        HdRenderPassStateSharedPtr const &renderPassState);
+
+protected:
+    virtual void _Sync(HdTaskContext* ctx) override;
+    virtual void _Execute(HdTaskContext* ctx) override;
+
+private:
+    HdRenderPassSharedPtr _renderPass;
+    HdRenderPassStateSharedPtr _renderPassState;
+};
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //USDIMAGING_UNIT_TEST_HELPER

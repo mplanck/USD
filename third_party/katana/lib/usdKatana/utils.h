@@ -24,6 +24,7 @@
 #ifndef PXRUSDKATANA_ATTRUTILS_H
 #define PXRUSDKATANA_ATTRUTILS_H
 
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/usdInPrivateData.h"
 
@@ -40,7 +41,13 @@
 
 namespace FnKat = Foundry::Katana;
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 struct PxrUsdKatanaUtils {
+
+    /// Reverse a motion time sample. This is used for building
+    /// multi-sampled attributes when motion blur is backward.
+    static double ReverseTimeSample(double sample);
 
     /// Convert Pixar-style numVerts to Katana-style startVerts.
     static void ConvertNumVertsToStartVerts( const std::vector<int> &numVertsVec,
@@ -54,7 +61,8 @@ struct PxrUsdKatanaUtils {
     /// The pathsAsModel argument is used when trying to resolve asset paths.
     static FnKat::Attribute ConvertVtValueToKatAttr( const VtValue & val,
                                                      bool asShaderParam,
-                                                     bool pathsAsModel = false );
+                                                     bool pathsAsModel = false,
+                                                     bool resolvePaths = true);
 
     /// Extract the targets of a relationship to a Katana attribute.
     /// If asShaderParam is true, it will use the special encoding
@@ -89,16 +97,27 @@ struct PxrUsdKatanaUtils {
     // Scan the model hierarchy for models with kind=camera.
     static SdfPathVector FindCameraPaths( const UsdStageRefPtr& stage );
 
+    /// Use UsdLuxListAPI to discover published lights (without a
+    /// full scene traversal).
+    static SdfPathSet FindLightPaths( const UsdStageRefPtr& stage );
+
     /// Convert the given SdfPath in the UsdStage to the corresponding
     /// katana location, given a scenegraph generator configuration.
     static std::string ConvertUsdPathToKatLocation(
             const SdfPath &path,
             const PxrUsdKatanaUsdInPrivateData& data);
+    static std::string ConvertUsdPathToKatLocation(
+            const SdfPath &path,
+            const PxrUsdKatanaUsdInArgsRefPtr &usdInArgs);
 
     /// USD Looks can have Katana child-parent relationships, which means that
     /// we'll have to do some extra processing to find the correct path that
     /// these resolve to
-    static std::string ConvertUsdLookPathToKatLocation(
+    static std::string _GetDisplayGroup(
+            const UsdPrim &prim,
+            const SdfPath& path);
+    static std::string _GetDisplayName(const UsdPrim &prim);
+    static std::string ConvertUsdMaterialPathToKatLocation(
             const SdfPath &path,
             const PxrUsdKatanaUsdInPrivateData& data);
 
@@ -120,6 +139,10 @@ struct PxrUsdKatanaUtils {
     /// having to do with number of children and how many are components (non-group
     /// models).
     static bool ModelGroupNeedsProxy(const UsdPrim &prim);
+
+    /// Creates the 'proxies' group attribute for consumption by the viewer.
+    static FnKat::GroupAttribute GetViewerProxyAttr(
+            const PxrUsdKatanaUsdInPrivateData& data);
 
     /// Returns the asset name for the given prim.  It should be a model.  This
     /// will fallback to the name of the prim.
@@ -143,13 +166,20 @@ struct PxrUsdKatanaUtils {
     static FnKat::DoubleAttribute ConvertBoundsToAttribute(
             const std::vector<GfBBox3d>& bounds,
             const std::vector<double>& motionSampleTimes,
+            bool isMotionBackward,
             bool* hasInfiniteBounds);
     /// \}
     
+    /// Build and return, as a group attribute for convenience, a map
+    /// from instances to masters.  Only traverses paths at and below
+    /// the given rootPath.
     static FnKat::GroupAttribute BuildInstanceMasterMapping(
-            const UsdStageRefPtr& stage);
+            const UsdStageRefPtr& stage, const SdfPath &rootPath);
     
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SGG_USD_UTILS_H
 

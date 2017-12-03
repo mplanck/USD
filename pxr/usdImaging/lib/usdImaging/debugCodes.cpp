@@ -25,6 +25,9 @@
 
 #include "pxr/base/tf/registryManager.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_REGISTRY_FUNCTION(TfDebug)
 {
     TF_DEBUG_ENVIRONMENT_SYMBOL(USDIMAGING_COLLECTIONS, "Report collection queries");
@@ -35,4 +38,11 @@ TF_REGISTRY_FUNCTION(TfDebug)
     TF_DEBUG_ENVIRONMENT_SYMBOL(USDIMAGING_TEXTURES, "Report texture status messages");
     TF_DEBUG_ENVIRONMENT_SYMBOL(USDIMAGING_SELECTION, "Report selection messages");
     TF_DEBUG_ENVIRONMENT_SYMBOL(USDIMAGING_INSTANCER, "Report instancer messages");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(USDIMAGING_POINT_INSTANCER_PROTO_CREATED,
+                                "Report PI prototype stats as they are created");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(USDIMAGING_POINT_INSTANCER_PROTO_CULLING,
+                                "Report PI culling debug info");
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

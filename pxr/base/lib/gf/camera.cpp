@@ -21,12 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/gf/camera.h"
-
 #include "pxr/base/gf/frustum.h"
-
 #include "pxr/base/tf/enum.h"
 #include "pxr/base/tf/registryManager.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_REGISTRY_FUNCTION(TfEnum)
 {
@@ -46,22 +48,6 @@ GfCamera::FOCAL_LENGTH_UNIT = 0.1;
 
 const bool GfCamera::ZUp = true;
 const bool GfCamera::YUp = false;
-
-// Matrix corresponding to Gf.Rotation(Gf.Vec3d.XAxis(), -90)
-const GfMatrix4d
-GfCamera::Y_UP_TO_Z_UP_MATRIX =
-    GfMatrix4d( 1,  0 , 0,  0,
-                0,  0, -1,  0,
-                0,  1,  0,  0,
-                0,  0,  0,  1);
-
-// Matrix corresponding to Gf.Rotation(Gf.Vec3d.XAxis(), 90)
-const GfMatrix4d
-GfCamera::Z_UP_TO_Y_UP_MATRIX =
-    GfMatrix4d( 1,  0 , 0,  0,
-                0,  0,  1,  0,
-                0, -1,  0,  0,
-                0,  0,  0,  1);
 
 // The default filmback size is based on a 35mm spherical
 // projector aperture (0.825 x 0.602 inches, converted to
@@ -299,7 +285,7 @@ GfCamera::GetFrustum() const {
     // Up to now, all computations were done in mm, convert to cm.
     window *= GfCamera::APERTURE_UNIT;
 
-    if (_projection != Orthographic and _focalLength != 0) {
+    if (_projection != Orthographic && _focalLength != 0) {
         window /= _focalLength * GfCamera::FOCAL_LENGTH_UNIT;
     }
 
@@ -327,16 +313,16 @@ bool
 GfCamera::operator==(const GfCamera& other) const
 {
     return
-        _transform == other._transform and
-        _projection == other._projection and
-        _horizontalAperture == other._horizontalAperture and
-        _verticalAperture == other._verticalAperture and
-        _horizontalApertureOffset == other._horizontalApertureOffset and
-        _verticalApertureOffset == other._verticalApertureOffset and
-        _focalLength == other._focalLength and
-        _clippingRange == other._clippingRange and
-        _clippingPlanes == other._clippingPlanes and
-        _fStop == other._fStop and
+        _transform == other._transform && 
+        _projection == other._projection && 
+        _horizontalAperture == other._horizontalAperture && 
+        _verticalAperture == other._verticalAperture && 
+        _horizontalApertureOffset == other._horizontalApertureOffset && 
+        _verticalApertureOffset == other._verticalApertureOffset && 
+        _focalLength == other._focalLength && 
+        _clippingRange == other._clippingRange && 
+        _clippingPlanes == other._clippingPlanes &&
+        _fStop == other._fStop &&
         _focusDistance == other._focusDistance;
 }
 
@@ -345,3 +331,5 @@ GfCamera::operator!=(const GfCamera& other) const
 {
     return !(*this == other);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

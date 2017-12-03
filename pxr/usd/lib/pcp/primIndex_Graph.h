@@ -24,6 +24,7 @@
 #ifndef PCP_PRIM_INDEX_GRAPH_H
 #define PCP_PRIM_INDEX_GRAPH_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/iterator.h"
 #include "pxr/usd/pcp/layerStack.h"
 #include "pxr/usd/pcp/node.h"
@@ -40,16 +41,20 @@
 #include <utility>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class PcpArc;
 class PcpLayerStackSite;
 
 TF_DECLARE_WEAK_AND_REF_PTRS(PcpPrimIndex_Graph);
 
 /// \class PcpPrimIndex_Graph
+///
 /// Internal representation of the graph used to represent sources of
 /// opinions in the prim index.
+///
 class PcpPrimIndex_Graph 
-    : public TfRefBase
+    : public TfSimpleRefBase
     , public TfWeakBase
 {
 public:
@@ -250,11 +255,9 @@ private:
             /* The equivalent initializations to the memset().
             , permission(SdfPermissionPublic)
             , hasSymmetry(false)
-            , hasVariantSelections(false)
             , inert(false)
             , culled(false)
             , permissionDenied(false)
-            , shouldContributeDependencies(false)
             , arcType(PcpArcTypeRoot)
             , arcSiblingNumAtOrigin(0)
             , arcNamespaceDepth(0)
@@ -287,7 +290,7 @@ private:
         //       out the data in memory as tightly as possible.
 
         // The layer stack for this node.
-        PcpLayerStackPtr layerStack;
+        PcpLayerStackRefPtr layerStack;
         // Mapping function used to translate from this node directly
         // to the root node. This is essentially the composition of the 
         // mapToParent for every arc between this node and the root.
@@ -308,10 +311,6 @@ private:
             // or at any of its namespace ancestors contain symmetry 
             // information.
             bool hasSymmetry:1;
-            // Whether this node contains variant selections. This implies
-            // that prims at this node's site or at any of its namespace
-            // ancestors contain variant selections.
-            bool hasVariantSelections:1;
             // Whether this node is inert. This is set to true in cases
             // where a node is needed to represent a structural dependency
             // but no opinions are allowed to be added.
@@ -326,13 +325,9 @@ private:
             // node that was marked \c SdfPermissionPrivate, or we arrive
             // at this node from  another node that was denied permission.
             bool permissionDenied:1;
-            // Whether this node should contribute specs for dependency
-            // tracking. This is set to true in cases where this node is
-            // not allowed to contribute opinions, but we still need to
-            // know about specs for  dependency tracking.
-            bool shouldContributeDependencies:1;
-            // The type of the arc to the parent node.
-            PcpArcType arcType:4;
+            // The type of the arc to the parent node.  We only need 4
+            // bits but we use 5 to avoid signed/unsigned issues.
+            PcpArcType arcType:5;
             // Index among sibling arcs at origin; lower is stronger
             _ChildrenSizeType arcSiblingNumAtOrigin:_childrenSize;
             // Absolute depth in namespace of node that introduced this
@@ -417,5 +412,7 @@ private:
     // the shared node pool.
     std::vector<bool> _nodeHasSpecs;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PCP_PRIM_INDEX_GRAPH_H

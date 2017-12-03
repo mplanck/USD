@@ -21,13 +21,28 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#ifndef USD_IMAGING_VERSION_H
-#define USD_IMAGING_VERSION_H
+#ifndef USDIMAGING_VERSION_H
+#define USDIMAGING_VERSION_H
+
+#include "pxr/pxr.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 
 // Version 3 -- add support for nested instancers in InsertInstancer.
-// Version 4 -- Populate returns SdfPath, HdxSelectionInstanceMap
+// Version 4 -- Populate returns SdfPath, HdxSelectionInstanceMap.
 // Version 5 -- GetPathForInstanceIndex returns absoluteInstanceIndex.
-// Version 6 -- PrimAdater::GetDependPaths
-#define USD_IMAGING_API 6
+// Version 6 -- PrimAdater::GetDependPaths.
+// Version 7 -- GetPathForInstanceIndex returns instanceContext.
+// Version 8 -- GetPathForInstanceIndex returns instanceContext (as 
+//              SdfPathVector) and rprimPath  separately.
+// Version 9 -- Rework UsdImagingEngineGL::RenderParams API to conform to
+//              updated purpose tokens and make proxy imaging optional.
 
-#endif // USD_IMAGING_VERSION_H
+#define USD_IMAGING_API_VERSION 9
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // USDIMAGING_VERSION_H

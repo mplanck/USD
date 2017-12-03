@@ -52,9 +52,9 @@ class TestGfRange(unittest.TestCase):
 
             v = makeValue(Value, [1, 2, 3, 4])
             r = Range()
-            r.min = v;
+            r.min = v
             self.assertEqual(r.min, v)
-            r.max = v;
+            r.max = v
             self.assertEqual(r.max, v)
 
             r = Range()
@@ -72,7 +72,16 @@ class TestGfRange(unittest.TestCase):
             r = Range(v1, v2)
             self.assertEqual(r.GetSize(), v2 - v1)
 
-
+            v1 = makeValue(Value, [-1, 1, -11, 2])
+            v2 = makeValue(Value, [1, 3, -10, 2])
+            v3 = makeValue(Value, [0, 2, -10.5, 2])
+            v4 = makeValue(Value, [0, 0, 0, 0])
+            r1 = Range(v1,v2)
+            self.assertEqual(r1.GetMidpoint(), v3)
+            r1.SetEmpty()
+            r2 = Range()
+            self.assertEqual(r1.GetMidpoint(), v4)
+            self.assertEqual(r2.GetMidpoint(), v4)
             
             v1 = makeValue(Value, [-1, -2, -3, -4])
             v2 = makeValue(Value, [1, 2, 3, 4])

@@ -21,44 +21,53 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#ifndef USDGEOM_GENERATED_MODEL_H
-#define USDGEOM_GENERATED_MODEL_H
+#ifndef USDGEOM_GENERATED_MODELAPI_H
+#define USDGEOM_GENERATED_MODELAPI_H
 
+/// \file usdGeom/modelAPI.h
 
-
-
-#include "pxr/usd/usdGeom/bboxCache.h"
-
+#include "pxr/pxr.h"
+#include "pxr/usd/usdGeom/api.h"
 #include "pxr/usd/usd/modelAPI.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
 
+#include "pxr/usd/usdGeom/bboxCache.h"
+#include "pxr/usd/usdGeom/constraintTarget.h"
+#include "pxr/usd/usdGeom/imageable.h" 
+
 #include "pxr/base/vt/value.h"
 
+#include "pxr/base/gf/vec3d.h"
 #include "pxr/base/gf/vec3f.h"
+#include "pxr/base/gf/matrix4d.h"
 
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
-class SdfAssetPath;
-class UsdGeomConstraintTarget;
+PXR_NAMESPACE_OPEN_SCOPE
 
-#include <vector>
-#include <string>
+class SdfAssetPath;
+
+// -------------------------------------------------------------------------- //
+// GEOMMODELAPI                                                               //
+// -------------------------------------------------------------------------- //
 
 /// \class UsdGeomModelAPI
-/// \brief UsdGeomModelAPI extends the generic UsdModelAPI schema with geometry
-/// specific concepts such as cached extents for the entire model,
+///
+/// UsdGeomModelAPI extends the generic UsdModelAPI schema with
+/// geometry specific concepts such as cached extents for the entire model,
 /// constraint targets, and geometry-inspired extensions to the payload
 /// lofting process.
-///
+/// 
 /// As described in GetExtentsHint() below, it is useful to cache extents
 /// at the model level.  UsdGeomModelAPI provides schema for computing and storing
 /// these cached extents, which can be consumed by UsdGeomBBoxCache to provide
 /// fast access to precomputed extents that will be used as the model's bounds
 /// (see UsdGeomBBoxCache::UsdGeomBBoxCache() ).
+/// 
+/// \todo CreatePayload() 
 ///
-/// \todo CreatePayload()
 class UsdGeomModelAPI : public UsdModelAPI
 {
 public:
@@ -72,7 +81,7 @@ public:
     /// Equivalent to UsdGeomModelAPI::Get(prim.GetStage(), prim.GetPath())
     /// for a \em valid \p prim, but will not immediately throw an error for
     /// an invalid \p prim
-    explicit UsdGeomModelAPI(const UsdPrim& prim)
+    explicit UsdGeomModelAPI(const UsdPrim& prim=UsdPrim())
         : UsdModelAPI(prim)
     {
     }
@@ -86,21 +95,40 @@ public:
     }
 
     /// Destructor.
+    USDGEOM_API
     virtual ~UsdGeomModelAPI();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
-    /// may be authored by custom/extended methods of the schemas involved
-    /// (such as primvars created by UsdGeomImageable).
+    /// may be authored by custom/extended methods of the schemas involved.
+    USDGEOM_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
+
+    /// Return a UsdGeomModelAPI holding the prim adhering to this
+    /// schema at \p path on \p stage.  If no prim exists at \p path on
+    /// \p stage, or if the prim at that path does not adhere to this schema,
+    /// return an invalid schema object.  This is shorthand for the following:
+    ///
+    /// \code
+    /// UsdGeomModelAPI(stage->GetPrimAtPath(path));
+    /// \endcode
+    ///
+    USDGEOM_API
+    static UsdGeomModelAPI
+    Get(const UsdStagePtr &stage, const SdfPath &path);
+
 
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDGEOM_API
     static const TfType &_GetStaticTfType();
 
+    static bool _IsTypedSchema();
+
     // override SchemaBase virtuals.
+    USDGEOM_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -108,8 +136,10 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 
@@ -161,6 +191,7 @@ public:
     /// \sa UsdGeomImageable::GetPurposeAttr(), 
     ///     UsdGeomImageable::GetOrderedPurposeTokens()
     ///
+    USDGEOM_API
     bool GetExtentsHint(VtVec3fArray *extents, 
                         const UsdTimeCode &time = UsdTimeCode::Default()) const;
 
@@ -168,10 +199,12 @@ public:
     /// 
     /// \sa GetExtentsHint()
     ///
+    USDGEOM_API
     bool SetExtentsHint(VtVec3fArray const &extents, 
                         const UsdTimeCode &time = UsdTimeCode::Default());
 
     /// Returns the custom 'extentsHint' attribute if it exits.
+    USDGEOM_API
     UsdAttribute GetExtentsHintAttr();
 
     /// For the given model, compute the value for the extents hint with the
@@ -181,6 +214,7 @@ public:
     ///
     /// \note \p bboxCache should not be in use by any other thread while
     /// this method is using it in a thread.
+    USDGEOM_API
     VtVec3fArray ComputeExtentsHint(UsdGeomBBoxCache& bboxCache) const;
 
     /// @}
@@ -192,30 +226,36 @@ public:
     /// 
     /// @{
         
-    /// \brief Get the constraint target with the given name, \p constraintName.
+    /// Get the constraint target with the given name, \p constraintName.
     /// 
     /// If the requested constraint target does not exist, then an invalid 
     /// UsdConstraintTarget object is returned.
     /// 
+    USDGEOM_API
     UsdGeomConstraintTarget GetConstraintTarget(
         const std::string &constraintName) const;
 
-    /// \brief Creates a new constraint target with the given name, \p constraintName.
+    /// Creates a new constraint target with the given name, \p constraintName.
     /// 
     /// If the constraint target already exists, then the existing target is 
     /// returned. If it does not exist, a new one is created and returned.
     /// 
+    USDGEOM_API
     UsdGeomConstraintTarget CreateConstraintTarget(
         const std::string &constraintName) const;
 
-    /// \brief Returns all the constraint targets belonging to the model.
+    /// Returns all the constraint targets belonging to the model.
     /// 
     /// Only valid constraint targets in the "constraintTargets" namespace 
     /// are returned by this method.
     /// 
+    USDGEOM_API
     std::vector<UsdGeomConstraintTarget> GetConstraintTargets() const;
 
     /// @}
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

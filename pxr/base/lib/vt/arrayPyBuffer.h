@@ -24,16 +24,21 @@
 #ifndef VT_ARRAY_PYBUFFER_H
 #define VT_ARRAY_PYBUFFER_H
 
+#include "pxr/pxr.h"
+#include "pxr/base/vt/api.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/base/tf/pyObjWrapper.h"
+
 #include <boost/optional.hpp>
 
-/// Convert \p obj which should support the python buffer protocol (e.g. a numpy
-/// array) to a VtArray if possible and return it.  Return empty optional if
-/// \p obj does not support the buffer protocol or does not have compatible type
-/// and dimensions.  If \p err is supplied, set it to an explanatory message in
-/// case of conversion failure.  This function may be invoked for VtArray<T>
-/// where T is one of VT_ARRAY_PYBUFFER_TYPES.
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// Convert \p obj which should support the python buffer protocol (e.g. a
+/// numpy array) to a VtArray if possible and return it.  Return empty
+/// optional if \p obj does not support the buffer protocol or does not have
+/// compatible type and dimensions.  If \p err is supplied, set it to an
+/// explanatory message in case of conversion failure.  This function may be
+/// invoked for VtArray<T> where T is one of VT_ARRAY_PYBUFFER_TYPES.
 template <class T>
 boost::optional<VtArray<T> >
 VtArrayFromPyBuffer(TfPyObjWrapper const &obj, std::string *err=nullptr);
@@ -49,5 +54,7 @@ VtArrayFromPyBuffer(TfPyObjWrapper const &obj, std::string *err=nullptr);
     ((GfQuatf, Quatf))                          \
     ((GfQuatd, Quatd))
 
-#endif // VT_ARRAY_PYBUFFER_H
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // VT_ARRAY_PYBUFFER_H

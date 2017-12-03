@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "translator.h"
 #include "stream.h"
 
@@ -32,7 +33,8 @@
 
 #include "pxr/base/gf/range3f.h"
 
-#include <boost/foreach.hpp>
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 SdfLayerRefPtr
 UsdObjTranslateObjToUsd(const UsdObjStream &objStream)
@@ -65,16 +67,16 @@ UsdObjTranslateObjToUsd(const UsdObjStream &objStream)
 
     // Usd currently requires an extent, somewhat unfortunately.
     GfRange3f extent;
-    BOOST_FOREACH(const GfVec3f &pt, usdPoints)
+    for (const auto& pt : usdPoints) {
         extent.UnionWith(pt);
+    }
     VtVec3fArray extentArray(2);
     extentArray[0] = extent.GetMin();
     extentArray[1] = extent.GetMax();
 
     // Make a poly mesh for each group in the obj.
-    BOOST_FOREACH(const UsdObjStream::Group &group, objStream.GetGroups()) {
-
-        if (not TfIsValidIdentifier(group.name)) {
+    for (const auto& group : objStream.GetGroups()) {
+        if (!TfIsValidIdentifier(group.name)) {
             TF_WARN("Omitting OBJ group with invalid name '%s'",
                     group.name.c_str());
             continue;
@@ -96,7 +98,7 @@ UsdObjTranslateObjToUsd(const UsdObjStream &objStream)
         mesh.GetPointsAttr().Set(usdPoints);
 
         VtArray<int> faceVertexCounts, faceVertexIndices;
-        BOOST_FOREACH(const UsdObjStream::Face &face, group.faces) {
+        for (const auto& face : group.faces) {
             faceVertexCounts.push_back(face.size());
             for (int p = face.pointsBegin; p != face.pointsEnd; ++p) {
                 faceVertexIndices.push_back(objPoints[p].vertIndex);
@@ -115,4 +117,7 @@ UsdObjTranslateObjToUsd(const UsdObjStream &objStream)
 }
 
 
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

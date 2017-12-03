@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/crateData.h"
 
 #include "crateFile.h"
@@ -28,6 +29,7 @@
 #include "pxr/base/tf/bitUtils.h"
 #include "pxr/base/tf/mallocTag.h"
 #include "pxr/base/tf/ostreamMethods.h"
+#include "pxr/base/tf/pathUtils.h"
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/typeInfoMap.h"
 #include "pxr/base/tracelite/trace.h"
@@ -35,6 +37,8 @@
 #include "pxr/base/work/arenaDispatcher.h"
 #include "pxr/base/work/utils.h"
 #include "pxr/base/work/loops.h"
+
+#include "pxr/usd/sdf/schema.h"
 
 #include <tbb/parallel_for.h>
 #include <tbb/parallel_sort.h>
@@ -59,6 +63,8 @@ using std::pair;
 using std::string;
 using std::unordered_map;
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 using namespace Usd_CrateFile;
 
@@ -102,8 +108,12 @@ public:
         , _crateFile(CrateFile::CreateNew()) {}
     
     ~Usd_CrateDataImpl() {
+        // Close file synchronously.  We don't want a race condition
+        // on Windows due to the file being open for an indeterminate
+        // amount of time.
+        _crateFile.reset();
+
         // Tear down asynchronously.
-        WorkMoveDestroyAsync(_crateFile);
         WorkMoveDestroyAsync(_flatTypes);
         WorkMoveDestroyAsync(_flatData);
         if (_hashData)
@@ -116,20 +126,56 @@ public:
         TfAutoMallocTag tag("Usd_CrateDataImpl::Save");
         
         auto dataFileName = _crateFile->GetFileName();
-        if (not TF_VERIFY(fileName == dataFileName or dataFileName.empty()))
+        if (!TF_VERIFY(fileName == dataFileName || dataFileName.empty()))
             return false;
 
+        // Sort by path for better namespace-grouped data layout.
+        vector<SdfPath> sortedPaths;
+        sortedPaths.reserve(_hashData ? _hashData->size() : _flatData.size());
+        if (_hashData) {
+            for (auto const &p: *_hashData) {
+                sortedPaths.push_back(p.first);
+            }
+        } else {
+            for (auto const &p: _flatData) {
+                sortedPaths.push_back(p.first);
+            }
+        }
+        tbb::parallel_sort(
+            sortedPaths.begin(), sortedPaths.end(),
+            [](SdfPath const &p1, SdfPath const &p2) {
+                // Prim paths before property paths, then property paths grouped
+                // by property name.
+                bool p1IsProperty = p1.IsPropertyPath();
+                bool p2IsProperty = p2.IsPropertyPath();
+                switch ((int)p1IsProperty + (int)p2IsProperty) {
+                case 1:
+                    return !p1IsProperty;
+                case 2:
+                    if (p1.GetName() != p2.GetName()) {
+                        return p1.GetName() < p2.GetName();
+                    }
+                // Intentional fall-through
+                default:
+                case 0:
+                    return p1 < p2;
+                }
+            });
+
+        // Now pack all the specs.
         if (CrateFile::Packer packer = _crateFile->StartPacking(fileName)) {
             if (_hashData) {
-                for (auto const &p: *_hashData) {
+                for (auto const &p: sortedPaths) {
+                    auto iter = _hashData->find(p);
                     packer.PackSpec(
-                        p.first, p.second.specType, p.second.fields.Get());
+                        p, iter->second.specType, iter->second.fields.Get());
                 }
             } else {
-                for (size_t i = 0; i != _flatData.size(); ++i) {
-                    auto const &p = _flatData.begin()[i];
+                for (auto const &p: sortedPaths) {
+                    auto iter = _flatData.find(p);
                     packer.PackSpec(
-                        p.first, _flatTypes[i].type, p.second.fields.Get());
+                        p, _flatTypes[iter-_flatData.begin()].type,
+                        iter->second.fields.Get());
                 }
             }
             if (packer.Close()) {
@@ -150,22 +196,62 @@ public:
         return false;
     }
 
+    inline bool _HasTargetSpec(SdfPath const &path) const {
+        // We don't store target specs to save space, since in Usd we don't have
+        // any fields that may be set on them.  Their presence is determined by
+        // whether or not they appear in their owning relationship's Added or
+        // Explicit items.
+        SdfPath parentPath = path.GetParentPath();
+        if (parentPath.IsPrimPropertyPath()) {
+            VtValue targetPaths;
+            if (Has(SdfAbstractDataSpecId(&parentPath),
+                    SdfFieldKeys->TargetPaths, &targetPaths) &&
+                targetPaths.IsHolding<SdfPathListOp>()) {
+                auto const &listOp = targetPaths.UncheckedGet<SdfPathListOp>();
+                if (listOp.IsExplicit()) {
+                    auto const &items = listOp.GetExplicitItems();
+                    return std::find(
+                        items.begin(), items.end(), path) != items.end();
+                } else {
+                    auto const &added = listOp.GetAddedItems();
+                    auto const &prepended = listOp.GetPrependedItems();
+                    auto const &appended = listOp.GetAppendedItems();
+                    return std::find(added.begin(), added.end(), path)
+                        != added.end() ||
+                        std::find(prepended.begin(), prepended.end(), path)
+                        != prepended.end() ||
+                        std::find(appended.begin(), appended.end(), path)
+                        != appended.end();
+                }
+            }
+        }
+        return false;
+    }
+
     inline bool HasSpec(const SdfAbstractDataSpecId &id) const {
         const SdfPath &path = id.GetFullSpecPath();
+        if (ARCH_UNLIKELY(path.IsTargetPath())) {
+            return _HasTargetSpec(path);
+        }
         return _hashData ?
             _hashData->find(path) != _hashData->end() :
             _flatData.find(path) != _flatData.end();
     }
 
     inline void EraseSpec(const SdfAbstractDataSpecId &id) {
+        if (ARCH_UNLIKELY(id.GetFullSpecPath().IsTargetPath())) {
+            // Do nothing, we do not store target specs.
+            return;
+        }
         if (_MaybeMoveToHashTable()) {
             _hashLastSet = nullptr;
             TF_VERIFY(_hashData->erase(id.GetFullSpecPath()),
-                      id.GetString().c_str());
+                      "%s", id.GetString().c_str());
         } else {
             auto iter = _flatData.find(id.GetFullSpecPath());
             size_t index = iter - _flatData.begin();
-            if (TF_VERIFY(iter != _flatData.end(), id.GetString().c_str())) {
+            if (TF_VERIFY(iter != _flatData.end(),
+                          "%s", id.GetString().c_str())) {
                 _flatLastSet = nullptr;
                 _flatData.erase(iter);
                 _flatTypes.erase(_flatTypes.begin() + index);
@@ -175,21 +261,26 @@ public:
 
     inline void MoveSpec(const SdfAbstractDataSpecId& oldId,
                          const SdfAbstractDataSpecId& newId) {
+        if (ARCH_UNLIKELY(oldId.GetFullSpecPath().IsTargetPath())) {
+            // Do nothing, we do not store target specs.
+            return;
+        }
+
         SdfPath const &oldPath = oldId.GetFullSpecPath();
         SdfPath const &newPath = newId.GetFullSpecPath();
 
         if (_MaybeMoveToHashTable()) {
             auto oldIter = _hashData->find(oldPath);
-            if (not TF_VERIFY(oldIter != _hashData->end()))
+            if (!TF_VERIFY(oldIter != _hashData->end()))
                 return;
             _hashLastSet = nullptr;
             bool inserted = _hashData->emplace(newPath, oldIter->second).second;
-            if (not TF_VERIFY(inserted))
+            if (!TF_VERIFY(inserted))
                 return;
             _hashData->erase(oldIter);
         } else {
             auto oldIter = _flatData.find(oldPath);
-            if (not TF_VERIFY(oldIter != _flatData.end()))
+            if (!TF_VERIFY(oldIter != _flatData.end()))
                 return;
             
             _flatLastSet = nullptr;
@@ -211,8 +302,13 @@ public:
 
     inline SdfSpecType GetSpecType(const SdfAbstractDataSpecId &id) const {
         SdfPath const &path = id.GetFullSpecPath();
-        if (path == SdfPath::AbsoluteRootPath())
+        if (path == SdfPath::AbsoluteRootPath()) {
             return SdfSpecTypePseudoRoot;
+        }
+        if (path.IsTargetPath()) {
+            return _HasTargetSpec(path) ?
+                SdfSpecTypeRelationshipTarget : SdfSpecTypeUnknown;
+        }
         if (_hashData) {
             auto i = _hashData->find(path);
             return i == _hashData->end() ?
@@ -222,19 +318,18 @@ public:
         if (i == _flatData.end())
             return SdfSpecTypeUnknown;
         // Don't look up in the table if we can tell the type from the path.
-        if (path.IsPrimPath())
-            return SdfSpecTypePrim;
-        // In Usd, target paths may only ever identify relationship targets,
-        // since Usd does not have support for attribute connections.
-        if (path.IsTargetPath())
-            return SdfSpecTypeRelationshipTarget;
-        return _flatTypes[i - _flatData.begin()].type;
+        return path.IsPrimPath() ? SdfSpecTypePrim :
+            _flatTypes[i - _flatData.begin()].type;
     }
 
     inline void
     CreateSpec(const SdfAbstractDataSpecId &id, SdfSpecType specType) {
-        if (not TF_VERIFY(specType != SdfSpecTypeUnknown))
+        if (!TF_VERIFY(specType != SdfSpecTypeUnknown))
             return;
+        if (id.GetFullSpecPath().IsTargetPath()) {
+            // Do nothing, we do not store relationship target specs in usd.
+            return;
+        }
         if (_MaybeMoveToHashTable()) {
             // No need to blow the _hashLastSet cache here, since inserting into
             // the table won't invalidate existing references.
@@ -255,16 +350,17 @@ public:
 
     inline void _VisitSpecs(SdfAbstractData const &data,
                             SdfAbstractDataSpecVisitor* visitor) const {
+        // XXX: Is it important to present relationship target specs here?
         if (_hashData) {
             for (auto const &p: *_hashData) {
-                if (not visitor->VisitSpec(
+                if (!visitor->VisitSpec(
                         data, SdfAbstractDataSpecId(&p.first))) {
                     break;
                 }
             }
         } else {
             for (auto const &p: _flatData) {
-                if (not visitor->VisitSpec(
+                if (!visitor->VisitSpec(
                         data, SdfAbstractDataSpecId(&p.first))) {
                     break;
                 }
@@ -343,9 +439,9 @@ public:
 
         SdfPath const &path = id.GetFullSpecPath();
 
-        if (not lastSet or lastSet->first != path) {
+        if (!lastSet || lastSet->first != path) {
             auto i = d.find(id.GetFullSpecPath());
-            if (not TF_VERIFY(
+            if (!TF_VERIFY(
                     i != d.end(),
                     "Tried to set field '%s' on nonexistent spec at <%s>",
                     id.GetString().c_str(), fieldName.GetText())) {
@@ -381,6 +477,12 @@ public:
                     const VtValue& value) {
         if (ARCH_UNLIKELY(value.IsEmpty())) {
             Erase(id, fieldName);
+            return;
+        }
+        if (id.GetFullSpecPath().IsTargetPath()) {
+            TF_CODING_ERROR("Cannot set fields on relationship target specs: "
+                            "<%s>:%s = %s", id.GetFullSpecPath().GetText(),
+                            fieldName.GetText(), TfStringify(value).c_str());
             return;
         }
         _hashData ?
@@ -459,7 +561,7 @@ public:
                 auto const &ts = fieldValue->UncheckedGet<TimeSamples>();
                 auto const &times = ts.times.Get();
                 auto iter = lower_bound(times.begin(), times.end(), time);
-                if (iter == times.end() or *iter != time)
+                if (iter == times.end() || *iter != time)
                     return false;
                 if (value) {
                     auto index = iter - times.begin();
@@ -474,10 +576,10 @@ public:
 
     inline bool QueryTimeSample(const SdfAbstractDataSpecId& id, double time,
                                 SdfAbstractDataValue* value) const {
-        if (not value)
+        if (!value)
             return QueryTimeSample(id, time, static_cast<VtValue *>(nullptr));
         VtValue vtVal;
-        return QueryTimeSample(id, time, &vtVal) and value->StoreValue(vtVal);
+        return QueryTimeSample(id, time, &vtVal) && value->StoreValue(vtVal);
     }
 
     inline void
@@ -493,14 +595,14 @@ public:
         VtValue *fieldValue =
             _GetMutableFieldValue(id, SdfDataTokens->TimeSamples);
         
-        if (fieldValue and fieldValue->IsHolding<TimeSamples>()) {
+        if (fieldValue && fieldValue->IsHolding<TimeSamples>()) {
             fieldValue->UncheckedSwap(newSamples);
         }
         
         // Insert or overwrite time into newTimes.
         auto iter = lower_bound(newSamples.times.Get().begin(),
                                 newSamples.times.Get().end(), time);
-        if (iter == newSamples.times.Get().end() or *iter != time) {
+        if (iter == newSamples.times.Get().end() || *iter != time) {
             auto index = iter - newSamples.times.Get().begin();
             // Make the samples mutable, which may invalidate 'iter'.
             _crateFile->MakeTimeSampleTimesAndValuesMutable(newSamples);
@@ -526,7 +628,7 @@ public:
         VtValue *fieldValue =
             _GetMutableFieldValue(id, SdfDataTokens->TimeSamples);
         
-        if (fieldValue and fieldValue->IsHolding<TimeSamples>()) {
+        if (fieldValue && fieldValue->IsHolding<TimeSamples>()) {
             fieldValue->UncheckedSwap(newSamples);
         } else {
             return;
@@ -535,17 +637,24 @@ public:
         // Insert or overwrite time into newTimes.
         auto iter = lower_bound(newSamples.times.Get().begin(),
                                 newSamples.times.Get().end(), time);
-        if (iter == newSamples.times.Get().end() or *iter != time)
+        if (iter == newSamples.times.Get().end() || *iter != time)
             return;
-        
-        auto index = iter-newSamples.times.Get().begin();
-        // Make the samples mutable, which may invalidate 'iter'.
-        _crateFile->MakeTimeSampleTimesAndValuesMutable(newSamples);
-        newSamples.times.GetMutable().erase(
-            newSamples.times.GetMutable().begin() + index);
-        newSamples.values.erase(newSamples.values.begin() + index);
-        
-        fieldValue->UncheckedSwap(newSamples);
+
+        // If we're removing the last sample, remove the entire field to be
+        // consistent with SdfData's implementation.
+        if (newSamples.times.Get().size() == 1) {
+            Erase(id, SdfDataTokens->TimeSamples);
+        } else {
+            // Otherwise remove just the one sample.
+            auto index = iter-newSamples.times.Get().begin();
+            // Make the samples mutable, which may invalidate 'iter'.
+            _crateFile->MakeTimeSampleTimesAndValuesMutable(newSamples);
+            newSamples.times.GetMutable().erase(
+                newSamples.times.GetMutable().begin() + index);
+            newSamples.values.erase(newSamples.values.begin() + index);
+            
+            fieldValue->UncheckedSwap(newSamples);
+        }
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -563,10 +672,16 @@ private:
         vector<CrateFile::Field> fields;
         vector<Usd_CrateFile::FieldIndex> fieldSets;
         _crateFile->RemoveStructuralData(specs, fields, fieldSets);
-
-        // Allocate all the spec data structures in the hashtable first, so we
-        // can populate fields in parallel without locking.
-        vector<_FlatSpecData *> specDataPtrs;
+        
+        // Remove any target specs, we do not store target specs in Usd, but old
+        // files could contain them.
+        specs.erase(
+            remove_if(
+                specs.begin(), specs.end(),
+                [this](CrateFile::Spec const &spec) {
+                    return _crateFile->GetPath(spec.pathIndex).IsTargetPath();
+                }),
+            specs.end());
 
         // Sort by path fast-less-than, need same order that _Table will
         // store.
@@ -589,8 +704,9 @@ private:
             using result_type = _FlatMap::value_type;
             explicit _SpecToPair(CrateFile *crateFile) : crateFile(crateFile) {}
             result_type operator()(CrateFile::Spec const &spec) const {
-                result_type r;
-                r.first = crateFile->GetPath(spec.pathIndex);
+                result_type r(crateFile->GetPath(spec.pathIndex),
+                              _FlatSpecData(Usd_EmptySharedTag));
+                TF_AXIOM(!r.first.IsTargetPath());
                 return r;
             }
             CrateFile *crateFile;
@@ -606,6 +722,10 @@ private:
                     _flatData);
         }
 
+        // Allocate all the spec data structures in the hashtable first, so we
+        // can populate fields in parallel without locking.
+        vector<_FlatSpecData *> specDataPtrs;
+
         // Create all the specData entries and store pointers to them.
         dispatcher.Run([this, &specs, &specDataPtrs]() {
                 // XXX Won't need first two tags when bug #132031 is addressed
@@ -613,9 +733,7 @@ private:
                 TfAutoMallocTag tag2("Usd_CrateDataImpl main hash table");
                 specDataPtrs.resize(specs.size());
                 for (size_t i = 0; i != specs.size(); ++i) {
-                    auto const &s = specs[i];
-                    specDataPtrs[i] =
-                        &_flatData.at(_crateFile->GetPath(s.pathIndex));
+                    specDataPtrs[i] = &(_flatData.begin()[i].second);
                 }
             });
 
@@ -682,7 +800,7 @@ private:
 
     inline VtValue _UnpackForField(ValueRep rep) const {
         VtValue ret;
-        if (rep.IsInlined() or rep.GetType() == TypeEnum::TimeSamples) {
+        if (rep.IsInlined() || rep.GetType() == TypeEnum::TimeSamples) {
             ret = _crateFile->UnpackValue(rep);
         } else {
             ret = rep;
@@ -819,7 +937,7 @@ private:
     bool _MaybeMoveToHashTable() {
         // Arbitrary size threshold for flat_map data.
         constexpr size_t FlatDataThreshold = 1024;
-        if (not _hashData and _flatData.size() > FlatDataThreshold) {
+        if (!_hashData && _flatData.size() > FlatDataThreshold) {
             // blow lastSet caches.
             _flatLastSet = nullptr;
             _hashLastSet = nullptr;
@@ -846,6 +964,9 @@ private:
 
     struct _FlatSpecData {
         inline void DetachIfNotUnique() { fields.MakeUnique(); }
+        _FlatSpecData() = default;
+        explicit _FlatSpecData(Usd_EmptySharedTagType)
+            : fields(Usd_EmptySharedTag) {}
         Usd_Shared<_FieldValuePairVector> fields;
     };
 
@@ -909,7 +1030,7 @@ Usd_CrateData::GetSoftwareVersionToken()
 bool
 Usd_CrateData::CanRead(string const &fileName)
 {
-    return CrateFile::CanRead(fileName);
+    return CrateFile::CanRead(TfAbsPath(fileName));
 }
 
 bool
@@ -920,23 +1041,24 @@ Usd_CrateData::Save(string const &fileName)
         return false;
     }
 
-    bool hasFile = not _impl->GetFileName().empty();
-    bool saveToOtherFile = _impl->GetFileName() != fileName;
+    auto newFileName = TfAbsPath(fileName);
+    bool hasFile = !_impl->GetFileName().empty();
+    bool saveToOtherFile = _impl->GetFileName() != newFileName;
         
-    if (hasFile and saveToOtherFile) {
+    if (hasFile && saveToOtherFile) {
         // We copy to a temporary data and save that.
         Usd_CrateData tmp;
         tmp.CopyFrom(SdfAbstractDataConstPtr(this));
-        return tmp.Save(fileName);
+        return tmp.Save(newFileName);
     }
 
-    return _impl->Save(fileName);
+    return _impl->Save(newFileName);
 }
 
 bool
 Usd_CrateData::Open(const std::string &fileName)
 {
-    return _impl->Open(fileName);
+    return _impl->Open(TfAbsPath(fileName));
 }
 
 // ------------------------------------------------------------------------- //
@@ -1090,3 +1212,6 @@ Usd_CrateData::EraseTimeSample(const SdfAbstractDataSpecId& id, double time)
 {
     return _impl->EraseTimeSample(id, time);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

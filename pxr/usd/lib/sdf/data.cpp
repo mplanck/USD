@@ -21,10 +21,15 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/data.h"
 #include "pxr/base/tracelite/trace.h"
 #include "pxr/base/work/utils.h"
+
 #include <iostream>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 SdfData::~SdfData()
 {
@@ -42,7 +47,7 @@ void
 SdfData::EraseSpec(const SdfAbstractDataSpecId& id)
 {
     _HashTable::iterator i = _data.find(id.GetFullSpecPath());
-    if (not TF_VERIFY(i != _data.end(), 
+    if (!TF_VERIFY(i != _data.end(), 
             "No spec to erase at <%s>", id.GetString().c_str())) {
         return;
     }
@@ -57,12 +62,12 @@ SdfData::MoveSpec(const SdfAbstractDataSpecId& oldId,
     const SdfPath newPath = newId.GetFullSpecPath();
 
     _HashTable::iterator old = _data.find(oldPath);
-    if (not TF_VERIFY(old != _data.end(),
+    if (!TF_VERIFY(old != _data.end(),
             "No spec to move at <%s>", oldPath.GetString().c_str())) {
         return;
     }
     bool inserted = _data.insert(std::make_pair(newPath,old->second)).second;
-    if (not TF_VERIFY(inserted)) {
+    if (!TF_VERIFY(inserted)) {
         return;
     }
     _data.erase(old);
@@ -81,7 +86,7 @@ SdfData::GetSpecType(const SdfAbstractDataSpecId& id) const
 void
 SdfData::CreateSpec(const SdfAbstractDataSpecId& id, SdfSpecType specType)
 {
-    if (not TF_VERIFY(specType != SdfSpecTypeUnknown)) {
+    if (!TF_VERIFY(specType != SdfSpecTypeUnknown)) {
         return;
     }
     _data[id.GetFullSpecPath()].specType = specType;
@@ -91,7 +96,7 @@ void
 SdfData::_VisitSpecs(SdfAbstractDataSpecVisitor* visitor) const
 {
     TF_FOR_ALL(it, _data) {
-        if (not visitor->VisitSpec(*this, SdfAbstractDataSpecId(&it->first))) {
+        if (!visitor->VisitSpec(*this, SdfAbstractDataSpecId(&it->first))) {
             break;
         }
     }
@@ -181,7 +186,7 @@ SdfData::_GetOrCreateFieldValue(const SdfAbstractDataSpecId& id,
                                 const TfToken& field)
 {
     _HashTable::iterator i = _data.find(id.GetFullSpecPath());
-    if (not TF_VERIFY(i != _data.end(),
+    if (!TF_VERIFY(i != _data.end(),
                       "No spec at <%s> when trying to set field '%s'",
                       id.GetString().c_str(), field.GetText())) {
         return NULL;
@@ -247,7 +252,7 @@ SdfData::ListAllTimeSamples() const
     TF_FOR_ALL(i, _data) {
         std::set<double> timesForPath = 
             ListTimeSamplesForPath(SdfAbstractDataSpecId(&i->first));
-        times.insert( timesForPath.begin(), timesForPath.end() );
+        times.insert(timesForPath.begin(), timesForPath.end());
     }
 
     return times;
@@ -270,54 +275,69 @@ SdfData::ListTimeSamplesForPath(const SdfAbstractDataSpecId& id) const
     return times;
 }
 
+template <class Container, class GetTime>
 static bool
-_GetBracketingTimeSamples(const std::set<double> & samples,
-                          const double time, double* tLower, double* tUpper)
+_GetBracketingTimeSamplesImpl(
+    const Container &samples, const GetTime &getTime,
+    const double time, double* tLower, double* tUpper)
 {
     if (samples.empty()) {
         // No samples.
         return false;
-    } else if (time <= *samples.begin()) {
+    } else if (time <= getTime(*samples.begin())) {
         // Time is at-or-before the first sample.
-        *tLower = *tUpper = *samples.begin();
-    } else if (time >= *samples.rbegin()) {
+        *tLower = *tUpper = getTime(*samples.begin());
+    } else if (time >= getTime(*samples.rbegin())) {
         // Time is at-or-after the last sample.
-        *tLower = *tUpper = *samples.rbegin();
+        *tLower = *tUpper = getTime(*samples.rbegin());
     } else {
-        std::set<double>::const_iterator i = samples.lower_bound(time);
-        if (*i == time) {
+        auto iter = samples.lower_bound(time);
+        if (getTime(*iter) == time) {
             // Time is exactly on a sample.
-            *tLower = *tUpper = *i;
+            *tLower = *tUpper = getTime(*iter);
         } else {
             // Time is in-between samples; return the bracketing times.
-            *tUpper = *i;
-            --i;
-            *tLower = *i;
+            *tUpper = getTime(*iter);
+            --iter;
+            *tLower = getTime(*iter);
         }
     }
     return true;
+}
+
+static bool
+_GetBracketingTimeSamples(const std::set<double> &samples, double time,
+                          double *tLower, double *tUpper)
+{
+    return _GetBracketingTimeSamplesImpl(samples, [](double t) { return t; },
+                                         time, tLower, tUpper);
+}
+
+static bool
+_GetBracketingTimeSamples(const SdfTimeSampleMap &samples, double time,
+                          double *tLower, double *tUpper)
+{
+    return _GetBracketingTimeSamplesImpl(
+        samples, [](SdfTimeSampleMap::value_type const &p) { return p.first; },
+        time, tLower, tUpper);
 }
 
 bool
 SdfData::GetBracketingTimeSamples(
     double time, double* tLower, double* tUpper) const
 {
-    std::set<double> times = ListAllTimeSamples();
-
-    return _GetBracketingTimeSamples(times, time, tLower, tUpper);
+    return _GetBracketingTimeSamples(
+        ListAllTimeSamples(), time, tLower, tUpper);
 }
 
 size_t
 SdfData::GetNumTimeSamplesForPath(const SdfAbstractDataSpecId& id) const
 {
-    if (const VtValue* fieldValue = 
-        _GetFieldValue(id, SdfDataTokens->TimeSamples)) {
-
-        if (fieldValue->IsHolding<SdfTimeSampleMap>()) {
-            return fieldValue->UncheckedGet<SdfTimeSampleMap>().size();
+    if (const VtValue *fval = _GetFieldValue(id, SdfDataTokens->TimeSamples)) {
+        if (fval->IsHolding<SdfTimeSampleMap>()) {
+            return fval->UncheckedGet<SdfTimeSampleMap>().size();
         }
     }
-
     return 0;
 }
 
@@ -326,25 +346,25 @@ SdfData::GetBracketingTimeSamplesForPath(
     const SdfAbstractDataSpecId& id, double time,
     double* tLower, double* tUpper) const
 {
-    std::set<double> times = ListTimeSamplesForPath(id);
-    return _GetBracketingTimeSamples(times, time, tLower, tUpper);
+    const VtValue *fval = _GetFieldValue(id, SdfDataTokens->TimeSamples);
+    if (fval && fval->IsHolding<SdfTimeSampleMap>()) {
+        auto const &tsmap = fval->UncheckedGet<SdfTimeSampleMap>();
+        return _GetBracketingTimeSamples(tsmap, time, tLower, tUpper);
+    }
+    return false;
 }
 
 bool
 SdfData::QueryTimeSample(const SdfAbstractDataSpecId& id, double time, 
                          VtValue *value) const
 {
-    // XXX: This could be made more efficient by using _GetFieldValue
-    //      instead of making a full copy of the time sample map.
-    VtValue sampleMapValue = Get(id, SdfDataTokens->TimeSamples);
-    if (sampleMapValue.IsHolding<SdfTimeSampleMap>()) {
-        const SdfTimeSampleMap & timeSampleMap =
-            sampleMapValue.UncheckedGet<SdfTimeSampleMap>();
-        SdfTimeSampleMap::const_iterator i = timeSampleMap.find(time);
-        if (i != timeSampleMap.end()) {
-            if (value) {
-                *value = i->second;
-            }
+    const VtValue *fval = _GetFieldValue(id, SdfDataTokens->TimeSamples);
+    if (fval && fval->IsHolding<SdfTimeSampleMap>()) {
+        auto const &tsmap = fval->UncheckedGet<SdfTimeSampleMap>();
+        auto iter = tsmap.find(time);
+        if (iter != tsmap.end()) {
+            if (value)
+                *value = iter->second;
             return true;
         }
     }
@@ -354,16 +374,13 @@ SdfData::QueryTimeSample(const SdfAbstractDataSpecId& id, double time,
 bool 
 SdfData::QueryTimeSample(const SdfAbstractDataSpecId& id, double time,
                          SdfAbstractDataValue* value) const
-{
-    // XXX: This could be made more efficient by using _GetFieldValue
-    //      instead of making a full copy of the time sample map.
-    VtValue sampleMapValue = Get(id, SdfDataTokens->TimeSamples);
-    if (sampleMapValue.IsHolding<SdfTimeSampleMap>()) {
-        const SdfTimeSampleMap & timeSampleMap =
-            sampleMapValue.UncheckedGet<SdfTimeSampleMap>();
-        SdfTimeSampleMap::const_iterator i = timeSampleMap.find(time);
-        if (i != timeSampleMap.end()) {
-            return not value or value->StoreValue(i->second);
+{ 
+    const VtValue *fval = _GetFieldValue(id, SdfDataTokens->TimeSamples);
+    if (fval && fval->IsHolding<SdfTimeSampleMap>()) {
+        auto const &tsmap = fval->UncheckedGet<SdfTimeSampleMap>();
+        auto iter = tsmap.find(time);
+        if (iter != tsmap.end()) {
+            return !value || value->StoreValue(iter->second);
         }
     }
     return false;
@@ -399,3 +416,4 @@ SdfData::EraseTimeSample(const SdfAbstractDataSpecId& id, double time)
         Set(id, SdfDataTokens->TimeSamples, VtValue(samples));
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

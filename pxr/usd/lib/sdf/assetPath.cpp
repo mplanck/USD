@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/assetPath.h"
 
 #include "pxr/base/tf/registryManager.h"
@@ -28,10 +29,11 @@
 #include "pxr/base/tf/type.h"
 
 #include "pxr/base/vt/array.h"
-#include "pxr/base/vt/wrapArray.h"
 #include "pxr/base/vt/value.h"
 
 #include <iostream>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // Register this class with the TfType registry
 // Array registration included to facilitate Sdf/Types and Sdf/ParserHelpers
@@ -44,7 +46,6 @@ TF_REGISTRY_FUNCTION(TfType)
 TF_REGISTRY_FUNCTION(VtValue)
 {
     VtValue::RegisterSimpleCast<std::string, SdfAssetPath>();
-    VtRegisterValueCastsFromPythonSequencesToArray<SdfAssetPath>();
 }
 
 TF_DEFINE_PRIVATE_TOKENS(
@@ -84,3 +85,5 @@ operator<<(std::ostream& out, const SdfAssetPath& ap)
 {
     return out << _tokens->enclosure << ap.GetAssetPath() << _tokens->enclosure;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

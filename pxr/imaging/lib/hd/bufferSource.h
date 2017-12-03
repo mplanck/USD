@@ -24,10 +24,12 @@
 #ifndef HD_BUFFER_SOURCE_H
 #define HD_BUFFER_SOURCE_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
+#include "pxr/imaging/hd/bufferSpec.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/token.h"
-#include "pxr/imaging/hd/bufferSpec.h"
 
 #include <atomic>
 #include <vector>
@@ -35,12 +37,17 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/weak_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 class HdBufferSource;
 typedef boost::shared_ptr<HdBufferSource> HdBufferSourceSharedPtr;
 typedef boost::shared_ptr<HdBufferSource const> HdBufferSourceConstSharedPtr;
 typedef std::vector<HdBufferSourceSharedPtr> HdBufferSourceVector;
 typedef boost::weak_ptr<HdBufferSource> HdBufferSourceWeakPtr;
 
+/// \class HdBufferSource
+///
 /// A transient buffer of data that has not yet been committed to the GPU.
 ///
 /// HdBufferSource is an abstract interface class, to be registered to the
@@ -54,6 +61,7 @@ class HdBufferSource : public boost::noncopyable {
 public:
     HdBufferSource() : _state(UNRESOLVED) { }
 
+    HD_API
     virtual ~HdBufferSource();
 
     /// Return the name of this buffer source.
@@ -62,6 +70,10 @@ public:
     /// Add the buffer spec for this buffer source into given bufferspec vector.
     /// note: buffer specs has to be determined before the source resolution.
     virtual void AddBufferSpecs(HdBufferSpecVector *specs) const = 0;
+
+    /// Computes and returns a hash value for the underlying data.
+    HD_API
+    virtual size_t ComputeHash() const;
 
     /// Prepare the access of GetData(). This process may include some
     /// computations (e.g. cpu smooth normals).
@@ -102,30 +114,67 @@ public:
     // overriden for efficiency.
 
     /// The size of a single element in the array, e.g. sizeof(GLuint)
+    HD_API
     virtual size_t GetElementSize() const;
 
     /// Returns the size of a single component.
     /// For example: sizeof(GLuint)
+    HD_API
     virtual size_t GetComponentSize() const;
 
     /// Returns the flat array size in bytes.
+    HD_API
     virtual size_t GetSize() const;
 
     /// Returns true it this computation has already been resolved.
     bool IsResolved() const {
-        return _state == RESOLVED;
+        return _state >= RESOLVED;
     }
 
+    /// Returns true if an error occured during resolve.
+    bool HasResolveError() const {
+        return _state == RESOLVE_ERROR;
+    }
+
+
+    /// \name Chained Buffers
+    /// Buffer sources may be daisy-chained together.
+    ///
+    /// Pre-chained buffer sources typically represent sources that
+    /// are inputs to computed buffer sources (e.g. coarse vertex
+    /// privmar data needing to be quadrangulated or refined) and
+    /// will be scheduled to be resolved along with their owning
+    /// buffer sources.
+    ///
+    /// Post-chained buffer sources typically represent additional
+    /// results produced by a computation (e.g. primitive param data
+    /// computed along with index buffer data) and will be scheduled
+    /// to be committed along with their owning buffer sources.
+    /// @{
+
+    /// Returns true if this buffer has a pre-chained buffer.
+    HD_API
+    virtual bool HasPreChainedBuffer() const;
+
+    /// Returns the pre-chained buffer.
+    HD_API
+    virtual HdBufferSourceSharedPtr GetPreChainedBuffer() const;
+
     /// Returns true if this buffer has a chained buffer.
+    HD_API
     virtual bool HasChainedBuffer() const;
 
     /// Returns the chained buffer.
+    HD_API
     virtual HdBufferSourceSharedPtr GetChainedBuffer() const;
+
+    /// @}
 
     /// Checks the validity of the source buffer.
     /// The function should be called to determine if
     /// AddBufferSpec() and Resolve() would return valid
     /// results.
+    HD_API
     bool IsValid() const;
 
 protected:
@@ -134,6 +183,20 @@ protected:
     void _SetResolved() {
         TF_VERIFY(_state == BEING_RESOLVED);
         _state = RESOLVED;
+    }
+
+    /// Called during Resolve() to indicate an unrecoverable failure occurred
+    /// and the results of the computation can not be used.
+    /// Further calls to Resolve() will not lead to success.
+    ///
+    /// This is different from Resolve() returning false, which indicates
+    /// that additional calls to Resolve() will eventually lead to success.
+    ///
+    /// This is also later in the pipeline than IsValid, which checks
+    /// that the buffer is setup such that Resolve() can be successful.
+    void _SetResolveError() {
+        TF_VERIFY(_state == BEING_RESOLVED);
+        _state = RESOLVE_ERROR;
     }
 
     /// Non-blocking lock acquisition.
@@ -166,7 +229,7 @@ protected:
     virtual bool _CheckValid() const = 0;
 
 private:
-    enum State { UNRESOLVED=0, BEING_RESOLVED, RESOLVED };
+    enum State { UNRESOLVED=0, BEING_RESOLVED, RESOLVED,  RESOLVE_ERROR};
     std::atomic<State> _state;
 };
 
@@ -180,11 +243,19 @@ private:
 ///
 class HdComputedBufferSource : public HdBufferSource {
 public:
+    HD_API
     virtual TfToken const &GetName() const;
+    HD_API
+    virtual size_t ComputeHash() const;
+    HD_API
     virtual void const* GetData() const;
+    HD_API
     virtual int GetGLComponentDataType() const;
+    HD_API
     virtual int GetGLElementDataType() const;
+    HD_API
     virtual int GetNumElements() const;
+    HD_API
     virtual short GetNumComponents() const;
 
 protected:
@@ -201,13 +272,25 @@ private:
 ///
 class HdNullBufferSource : public HdBufferSource {
 public:
+    HD_API
     virtual TfToken const &GetName() const;
+    HD_API
+    virtual size_t ComputeHash() const;
+    HD_API
     virtual void const* GetData() const;
+    HD_API
     virtual int GetGLComponentDataType() const;
+    HD_API
     virtual int GetGLElementDataType() const;
+    HD_API
     virtual int GetNumElements() const;
+    HD_API
     virtual short GetNumComponents() const;
+    HD_API
     virtual void AddBufferSpecs(HdBufferSpecVector *specs) const;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HD_BUFFER_SOURCE_H

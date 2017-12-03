@@ -22,16 +22,11 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/usd/usdGeom/modelAPI.h"
-#include "pxr/usd/usdGeom/constraintTarget.h"
-
 #include "pxr/usd/usd/schemaBase.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/usd/sdf/primSpec.h"
-#include "pxr/usd/sdf/types.h"
 
-#include "pxr/base/vt/value.h"
-
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -39,7 +34,13 @@
 
 #include <boost/python.hpp>
 
+#include <string>
+
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 #define WRAP_CUSTOM                                                     \
     template <class Cls> static void _CustomWrapCode(Cls &_class)
@@ -47,24 +48,37 @@ using namespace boost::python;
 // fwd decl.
 WRAP_CUSTOM;
 
+
+} // anonymous namespace
+
 void wrapUsdGeomModelAPI()
 {
     typedef UsdGeomModelAPI This;
 
-    class_<
-        This, bases<UsdModelAPI>
-        > cls("ModelAPI", init<UsdPrim>(arg("prim")));
+    class_<This, bases<UsdModelAPI> >
+        cls("ModelAPI");
 
     cls
+        .def(init<UsdPrim>(arg("prim")))
         .def(init<UsdSchemaBase const&>(arg("schemaObj")))
         .def(TfTypePythonClass())
+
+        .def("Get", &This::Get, (arg("stage"), arg("path")))
+        .staticmethod("Get")
+
+
         .def("GetSchemaAttributeNames",
              &This::GetSchemaAttributeNames,
              arg("includeInherited")=true,
              return_value_policy<TfPySequenceToList>())
         .staticmethod("GetSchemaAttributeNames")
 
+        .def("_GetStaticTfType", (TfType const &(*)()) TfType::Find<This>,
+             return_value_policy<return_by_value>())
+        .staticmethod("_GetStaticTfType")
+
         .def(!self)
+
 
     ;
 
@@ -83,8 +97,14 @@ void wrapUsdGeomModelAPI()
 // }
 //
 // Of course any other ancillary or support code may be provided.
+// 
+// Just remember to wrap code in the appropriate delimiters:
+// 'namespace {', '}'.
+//
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
+
+namespace {
 
 static object
 _GetExtentsHint(
@@ -92,7 +112,7 @@ _GetExtentsHint(
         const UsdTimeCode &time)
 {
     VtVec3fArray extents;
-    if (not self.GetExtentsHint(&extents, time)) {
+    if (!self.GetExtentsHint(&extents, time)) {
         return object();
     }
 
@@ -106,7 +126,7 @@ _SetExtentsHint(
         const UsdTimeCode &timeVal)
 {
     VtValue value = UsdPythonToSdfType(pyVal, SdfValueTypeNames->Float3Array);
-    if (not value.IsHolding<VtVec3fArray>()) {
+    if (!value.IsHolding<VtVec3fArray>()) {
         TF_CODING_ERROR("Improper value for 'extentsHint' on %s",
                         UsdDescribe(self.GetPrim()).c_str());
         return false;
@@ -133,3 +153,5 @@ WRAP_CUSTOM {
             return_value_policy<TfPySequenceToList>())
     ;
 }
+
+} // anonymous namespace 

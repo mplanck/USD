@@ -36,7 +36,7 @@ import os, sys, itertools
 from argparse import ArgumentParser
 
 from jinja2 import Environment, FileSystemLoader
-from jinja2.exceptions import TemplateError
+from jinja2.exceptions import TemplateError, TemplateSyntaxError
 
 # Write filePath if its content differs from \p content.  If unchanged, print a
 # message indicating that.  If filePath is not writable, print a diff.
@@ -65,13 +65,13 @@ def _WriteFile(filePath, content, verbose=True):
                                              content.split('\n')))
 
 def IsFloatingPoint(t):
-    return t in ['double', 'float', 'half']
+    return t in ['double', 'float', 'GfHalf']
 
 def RankScalar(s):
     # Return a numeric rank for a scalar type.  We allow implicit conversions to
     # scalars of greater rank.
     return dict([(t, n) for n, t in
-                 enumerate(['int', 'half', 'float', 'double'])])[s]
+                 enumerate(['int', 'GfHalf', 'float', 'double'])])[s]
 
 def AllowImplicitConversion(src, dst):
     # Somewhat questionably, we always allow ints to implicitly convert to
@@ -101,34 +101,45 @@ def MakeMatrixFn(defaultN):
     return Matrix
 
 def GenerateFromTemplates(env, templates, suffix, outputPath, verbose=True):
-    try:
-        for tmpl in templates:
-            template = env.get_template(tmpl % '.template')
+    for tmpl in templates:
+        tmplName = tmpl % '.template'
+
+        try:
             _WriteFile(os.path.join(outputPath, tmpl % suffix),
-                       template.render(), verbose=verbose)
-    except TemplateError as err:
-        print '\t', err,
-        print 'Aborting ...'
+                env.get_template(tmplName).render(), verbose)
+        except TemplateSyntaxError as err:
+            print >>sys.stderr, \
+                'Syntax Error: {0.name}:{0.lineno}: {0.message}'.format(err)
+        except TemplateError as err:
+            print >>sys.stderr, \
+                'Template Error: {}: {}'.format(err, tmplName)
+
+def ScalarSuffix(scl):
+    if scl == 'GfHalf':
+        return 'h'
+    else:
+        return scl[0]
 
 def VecName(dim, scl):
-    return 'GfVec%s%s' % (dim, scl[0])
+    return 'GfVec%s%s' % (dim, ScalarSuffix(scl))
 
 def Eps(scl):
-    return '0.001' if scl == 'half' else 'GF_MIN_VECTOR_LENGTH'
+    return '0.001' if scl == 'GfHalf' else 'GF_MIN_VECTOR_LENGTH'
 
 ########################################################################
 # GfVec
 def GetVecSpecs():
-    scalarTypes = ['double', 'float', 'half', 'int']
+    scalarTypes = ['double', 'float', 'GfHalf', 'int']
     dimensions = [2, 3, 4]
     vecSpecs = sorted(
         [dict(SCL=scl,
               DIM=dim,
-              SUFFIX=str(dim) + scl[0],
+              SUFFIX=str(dim) + ScalarSuffix(scl),
               VEC=VecName(dim, scl),
               EPS=Eps(scl),
               LIST=MakeListFn(dim),
               VECNAME=VecName,
+              SCALAR_SUFFIX=ScalarSuffix,
               SCALARS=scalarTypes)
          for scl, dim in itertools.product(scalarTypes, dimensions)],
         key=lambda d: RankScalar(d['SCL']))
@@ -140,7 +151,7 @@ def GetVecSpecs():
 # GfRange
 def GetRangeSpecs():
     def RngName(dim, scl):
-        return 'GfRange%s%s' % (dim, scl[0])
+        return 'GfRange%s%s' % (dim, ScalarSuffix(scl))
 
     def MinMaxType(dim, scl):
         return scl if dim == 1 else VecName(dim, scl)
@@ -156,7 +167,7 @@ def GetRangeSpecs():
               MINMAX=MinMaxType(dim, scl),
               MINMAXPARM=MinMaxParm(dim, scl),
               DIM=dim,
-              SUFFIX=str(dim) + scl[0],
+              SUFFIX=str(dim) + ScalarSuffix(scl),
               RNG=RngName(dim, scl),
               RNGNAME=RngName,
               SCALARS=scalarTypes,
@@ -171,14 +182,15 @@ def GetRangeSpecs():
 # GfQuat
 def GetQuatSpecs():
     def QuatName(scl):
-        return 'GfQuat%s' % scl[0]
+        return 'GfQuat%s' % ScalarSuffix(scl)
 
-    scalarTypes = ['double', 'float', 'half']
+    scalarTypes = ['double', 'float', 'GfHalf']
     quatSpecs = sorted(
         [dict(SCL=scl,
-              SUFFIX=scl[0],
+              SUFFIX=ScalarSuffix(scl),
               QUAT=QuatName(scl),
               QUATNAME=QuatName,
+              SCALAR_SUFFIX=ScalarSuffix,
               SCALARS=scalarTypes,
               LIST=MakeListFn(4))
          for scl in scalarTypes],
@@ -191,22 +203,22 @@ def GetQuatSpecs():
 # GfMatrix
 def GetMatrixSpecs(dim):
     def MatrixName(dim, scl):
-        return 'GfMatrix%s%s' % (dim, scl[0])
+        return 'GfMatrix%s%s' % (dim, ScalarSuffix(scl))
 
     scalarTypes = ['double', 'float']
     dimensions = [dim]
 
     matrixSpecs = sorted(
         [dict(SCL=scl,
-              DIM=dim,
-              FILESUFFIX=scl[0],
-              SUFFIX=str(dim) + scl[0],
-              MAT=MatrixName(dim, scl),
-              LIST=MakeListFn(dim),
-              MATRIX=MakeMatrixFn(dim),
+              DIM=i,
+              FILESUFFIX=ScalarSuffix(scl),
+              SUFFIX=str(i) + ScalarSuffix(scl),
+              MAT=MatrixName(i, scl),
+              LIST=MakeListFn(i),
+              MATRIX=MakeMatrixFn(i),
               MATNAME=MatrixName,
               SCALARS=scalarTypes)
-         for scl, dim in itertools.product(scalarTypes, dimensions)],
+         for scl, i in itertools.product(scalarTypes, dimensions)],
         key=lambda d: RankScalar(d['SCL']))
 
     return dict(templates=['matrix%s%%s.h' % dim,
@@ -289,3 +301,4 @@ if __name__ == '__main__':
         if args.validate:
             import shutil
             shutil.rmtree(args.dstDir)
+

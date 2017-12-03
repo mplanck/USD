@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usdUtils/pipeline.h"
 
 #include "pxr/usd/sdf/layer.h"
@@ -40,10 +41,12 @@
 
 #include <string>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
-    (zUp)
 
     (UsdUtilsPipeline)
         (RegisteredVariantSets)
@@ -54,42 +57,6 @@ TF_DEFINE_PRIVATE_TOKENS(
                 (always)
 );
 
-
-bool UsdUtilsGetCamerasAreZup(UsdStageWeakPtr const &stage)
-{
-    if (not stage){
-        return false;
-    }
-    
-    SdfLayerHandle const &rootLayer = stage->GetRootLayer();
-    
-    bool hasZupCamera = false;
-
-    TF_FOR_ALL(prim, stage->GetPseudoRoot().
-                            GetFilteredChildren(UsdPrimIsDefined and
-                                                not UsdPrimIsAbstract)){
-        VtValue isZup = prim->GetCustomDataByKey(_tokens->zUp);
-        if (isZup.IsEmpty()){
-            continue;
-        }
-        else if (isZup.IsHolding<bool>()){
-            if (isZup.Get<bool>()) {
-                hasZupCamera = true;
-            } else {
-                // If any prim is y-Up, that trumps everything.
-                return false;
-            }
-        }
-        else {
-            TF_WARN("Found non-boolean 'zUp' customData in UsdStage "
-                    "root at layer '%s'."
-                    "for isZup.", rootLayer->GetIdentifier().c_str());
-        }
-    }
-
-    // If there's no customData, it will be Y-up.
-    return hasZupCamera;
-}
 
 TfToken UsdUtilsGetAlphaAttributeNameForColor(TfToken const &colorAttrName)
 {
@@ -102,7 +69,7 @@ UsdUtilsGetModelNameFromRootLayer(
 {
     // First check if if we have the metadata.
     TfToken modelName = rootLayer->GetDefaultPrim();
-    if (not modelName.IsEmpty()) {
+    if (!modelName.IsEmpty()) {
         return modelName;
     }
 
@@ -112,7 +79,7 @@ UsdUtilsGetModelNameFromRootLayer(
     std::string baseName = TfGetBaseName(filePath);
     modelName = TfToken(baseName.substr(0, baseName.find('.')));
 
-    if (not modelName.IsEmpty() and rootLayer->GetPrimAtPath(
+    if (!modelName.IsEmpty() && rootLayer->GetPrimAtPath(
             SdfPath::AbsoluteRootPath().AppendChild(modelName))) {
         return modelName;
     }
@@ -136,7 +103,7 @@ TF_MAKE_STATIC_DATA(std::set<UsdUtilsRegisteredVariantSet>, _regVarSets)
         JsObject metadata = plug->GetMetadata();
         JsValue pipelineUtilsDictValue;
         if (TfMapLookup(metadata, _tokens->UsdUtilsPipeline, &pipelineUtilsDictValue)) {
-            if (not pipelineUtilsDictValue.Is<JsObject>()) {
+            if (!pipelineUtilsDictValue.Is<JsObject>()) {
                 TF_CODING_ERROR(
                         "%s[UsdUtilsPipeline] was not a dictionary.",
                         plug->GetName().c_str());
@@ -150,18 +117,19 @@ TF_MAKE_STATIC_DATA(std::set<UsdUtilsRegisteredVariantSet>, _regVarSets)
             if (TfMapLookup(pipelineUtilsDict,
                         _tokens->RegisteredVariantSets,
                         &registeredVariantSetsValue)) {
-                if (not registeredVariantSetsValue.IsObject()) {
+                if (!registeredVariantSetsValue.IsObject()) {
                     TF_CODING_ERROR(
                             "%s[UsdUtilsPipeline][RegisteredVariantSets] was not a dictionary.",
                             plug->GetName().c_str());
                     continue;
                 }
 
-                JsObject registeredVariantSets = registeredVariantSetsValue.GetObject();
+                const JsObject& registeredVariantSets =
+                    registeredVariantSetsValue.GetJsObject();
                 for (const auto& i: registeredVariantSets) {
                     const std::string& variantSetName = i.first;
                     const JsValue& v = i.second;
-                    if (not v.IsObject()) {
+                    if (!v.IsObject()) {
                         TF_CODING_ERROR(
                                 "%s[UsdUtilsPipeline][RegisteredVariantSets][%s] was not a dictionary.",
                                 plug->GetName().c_str(),
@@ -169,7 +137,7 @@ TF_MAKE_STATIC_DATA(std::set<UsdUtilsRegisteredVariantSet>, _regVarSets)
                         continue;
                     }
 
-                    JsObject info = v.GetObject();
+                    JsObject info = v.GetJsObject();
                     std::string variantSetType = info[_tokens->selectionExportPolicy].GetString();
 
 
@@ -211,36 +179,12 @@ UsdPrim
 UsdUtilsGetPrimAtPathWithForwarding(const UsdStagePtr &stage, 
                                     const SdfPath &path)
 {
-   if (UsdPrim p = stage->GetPrimAtPath(path))
-        return p;
-
-    SdfPath validAncestorPath = path;
-    UsdPrim validAncestor;
-    while (not validAncestor) {
-        if (validAncestorPath == SdfPath::AbsoluteRootPath() or 
-            validAncestorPath == SdfPath::EmptyPath()) {
-            break;
-        }
-
-        validAncestorPath = validAncestorPath.GetParentPath();
-        validAncestor = stage->GetPrimAtPath(validAncestorPath);
-    }
-
-    if (validAncestorPath.IsPrimPath()) {
-        if (not validAncestor.IsInstance())
-            return UsdPrim();
-
-        SdfPath instanceRelPath = path.ReplacePrefix(validAncestorPath, 
-            SdfPath::ReflexiveRelativePath());
-        UsdPrim master = validAncestor.GetMaster();
-        if (TF_VERIFY(master)) {
-            SdfPath masterPath = master.GetPath().AppendPath(instanceRelPath);
-
-            return UsdUtilsGetPrimAtPathWithForwarding(stage, masterPath);
-        }
-    }
-
-    return UsdPrim();
+    // If the given path refers to a prim beneath an instance,
+    // UsdStage::GetPrimAtPath will return an instance proxy
+    // from which we can retrieve the corresponding prim in
+    // the master.
+    UsdPrim p = stage->GetPrimAtPath(path);
+    return (p && p.IsInstanceProxy()) ? p.GetPrimInMaster() : p;
 }
 
 UsdPrim 
@@ -248,37 +192,43 @@ UsdUtilsUninstancePrimAtPath(const UsdStagePtr &stage,
                              const SdfPath &path)
 {
     // If a valid prim exists at the requested path, simply return it.
-    if (UsdPrim p = stage->GetPrimAtPath(path))
+    // If the prim is an instance proxy, it means this path indicates
+    // a prim beneath an instance. In order to uninstance it, we need
+    // to uninstance all ancestral instances.
+    UsdPrim p = stage->GetPrimAtPath(path);
+    if (!p || !p.IsInstanceProxy()) {
         return p;
+    }
 
-    // Check if the path can be forwarded to a valid prim in a master.
-    if (not UsdUtilsGetPrimAtPathWithForwarding(stage, path))
-        return UsdPrim();
+    // Skip the last element in prefixes, since that's our own
+    // path and we only want to uninstance ancestors.
+    SdfPathVector prefixes = path.GetPrefixes();
+    if (!prefixes.empty()) {
+        prefixes.pop_back();
+    }
 
-    SdfPath validAncestorPath = path;
-    UsdPrim validAncestor;
-    while (not validAncestor) {
-        if (validAncestorPath == SdfPath::AbsoluteRootPath() or 
-            validAncestorPath == SdfPath::EmptyPath()) {
+    for (const SdfPath& prefixPath : prefixes) {
+        UsdPrim prim = stage->GetPrimAtPath(prefixPath);
+        if (!prim) {
             break;
         }
 
-        validAncestorPath = validAncestorPath.GetParentPath();
-        validAncestor = stage->GetPrimAtPath(validAncestorPath);
+        if (prim.IsInstance()) {
+            prim.SetInstanceable(false);
+        }
     }
 
-    if (validAncestorPath.IsPrimPath()) {
-        if (not TF_VERIFY(validAncestor.IsInstance()))
-            return UsdPrim();
-
-        validAncestor.SetInstanceable(false);
-        return UsdUtilsUninstancePrimAtPath(stage, path);
-    }
-
-    return UsdPrim(); 
+    // Uninstancing should ensure that the prim at the given
+    // path, if it exists, is no longer inside an instance.
+    p = stage->GetPrimAtPath(path);
+    TF_VERIFY(!p || !p.IsInstanceProxy());
+    return p;
 }
 
 TfToken UsdUtilsGetPrimaryUVSetName()
 {
     return TfToken("st");
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -28,7 +28,12 @@
 #ifndef GF_VEC2F_H
 #define GF_VEC2F_H
 
+/// \file gf/vec2f.h
+/// \ingroup group_gf_LinearAlgebra
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/diagnostic.h"
+#include "pxr/base/gf/api.h"
 #include "pxr/base/gf/limits.h"
 #include "pxr/base/gf/traits.h"
 #include "pxr/base/gf/math.h"
@@ -40,24 +45,21 @@
 
 #include <iosfwd>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+class GfVec2f;
+
 template <>
 struct GfIsGfVec<class GfVec2f> { static const bool value = true; };
 
-/*!
- * \file vec2f.h
- * \ingroup group_gf_LinearAlgebra
- */
-
-/*!
- * \class GfVec2f vec2f.h "pxr/base/gf/vec2f.h"
- * \ingroup group_gf_LinearAlgebra
- * \brief Basic type for a vector of 2 float components.
- *
- * Represents a vector of 2 components of type \c float.
- * It is intended to be fast and simple.
- *
- */
-
+/// \class GfVec2f
+/// \ingroup group_gf_LinearAlgebra
+///
+/// Basic type for a vector of 2 float components.
+///
+/// Represents a vector of 2 components of type \c float.
+/// It is intended to be fast and simple.
+///
 class GfVec2f
 {
 public:
@@ -68,8 +70,8 @@ public:
     /// Default constructor does no initialization.
     GfVec2f() {}
 
-
-    // Copy constructor.  XXX: Remove this, use compiler-generated.
+    // Copy constructor.
+    // TODO Remove this, use compiler-generated.
     GfVec2f(const GfVec2f &other) {
         *this = other;
     }
@@ -84,7 +86,7 @@ public:
     GfVec2f(float s0, float s1) {
         Set(s0, s1);
     }
-    
+
     /// Construct with pointer to values.
     template <class Scl>
     explicit GfVec2f(Scl const *p) { Set(p); }
@@ -110,7 +112,7 @@ public:
         result[1] = 1;
         return result;
     }
-    
+
     /// Create a unit vector along the i-th axis, zero-based.  Return the zero
     /// vector if \p i is greater than or equal to 2.
     static GfVec2f Axis(size_t i) {
@@ -119,7 +121,7 @@ public:
             result[i] = 1;
         return result;
     }
-    
+
     /// Set all elements with passed arguments.
     GfVec2f &Set(float s0, float s1) {
         _data[0] = s0;
@@ -151,19 +153,22 @@ public:
 
     /// Equality comparison.
     bool operator==(GfVec2f const &other) const {
-        return _data[0] == other[0] and
+        return _data[0] == other[0] &&
                _data[1] == other[1];
     }
     bool operator!=(GfVec2f const &other) const {
         return !(*this == other);
     }
 
-    // XXX: Add inequality for other vec types...
+    // TODO Add inequality for other vec types...
     /// Equality comparison.
+    GF_API
     bool operator==(class GfVec2d const &other) const;
     /// Equality comparison.
+    GF_API
     bool operator==(class GfVec2h const &other) const;
     /// Equality comparison.
+    GF_API
     bool operator==(class GfVec2i const &other) const;
     
     /// Create a vec with negated elements.
@@ -195,25 +200,25 @@ public:
     GfVec2f &operator*=(double s) {
         _data[0] *= s;
         _data[1] *= s;
-	return *this;
+        return *this;
     }
     GfVec2f operator*(double s) const {
-	return GfVec2f(*this) *= s;
+        return GfVec2f(*this) *= s;
     }
     friend GfVec2f operator*(double s, GfVec2f const &v) {
         return v * s;
     }
 
         /// Division by scalar.
-    // XXX: should divide by the scalar type.
+    // TODO should divide by the scalar type.
     GfVec2f &operator/=(double s) {
-        // XXX: This should not multiply by 1/s, it should do the division.
+        // TODO This should not multiply by 1/s, it should do the division.
         // Doing the division is more numerically stable when s is close to
         // zero.
         return *this *= (1.0 / s);
     }
     GfVec2f operator/(double s) const {
-	return *this * (1.0 / s);
+        return *this * (1.0 / s);
     }
     
     /// See GfDot().
@@ -221,7 +226,7 @@ public:
         return _data[0] * v[0] + _data[1] * v[1];
     }
 
-    /// Returns the projection of \p this onto \p v. That is: 
+    /// Returns the projection of \p this onto \p v. That is:
     /// \code
     /// v * (*this * v)
     /// \endcode
@@ -229,12 +234,13 @@ public:
         return v * (*this * v);
     }
 
-    /// Returns the orthogonal complement of \p this->GetProjection(b). That is:
+    /// Returns the orthogonal complement of \p this->GetProjection(b).
+    /// That is:
     /// \code
     ///  *this - this->GetProjection(b)
     /// \endcode
     GfVec2f GetComplement(GfVec2f const &b) const {
-	return *this - this->GetProjection(b);
+        return *this - this->GetProjection(b);
     }
 
     /// Squared length.
@@ -244,7 +250,7 @@ public:
 
     /// Length
     float GetLength() const {
-        // XXX: should use GfSqrt.
+        // TODO should use GfSqrt.
         return sqrt(GetLengthSq());
     }
 
@@ -257,7 +263,7 @@ public:
     /// By tickling the code, it no longer tries to write into
     /// an illegal memory address (in the code section of memory).
     float Normalize(float eps = GF_MIN_VECTOR_LENGTH) {
-        // XXX: this seems suspect...  suggest dividing by length so long as
+        // TODO this seems suspect...  suggest dividing by length so long as
         // length is not zero.
         float length = GetLength();
         *this /= (length > eps) ? length : eps;
@@ -275,13 +281,37 @@ private:
     float _data[2];
 };
 
-/// Output a GfVec2f
+/// Output a GfVec2f.
 /// \ingroup group_gf_DebuggingOutput
-std::ostream& operator<<(std::ostream &, GfVec2f const &);
+GF_API std::ostream& operator<<(std::ostream &, GfVec2f const &);
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #include "pxr/base/gf/vec2d.h"
 #include "pxr/base/gf/vec2h.h"
 #include "pxr/base/gf/vec2i.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+inline
+GfVec2f::GfVec2f(class GfVec2d const &other)
+{
+    _data[0] = other[0];
+    _data[1] = other[1];
+}
+inline
+GfVec2f::GfVec2f(class GfVec2h const &other)
+{
+    _data[0] = other[0];
+    _data[1] = other[1];
+}
+inline
+GfVec2f::GfVec2f(class GfVec2i const &other)
+{
+    _data[0] = other[0];
+    _data[1] = other[1];
+}
 
 /// Returns component-wise multiplication of vectors \p v1 and \p v2.
 inline GfVec2f
@@ -308,7 +338,6 @@ GfDot(GfVec2f const &v1, GfVec2f const &v2) {
 }
 
 
-
 /// Returns the geometric length of \c v.
 inline float
 GfGetLength(GfVec2f const &v)
@@ -326,8 +355,8 @@ GfNormalize(GfVec2f *v, float eps = GF_MIN_VECTOR_LENGTH)
 }
 
 /// Returns a normalized (unit-length) vector with the same direction as \p v.
-/// If the length of this vector is smaller than \p eps, the vector divided
-/// by \p eps is returned.
+/// If the length of this vector is smaller than \p eps, the vector divided by
+/// \p eps is returned.
 inline GfVec2f
 GfGetNormalized(GfVec2f const &v, float eps = GF_MIN_VECTOR_LENGTH)
 {
@@ -365,4 +394,6 @@ GfIsClose(GfVec2f const &v1, GfVec2f const &v2, double tolerance)
 
  
  
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // GF_VEC2F_H

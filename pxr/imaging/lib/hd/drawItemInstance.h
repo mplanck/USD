@@ -24,18 +24,23 @@
 #ifndef _HD_DRAW_ITEM_INSTANCE_H_
 #define _HD_DRAW_ITEM_INSTANCE_H_
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
+#include "boost/shared_ptr.hpp"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 class Hd_DrawBatch;
 class HdDrawItem;
 class HdDrawItemInstance;
 
-#include "boost/shared_ptr.hpp"
-
 typedef boost::shared_ptr<Hd_DrawBatch> HdDrawBatchSharedPtr;
 typedef boost::shared_ptr<HdDrawItem> HdDrawItemSharedPtr;
 
-/// A container to store instance state for a drawitem
+/// \class HdDrawItemInstance
+///
+/// A container to store instance state for a drawitem.
 ///
 /// During culling, the visiblity state will be set. If the instance
 /// has a batch, the batch will get a DrawItemInstanceChanged
@@ -44,13 +49,17 @@ typedef boost::shared_ptr<HdDrawItem> HdDrawItemSharedPtr;
 /// The Batch is responsible for calling SetBatch and SetBatchIndex
 /// when adding / appending the instance. If the batch does not require
 /// the DrawItemInstanceChanged callback, then this step can be skipped
+///
 class HdDrawItemInstance
 {
 public:
+    HD_API
     HdDrawItemInstance(HdDrawItem const *drawItem);
+    HD_API
     ~HdDrawItemInstance();
 
     /// Set visibility state
+    HD_API
     void SetVisible(bool visible);
 
     /// Query visibility state
@@ -58,6 +67,7 @@ public:
 
     /// Set index into batch list. Can be used by
     /// batch during DrawItemInstanceChanged callback
+    HD_API
     void SetBatchIndex(size_t batchIndex);
 
     /// Query batch index
@@ -66,6 +76,7 @@ public:
     /// Set the batch that will receive the DrawItemInstanceChanged
     /// callback when visibility is updated. Setting batch to NULL
     /// will disable this callback.
+    // HD_API
     void SetBatch(Hd_DrawBatch *batch);
 
     /// Return a const pointer to draw item
@@ -79,6 +90,9 @@ private:
     size_t _batchIndex;
     bool _visible;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // _HD_DRAW_ITEM_INSTANCE_H_
 

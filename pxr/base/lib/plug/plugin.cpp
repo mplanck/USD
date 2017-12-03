@@ -21,13 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/debugCodes.h"
 
-#include "pxr/base/arch/attributes.h"
-#include "pxr/base/arch/fileSystem.h"
-#include "pxr/base/arch/symbols.h"
 #include "pxr/base/arch/threads.h"
+#include "pxr/base/arch/library.h"
 #include "pxr/base/js/value.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/dl.h"
@@ -36,30 +36,28 @@
 #include "pxr/base/tf/hashmap.h"
 #include "pxr/base/tf/hashset.h"
 #include "pxr/base/tf/pathUtils.h"
-#include "pxr/base/tf/pyInterpreter.h"
 #include "pxr/base/tf/pyLock.h"
 #include "pxr/base/tf/scopeDescription.h"
-#include "pxr/base/tf/scriptModuleLoader.h"
 #include "pxr/base/tf/staticData.h"
 #include "pxr/base/tf/stl.h"
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/type.h"
 #include "pxr/base/tracelite/trace.h"
 
-#include <boost/bind.hpp>
-#include <boost/foreach.hpp>
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
+#include "pxr/base/tf/pyInterpreter.h"
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 #include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
 using std::pair;
 using std::string;
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 typedef TfHashMap< std::string, PlugPluginRefPtr, TfHash > _PluginMap;
 typedef TfHashMap< std::string, PlugPluginPtr, TfHash > _WeakPluginMap;
@@ -83,12 +81,10 @@ PlugPlugin::_NewDynamicLibraryPlugin(const std::string & path,
                                      const std::string & resourcePath,
                                      const JsObject & plugInfo)
 {
-    const string realPath    = TfRealPath(path);
-    const string pluginPath  = TfRealPath(dsoPath);
     {
         // Already registered?
         std::lock_guard<std::mutex> lock(_allPluginsMutex);
-        _PluginMap::const_iterator it = _allPlugins->find(realPath);
+        _PluginMap::const_iterator it = _allPlugins->find(path);
         if (it != _allPlugins->end())
             return std::make_pair(it->second, false);
 
@@ -101,41 +97,41 @@ PlugPlugin::_NewDynamicLibraryPlugin(const std::string & path,
 
     // Go ahead and create a plugin. 
     TF_DEBUG(PLUG_REGISTRATION).Msg("Registering dso plugin '%s' at '%s'.\n",
-                                    name.c_str(), pluginPath.c_str());
+                                    name.c_str(), dsoPath.c_str());
     PlugPluginRefPtr plugin =
-        TfCreateRefPtr(new PlugPlugin(pluginPath, name, resourcePath,
+        TfCreateRefPtr(new PlugPlugin(dsoPath, name, resourcePath,
                                       plugInfo, LibraryType));
 
     pair<PlugPluginPtr, bool> result;
     {
         std::lock_guard<std::mutex> lock(_allPluginsMutex);
         pair<_PluginMap::iterator, bool> iresult =
-            _allPlugins->insert(make_pair(realPath, plugin));
+            _allPlugins->insert(make_pair(path, plugin));
         result.first = iresult.first->second;
         result.second = iresult.second;
 
         // If successfully inserted, add to _allPluginsByDynamicLibraryName too.
         if (iresult.second) {
             (*_allPluginsByDynamicLibraryName)[name]   = plugin;
-            (*_libraryPluginsByDsoPath)[pluginPath] = plugin;
+            (*_libraryPluginsByDsoPath)[dsoPath] = plugin;
         }
     }
 
     return result;
 }
 
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
 pair<PlugPluginPtr, bool>
 PlugPlugin::_NewPythonModulePlugin(const std::string & modulePath,
                                    const std::string & moduleName,
                                    const std::string & resourcePath,
                                    const JsObject & plugInfo)
 {
-    const string realPath = TfRealPath(modulePath);
     {
         // Already registered?
         std::lock_guard<std::mutex> lock(_allPluginsMutex);
 
-        _PluginMap::const_iterator it = _allPlugins->find(realPath);
+        _PluginMap::const_iterator it = _allPlugins->find(modulePath);
         if (it != _allPlugins->end())
             return std::make_pair(it->second, false);
 
@@ -157,7 +153,7 @@ PlugPlugin::_NewPythonModulePlugin(const std::string & modulePath,
     {
         std::lock_guard<std::mutex> lock(_allPluginsMutex);
         pair<_PluginMap::iterator, bool> iresult =
-            _allPlugins->insert(make_pair(realPath, plugin));
+            _allPlugins->insert(make_pair(modulePath, plugin));
         result.first = iresult.first->second;
         result.second = iresult.second;
 
@@ -168,6 +164,7 @@ PlugPlugin::_NewPythonModulePlugin(const std::string & modulePath,
 
     return result;
 }
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 std::pair<PlugPluginPtr, bool> 
 PlugPlugin::_NewResourcePlugin(const std::string & path,
@@ -175,12 +172,11 @@ PlugPlugin::_NewResourcePlugin(const std::string & path,
                                const std::string & resourcePath,
                                const JsObject & plugInfo)
 {
-    const string realPath = TfRealPath(path);
     {
         // Already registered?
         std::lock_guard<std::mutex> lock(_allPluginsMutex);
 
-        _PluginMap::const_iterator it = _allPlugins->find(realPath);
+        _PluginMap::const_iterator it = _allPlugins->find(path);
         if (it != _allPlugins->end())
             return std::make_pair(it->second, false);
 
@@ -202,7 +198,7 @@ PlugPlugin::_NewResourcePlugin(const std::string & path,
     {
         std::lock_guard<std::mutex> lock(_allPluginsMutex);
         pair<_PluginMap::iterator, bool> iresult =
-            _allPlugins->insert(make_pair(realPath, plugin));
+            _allPlugins->insert(make_pair(path, plugin));
         result.first = iresult.first->second;
         result.second = iresult.second;
 
@@ -247,11 +243,11 @@ JsObject
 PlugPlugin::GetDependencies()
 {
     JsObject::iterator depend = _dict.find("PluginDependencies");
-    if (depend == _dict.end() or
-        not depend->second.IsObject())
+    if (depend == _dict.end() || 
+        !depend->second.IsObject())
         return JsObject();
 
-    return depend->second.GetObject();
+    return depend->second.GetJsObject();
 }
 
 bool
@@ -262,6 +258,8 @@ PlugPlugin::_Load()
     TF_DEBUG(PLUG_LOAD).Msg("Loading plugin '%s'.\n", _name.c_str());
 
     bool isLoaded = true;
+
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
     if (IsPythonModule()) {
         string cmd = TfStringPrintf("import %s\n", _name.c_str());
         if (TfPyRunSimpleString(cmd) != 0) {
@@ -269,13 +267,22 @@ PlugPlugin::_Load()
                             _name.c_str(), _name.c_str());
             isLoaded = false;
         }
-    } else {
-        string dsoError;
-        _handle = TfDlopen(_path.c_str(), RTLD_NOW, &dsoError);
-        if ( ! _handle ) {
-            TF_CODING_ERROR("Load of '%s' for '%s' failed: %s",
-                            _path.c_str(), _name.c_str(), dsoError.c_str());
-            isLoaded = false;
+#else
+    if (false) {
+#endif // PXR_PYTHON_SUPPORT_ENABLED
+    } else if (!IsResource()) {
+        // XXX -- This is a hack to handle a static/non-monolithic library
+        // build.  In this case some "plugins" will be static libraries
+        // directly linked into the executable and can't be dynamically
+        // loaded.  Just skip these since they're already loaded.
+        if (!TfStringEndsWith(_path, ARCH_STATIC_LIBRARY_SUFFIX)) {
+            string dsoError;
+            _handle = TfDlopen(_path.c_str(), ARCH_LIBRARY_NOW, &dsoError);
+            if (!_handle ) {
+                TF_CODING_ERROR("Load of '%s' for '%s' failed: %s",
+                                _path.c_str(), _name.c_str(), dsoError.c_str());
+                isLoaded = false;
+            }
         }
     }
     // Set _isLoaded at the end to make sure that we've fully loaded since
@@ -292,7 +299,7 @@ struct PlugPlugin::_SeenPlugins {
 bool
 PlugPlugin::_LoadWithDependents(_SeenPlugins *seenPlugins)
 {
-    if (not _isLoaded) {
+    if (!_isLoaded) {
         // Take note of each plugin we've visited and bail if there is a cycle.
         if (seenPlugins->plugins.count(_name)) {
             TF_CODING_ERROR("Load failed because of cyclic dependency for '%s'",
@@ -316,7 +323,7 @@ PlugPlugin::_LoadWithDependents(_SeenPlugins *seenPlugins)
 
             // Get dependencies, as typenames
             typedef vector<string> TypeNames;
-            if (not i->second.IsArrayOf<string>()) {
+            if (!i->second.IsArrayOf<string>()) {
                 TF_CODING_ERROR("Load failed: dependency list has wrong type");
                 return false;
             }
@@ -334,12 +341,12 @@ PlugPlugin::_LoadWithDependents(_SeenPlugins *seenPlugins)
                 }
 
                 PlugPluginPtr dependPlugin = _GetPluginForType(dependType);
-                if (not dependPlugin) {
+                if (!dependPlugin) {
                     TF_CODING_ERROR("Load failed: unknown dependent "
                                     "plugin '%s'", dependName.c_str());
                     return false;
                 }
-                if (not dependPlugin->_LoadWithDependents(seenPlugins)) {
+                if (!dependPlugin->_LoadWithDependents(seenPlugins)) {
                     TF_CODING_ERROR("Load failed: unable to load dependent "
                                     "plugin '%s'", dependName.c_str());
                     return false;
@@ -367,7 +374,7 @@ PlugPlugin::Load()
         TF_PY_ALLOW_THREADS_IN_SCOPE();
 
         std::lock_guard<std::recursive_mutex> lock(loadMutex);
-        loadedInSecondaryThread = not _isLoaded and not ArchIsMainThread();
+        loadedInSecondaryThread = !_isLoaded && !ArchIsMainThread();
         _SeenPlugins seenPlugins;
         result = _LoadWithDependents(&seenPlugins);
     }
@@ -386,11 +393,13 @@ PlugPlugin::IsLoaded() const
     return _isLoaded;
 }
 
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
 bool
 PlugPlugin::IsPythonModule() const
 {
     return _type == PythonType;
 }
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 bool
 PlugPlugin::IsResource() const
@@ -412,10 +421,10 @@ PlugPlugin::MakeResourcePath(const std::string& path) const
 }
 
 std::string
-PlugPlugin::FindResource(const std::string& path, bool verify) const
+PlugPlugin::FindPluginResource(const std::string& path, bool verify) const
 {
     std::string result = MakeResourcePath(path);
-    if (verify and not TfPathExists(result)) {
+    if (verify && !TfPathExists(result)) {
         result.clear();
     }
     return result;
@@ -425,39 +434,30 @@ PlugPlugin::FindResource(const std::string& path, bool verify) const
 //void PlugPlugin::_RegisterAllPlugins();
 
 PlugPluginPtr
-PlugPlugin::_GetPluginWithAddress(void* address)
+PlugPlugin::_GetPluginWithName(const std::string& name)
 {
-    std::string path;
-    return ArchGetAddressInfo(address, &path, NULL, NULL, NULL)
-           ? _GetPluginWithPath(path)
-           : TfNullPtr;
-}
-
-PlugPluginPtr
-PlugPlugin::_GetPluginWithPath(const std::string& path)
-{
-    // Plugins are registered under their real paths.
-    const std::string realPath = TfRealPath(path);
-
-    // Register all plugins first.  We can't associate a plugin with a path
+    // Register all plugins first. We can't associate a plugin with a name
     // until it's registered.
     _RegisterAllPlugins();
 
     std::lock_guard<std::mutex> lock(_allPluginsMutex);
 
-    // Try DSO paths first.
-    _WeakPluginMap::const_iterator i = _libraryPluginsByDsoPath->find(realPath);
-    if (i != _libraryPluginsByDsoPath->end()) {
-        return i->second;
+    auto idso = _allPluginsByDynamicLibraryName->find(name);
+    if (idso != _allPluginsByDynamicLibraryName->end()) {
+        return idso->second;
     }
 
-    // Try plugin paths.
-    _PluginMap::const_iterator j = _allPlugins->find(realPath);
-    if (j != _allPlugins->end()) {
-        return j->second;
+    auto imod = _allPluginsByModuleName->find(name);
+    if (imod != _allPluginsByModuleName->end()) {
+        return imod->second;
     }
 
-    return TfNullPtr;
+    auto ires = _allPluginsByResourceName->find(name);
+    if (ires != _allPluginsByResourceName->end()) {
+        return ires->second;
+    }
+
+    return nullptr;
 }
 
 PlugPluginPtrVector
@@ -494,15 +494,15 @@ PlugPlugin::GetMetadataForType(const TfType &type)
 {
     JsValue types;
     TfMapLookup(_dict,"Types",&types);
-    if (not types.IsObject()) {
+    if (!types.IsObject()) {
         return JsObject();
     }
 
-    const JsObject &typesDict = types.GetObject();
+    const JsObject &typesDict = types.GetJsObject();
     JsValue result;
     TfMapLookup(typesDict,type.GetTypeName(),&result);
     if (result.IsObject()) {
-        return result.GetObject();
+        return result.GetJsObject();
     }
     return JsObject();
 }
@@ -512,7 +512,7 @@ PlugPlugin::DeclaresType(const TfType& type, bool includeSubclasses) const
 {
     if (const JsValue* typesEntry = TfMapLookupPtr(_dict, "Types")) {
         if (typesEntry->IsObject()) {
-            const JsObject& typesDict = typesEntry->GetObject();
+            const JsObject& typesDict = typesEntry->GetJsObject();
             TF_FOR_ALL(it, typesDict) {
                 const TfType typeFromPlugin = TfType::FindByName(it->first);
                 const bool match = 
@@ -553,14 +553,14 @@ PlugPlugin::_DeclareAliases( TfType t, const JsObject & metadata )
 {
     JsObject::const_iterator i = metadata.find("alias");
 
-    if (i == metadata.end() or not i->second.IsObject())
+    if (i == metadata.end() || !i->second.IsObject())
         return;
 
-    const JsObject& aliasDict = i->second.GetObject();
+    const JsObject& aliasDict = i->second.GetJsObject();
 
     TF_FOR_ALL(aliasIt, aliasDict) {
 
-        if (not aliasIt->second.IsString()) {
+        if (!aliasIt->second.IsString()) {
             TF_WARN("Expected string for alias name, but found %s",
                     aliasIt->second.GetTypeName().c_str() );
             continue;
@@ -579,12 +579,12 @@ PlugPlugin::_DeclareTypes()
     JsValue typesValue;
     TfMapLookup(_dict,"Types",&typesValue);
     if (typesValue.IsObject()) {
-        const JsObject& types = typesValue.GetObject();
+        const JsObject& types = typesValue.GetJsObject();
 
         // Declare TfTypes for all the types found in the plugin.
         TF_FOR_ALL(i, types) {
             if (i->second.IsObject()) {
-                _DeclareType(i->first, i->second.GetObject());
+                _DeclareType(i->first, i->second.GetJsObject());
             }
         }
     }
@@ -605,7 +605,7 @@ PlugPlugin::_DeclareType(
         for (const auto& name : bases.GetArrayOf<string>()) {
             basesVec.push_back(TfType::Declare(name));
         }
-    } else if (not bases.IsNull()) {
+    } else if (!bases.IsNull()) {
         TF_CODING_ERROR("Invalid bases for type %s specified by plugin %s. "
             "Expected list of strings.", typeName.c_str(), _name.c_str());
     }
@@ -685,31 +685,13 @@ TF_REGISTRY_FUNCTION(TfType)
     TfType::Define<PlugPlugin>();
 }
 
-
-PlugThisPlugin::PlugThisPlugin()
-{
-    _plugin = PlugPlugin::_GetPluginWithAddress(this);
-}
-
-PlugThisPlugin::~PlugThisPlugin()
-{
-    // Do nothing
-}
-
 std::string
-PlugFindResource(
+PlugFindPluginResource(
     const PlugPluginPtr& plugin,
     const std::string& path,
     bool verify)
 {
-    return plugin ? plugin->FindResource(path, verify) : std::string();
+    return plugin ? plugin->FindPluginResource(path, verify) : std::string();
 }
 
-std::string
-PlugFindResource(
-    const PlugThisPlugin& plugin,
-    const std::string& path,
-    bool verify)
-{
-    return PlugFindResource(plugin.Get(), path, verify);
-}
+PXR_NAMESPACE_CLOSE_SCOPE

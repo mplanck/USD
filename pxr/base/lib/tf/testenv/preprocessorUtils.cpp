@@ -23,11 +23,13 @@
 //
 #define TF_MAX_ARITY 24
 
-#include <boost/preprocessor/stringize.hpp>
-#include <string.h>
+#include "pxr/pxr.h"
 #include "pxr/base/tf/regTest.h"
 #include "pxr/base/tf/preprocessorUtils.h"
+#include <boost/preprocessor/stringize.hpp>
+#include <string.h>
 
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static bool
 TestTF_NUM_ARGS()
@@ -42,10 +44,6 @@ TestTF_NUM_ARGS()
     TF_AXIOM(TF_NUM_ARGS((a)) == 1);
     TF_AXIOM(TF_NUM_ARGS(((a))) == 1);
     TF_AXIOM(TF_NUM_ARGS((()())) == 1);
-
-    //XXX: Figure out why these doesn't work.  See bug 8584.
-    //TF_AXIOM(TF_NUM_ARGS(()f) == 1);
-    //TF_AXIOM(TF_NUM_ARGS(()()) == 1);
 
     TF_AXIOM(TF_NUM_ARGS(a) == 1);
     TF_AXIOM(TF_NUM_ARGS(a, b) == 2);
@@ -72,46 +70,40 @@ TestTF_NUM_ARGS()
     TF_AXIOM(TF_NUM_ARGS(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w) == 23);
     TF_AXIOM(TF_NUM_ARGS(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x) == 24);
 
-    //XXX: TF_MAX_ARITY of 25 should work... See bug 8584.
-    //TF_AXIOM(TF_NUM_ARGS(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y) == 25);
-
     return true;
 }
 
 
-#include <iostream>
 static bool
 TestTF_PP_EAT_PARENS()
 {
-    #define _STR BOOST_PP_STRINGIZE
+    #define _STR TF_PP_EAT_PARENS_STR
     #define _EAT TF_PP_EAT_PARENS
 
-    TF_AXIOM(not strcmp(_STR(), ""));
-    TF_AXIOM(not strcmp(_STR(_EAT()), ""));
-    TF_AXIOM(not strcmp(_STR(_EAT(())), ""));
-    TF_AXIOM(not strcmp(_STR(_EAT(a)), "a"));
-    TF_AXIOM(not strcmp(_STR(_EAT(a)), "a"));
-    TF_AXIOM(not strcmp(_STR(_EAT((a))), "a"));
-    TF_AXIOM(not strcmp(_STR(_EAT(((a)))), "(a)"));
-    TF_AXIOM(not strcmp(_STR(_EAT(_EAT(((a))))), "a"));
-    TF_AXIOM(not strcmp(_STR(_EAT(_EAT((((a)))))), "(a)"));
-    TF_AXIOM(not strcmp(_STR(_EAT(_EAT(_EAT((((a))))))), "a"));
+    TF_AXIOM(!strcmp(_STR(), ""));
+    TF_AXIOM(!strcmp(_STR(_EAT()), ""));
+    TF_AXIOM(!strcmp(_STR(_EAT(())), ""));
+    TF_AXIOM(!strcmp(_STR(_EAT(a)), "a"));
+    TF_AXIOM(!strcmp(_STR(_EAT(a)), "a"));
+    TF_AXIOM(!strcmp(_STR(_EAT((a))), "a"));
+    TF_AXIOM(!strcmp(_STR(_EAT(((a)))), "(a)"));
+    TF_AXIOM(!strcmp(_STR(_EAT(_EAT(((a))))), "a"));
+    TF_AXIOM(!strcmp(_STR(_EAT(_EAT((((a)))))), "(a)"));
+    TF_AXIOM(!strcmp(_STR(_EAT(_EAT(_EAT((((a))))))), "a"));
 
-    TF_AXIOM(not strcmp(_STR((_EAT((<a, b>)))), "(<a, b>)"));
-    TF_AXIOM(not strcmp(_STR((_EAT(_EAT(((<a, b>)))))), "(<a, b>)"));
-    TF_AXIOM(not strcmp(_STR((_EAT(_EAT(_EAT((((<a, b>)))))))), "(<a, b>)"));
+    TF_AXIOM(!strcmp(_STR((_EAT((<a, b>)))), "(<a, b>)"));
+    TF_AXIOM(!strcmp(_STR((_EAT(_EAT(((<a, b>)))))), "(<a, b>)"));
+    TF_AXIOM(!strcmp(_STR((_EAT(_EAT(_EAT((((<a, b>)))))))), "(<a, b>)"));
 
-    TF_AXIOM(not strcmp(_STR(_EAT(f(a))), "f(a)"));
+    TF_AXIOM(!strcmp(_STR(_EAT(f(a))), "f(a)"));
 
-    //XXX: This isn't quite what we want; we would only expect _EAT()
-    //     to remove the outermost _matching_ parentheses.
-    //     See bug 8584.
-    TF_AXIOM(not strcmp(_STR(_EAT((x)(x))), "x(x)"));
-    TF_AXIOM(not strcmp(_STR(_EAT((x)f(x))), "xf(x)"));
-    TF_AXIOM(not strcmp(_STR(_EAT((x)(x)(x))), "x(x)(x)"));
-    //TF_AXIOM(not strcmp(_STR(_EAT((x)(x))), "(x)(x)"));
-    //TF_AXIOM(not strcmp(_STR(_EAT((x)f(x))), "(x)f(x)"));
-    //TF_AXIOM(not strcmp(_STR(_EAT((x)(x)(x))), "(x)(x)(x)"));
+    TF_AXIOM(!strcmp(_STR(_EAT((x)(x))), "x(x)"));
+    TF_AXIOM(!strcmp(_STR(_EAT((x)f(x))), "xf(x)"));
+    TF_AXIOM(!strcmp(_STR(_EAT((x)(x)(x))), "x(x)(x)"));
+
+    TF_AXIOM(!strcmp(_STR(_EAT(((x)(x)))), "(x)(x)"));
+    TF_AXIOM(!strcmp(_STR(_EAT(((x)f(x)))), "(x)f(x)"));
+    TF_AXIOM(!strcmp(_STR(_EAT(((x)(x)(x)))), "(x)(x)(x)"));
 
     #undef _STR
     #undef _EAT
@@ -125,19 +117,15 @@ TestTF_PP_IS_TUPLE()
 {
     #define _STR BOOST_PP_STRINGIZE
 
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE(())), "1"));
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE((a))), "1"));
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE(((a)))), "1"));
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE((a, b))), "1"));
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE((a, b, c))), "1"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE(())), "1"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE((a))), "1"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE(((a)))), "1"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE((a, b))), "1"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE((a, b, c))), "1"));
 
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE(a)), "0"));
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE(f(a))), "0"));
-    TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE(This is a test)), "0"));
-
-    // XXX: TF_PP_IS_TUPLE() should expand to 0 for sequences of size
-    //      greater than 1...  See bug 8584.
-    //TF_AXIOM(not strcmp(_STR(TF_PP_IS_TUPLE(()())), "0"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE(a)), "0"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE(f(a))), "0"));
+    TF_AXIOM(!strcmp(_STR(TF_PP_IS_TUPLE(This is a test)), "0"));
 
     #undef _STR
 
@@ -148,8 +136,8 @@ TestTF_PP_IS_TUPLE()
 static bool
 Test_TfPreprocessorUtils()
 {
-    return TestTF_NUM_ARGS() and
-           TestTF_PP_EAT_PARENS() and
+    return TestTF_NUM_ARGS() &&
+           TestTF_PP_EAT_PARENS() &&
            TestTF_PP_IS_TUPLE()
            ;
 }

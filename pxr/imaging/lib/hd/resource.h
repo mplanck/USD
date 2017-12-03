@@ -24,35 +24,51 @@
 #ifndef HD_RESOURCE_H
 #define HD_RESOURCE_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
-#include "pxr/imaging/garch/gl.h"
 #include "pxr/base/tf/token.h"
 
 #include <boost/noncopyable.hpp>
 #include <boost/shared_ptr.hpp>
 
+#include <cstddef>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class HdResource> HdResourceSharedPtr;
 
+/// \class HdResource
+///
 /// Base class for all GPU resource objects.
 ///
-class HdResource : boost::noncopyable {
+class HdResource : boost::noncopyable 
+{
 public:
+    HD_API
     HdResource(TfToken const & role);
+    HD_API
     virtual ~HdResource();
 
     /// Returns the role of the GPU data in this resource.
     TfToken const & GetRole() const {return _role;}
 
-    /// The OpenGL name/identifier for this resource and its size
-    virtual void SetAllocation(GLuint id, GLsizeiptr size);
+    /// Returns the size of the resource allocated in the GPU
+    HD_API
+    size_t GetSize() const {return _size;}
 
-    GLuint GetId() const {return _id;}
-    GLsizeiptr GetSize() const {return _size;}
+protected:
+    /// Stores the size of the resource allocated in the GPU
+    HD_API
+    void SetSize(size_t size);
 
 private:
     const TfToken _role;
-    GLuint _id;
-    GLsizeiptr _size;
+    size_t _size;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HD_RESOURCE_H

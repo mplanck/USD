@@ -21,15 +21,24 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
+#include <vector>
+#include <utility>
+#include <locale>
+
 #include "pxr/base/tf/token.h"
 
 #include <boost/python/class.hpp>
-#include <vector>
-#include <utility>
 
 using namespace boost::python;
 using std::pair;
 using std::vector;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 class Tf_TestPyContainerConversions {
 public:
@@ -54,6 +63,8 @@ public:
     }
 
 };
+
+} // anonymous namespace 
 
 void wrapTf_TestPyContainerConversions()
 {

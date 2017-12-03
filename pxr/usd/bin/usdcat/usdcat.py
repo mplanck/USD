@@ -22,23 +22,26 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 #
-import argparse, sys, signal, os
+import argparse, sys, os
 
 def _Err(msg):
-    sys.stderr.write(msg + '\n');
+    sys.stderr.write(msg + '\n')
 
 def GetUsdData(filePath):
     from pxr import Sdf
-    layer = Sdf.Layer.FindOrOpen(filePath)
-    assert layer, 'Failed to open %s' % filePath
-    return layer
+    return Sdf.Layer.FindOrOpen(filePath)
 
-def GetFlattenedUsdData(filePath):
+def GetFlattenedUsdData(filePath, populationMaskPaths):
     from pxr import Ar, Usd
     Ar.GetResolver().ConfigureResolverForAsset(filePath)
-    stage = Usd.Stage.Open(filePath)
-    assert stage, 'Failed to open %s' % filePath
-    return stage
+    popMask = (None if populationMaskPaths is None
+               else Usd.StagePopulationMask())
+    if popMask:
+        for path in populationMaskPaths:
+            popMask.Add(path)
+        return Usd.Stage.OpenMasked(filePath, popMask)
+    else:
+        return Usd.Stage.Open(filePath)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -59,6 +62,15 @@ def main():
     parser.add_argument(
         '-f', '--flatten', action='store_true', help='Compose stages with the '
         'input files as root layers and write their flattened content.')
+    parser.add_argument('--mask', action='store',
+                        dest='populationMask',
+                        metavar='PRIMPATH[,PRIMPATH...]',
+                        help='Limit stage population to these prims, '
+                        'their descendants and ancestors.  To specify '
+                        'multiple paths, either use commas with no spaces '
+                        'or quote the argument and separate paths by '
+                        'commas and/or spaces.  Requires --flatten.')
+
 
     args = parser.parse_args()
 
@@ -88,6 +100,20 @@ def main():
             _Err("%s: error: unknown output file extension '.%s'"
                  % (parser.prog, ext))
             return 1
+    # If --out was not specified, then --usdFormat must be unspecified or must
+    # be 'usda'.
+    elif args.usdFormat and args.usdFormat != 'usda':
+        _Err("%s: error: can only write 'usda' format to stdout; specify an "
+             "output file with -o/--out to write other formats" % parser.prog)
+        return 1
+
+    # split args.populationMask into paths.
+    if args.populationMask:
+        if not args.flatten:
+            # You can only mask a stage, not a layer.
+            _Err("%s: error: --mask requires --flatten" % parser.prog)
+            return 1
+        args.populationMask = args.populationMask.replace(',', ' ').split()
 
     from pxr import Usd
 
@@ -110,8 +136,10 @@ def main():
         # --flatten was specified.  Note that 'usdData' will be either a
         # Usd.Stage or an Sdf.Layer.
         try:
-            usdData = (GetFlattenedUsdData(inputFile) if args.flatten
-                       else GetUsdData(inputFile))
+            usdData = (GetFlattenedUsdData(inputFile, args.populationMask)
+                       if args.flatten else GetUsdData(inputFile))
+            if not usdData:
+                raise Exception("Unknown error")
         except Exception as e:
             _Err("Failed to open '%s' - %s" % (inputFile, e))
             exitCode = 1
@@ -122,20 +150,27 @@ def main():
             try:
                 usdData.Export(args.out, args=formatArgsDict)
             except Exception as e:
-                # An error occurred -- if the output file exists, let's try to
-                # rename it with '.quarantine' appended, and either way let the
-                # user know what happened.
-                info = 'no output file produced'
+                # Let the user know an error occurred.
+                _Err("Error exporting '%s' to '%s' - %s" %
+                     (inputFile, args.out, e))
+
+                # If the output file exists, let's try to rename it with
+                # '.quarantine' appended and let the user know.  Do this
+                # after the above error report because os.rename() can
+                # fail and we don't want to lose the above error.
                 if os.path.isfile(args.out):
                     newName = args.out + '.quarantine'
-                    os.rename(args.out, newName)
-                    info = 'possibly corrupt output file renamed to ' + newName
-                _Err("Error exporting '%s' to '%s' - %s; %s" %
-                     (inputFile, args.out, info, e))
+                    try:
+                        os.rename(args.out, newName)
+                        _Err("Possibly corrupt output file renamed to %s" %
+                            (newName, ))
+                    except Exception as e:
+                        _Err("Failed to rename possibly corrupt output " +
+                             "file from %s to %s" % (args.out, newName))
                 exitCode = 1
         else:
             try:
-                print usdData.ExportToString()
+                sys.stdout.write(usdData.ExportToString())
             except Exception as e:
                 _Err("Error writing '%s' to stdout; %s" % (inputFile, e))
                 exitCode = 1
@@ -144,5 +179,8 @@ def main():
 
 if __name__ == "__main__":
     # Restore signal handling defaults to allow output redirection and the like.
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    import platform
+    if platform.system() != 'Windows':
+        import signal
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(main())

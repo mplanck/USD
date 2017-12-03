@@ -21,20 +21,22 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file sdf/layerBase.h
-///
-///
-
 #ifndef SDF_LAYER_BASE_H
 #define SDF_LAYER_BASE_H
 
+/// \file sdf/layerBase.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/refBase.h"
 #include "pxr/base/tf/weakBase.h"
 #include <boost/noncopyable.hpp>
+
 #include <map>
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_DECLARE_WEAK_AND_REF_PTRS(SdfLayerBase);
 TF_DECLARE_WEAK_AND_REF_PTRS(SdfFileFormat);
@@ -50,7 +52,7 @@ class SdfLayerBase : public TfRefBase, public TfWeakBase, boost::noncopyable
 {
 public:
     /// Returns the file format used by this layer.
-    SdfFileFormatConstPtr GetFileFormat() const;
+    SDF_API SdfFileFormatConstPtr GetFileFormat() const;
 
     /// Type for specifying additional file format-specific arguments to
     /// layer API.
@@ -58,21 +60,25 @@ public:
 
     /// Returns the file format-specific arguments used during the construction
     /// of this layer.
-    const FileFormatArguments& GetFileFormatArguments() const;
+    SDF_API const FileFormatArguments& GetFileFormatArguments() const;
 
     /// Returns the schema this layer adheres to. This schema provides details
     /// about the scene description that may be authored in this layer.
-    virtual const SdfSchemaBase& GetSchema() const = 0;
+    SDF_API virtual const SdfSchemaBase& GetSchema() const = 0;
 
 protected:
+    SDF_API
     SdfLayerBase(const SdfFileFormatConstPtr& fileFormat,
                  const FileFormatArguments& args = FileFormatArguments());
 
+    SDF_API
     virtual ~SdfLayerBase();
 
 private:
     SdfFileFormatConstPtr _fileFormat;
     FileFormatArguments _fileFormatArgs;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_LAYER_BASE_H

@@ -31,14 +31,16 @@
 //           HdEngine::Draw API change.
 // 22 -> 23: remove ID render API
 // 23 -> 24: GetPathForInstanceIndex returns absolute instance index.
-#define HD_API  24
+// 24 -> 25: move simpleLightingShader to Hdx.
+// 25 -> 26: move camera and light to Hdx.
+// 26 -> 27: move drawTarget to Hdx.
+// 27 -> 28: switch render index Sprim to take a typeId.
+// 28 -> 29: cameras only support matrices.
+// 29 -> 30: added IDRenderColor decode and direct Rprim path fetching.
+// 30 -> 31: added pre-chained buffer sources
+#define HD_API_VERSION 31
 
-// 1 -> 2: Changes "doubleShaded" API to "doubleSided".
-#define HD_CHANGETRACKER_API 2
-#define HD_ENGINE_API 1
-#define HD_RPRIMCOLLECTION_API 1
-
-// 2 -> 3: Changes "doubleShaded" API to "doubleSided".
-#define HD_TOKENS_API   3
+// 1  ->  2: SimpleLighting -> FallbackLighting
+#define HD_SHADER_API 2
 
 #endif // HD_VERSION_H

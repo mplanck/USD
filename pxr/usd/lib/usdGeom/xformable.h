@@ -24,6 +24,10 @@
 #ifndef USDGEOM_GENERATED_XFORMABLE_H
 #define USDGEOM_GENERATED_XFORMABLE_H
 
+/// \file usdGeom/xformable.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdGeom/api.h"
 #include "pxr/usd/usdGeom/imageable.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -41,32 +45,22 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // XFORMABLE                                                                  //
 // -------------------------------------------------------------------------- //
 
-/// \brief Base class for all transformable prims, which allows arbitrary
+/// \class UsdGeomXformable
+///
+/// Base class for all transformable prims, which allows arbitrary
 /// sequences of component affine transformations to be encoded.
 /// 
-/// \anchor usdGeom_linAlgBasics
-/// <b>A Note about UsdGeom Linear Algebra</b>
-/// 
-/// To ensure reliable interchange, we stipulate the following foundational
-/// mathematical assumptions:
-/// \li Matrices are laid out and indexed in row-major order, such that, given
-/// a \c GfMatrix4d datum \em mat, \em mat[3][1] denotes the second column
-/// of the fourth row.
-/// \li GfVec datatypes are row vectors that <b>pre-multiply</b> matrices to 
-/// effect transformations, which implies, for example, that it is the fourth 
-/// row of a GfMatrix4d that specifies the translation of the transformation.
-/// \li GfQuatf and GfQuatd quaternion objects are laid out with the first 
-/// element as the imaginary 3-vector, followed by the real component.
-/// \li All rotation angles are expressed in degrees, not radians.
-/// \li Vector cross-products and rotations intrinsically follow the
-/// <A HREF="https://en.wikipedia.org/wiki/Right-hand_rule">right hand rule.</A>
-/// 
+/// \note 
+/// You may find it useful to review \ref UsdGeom_LinAlgBasics while reading
+/// this class description.
 /// 
 /// <b>Supported Component Transformation Operations</b>
 /// 
@@ -117,10 +111,10 @@ class SdfAssetPath;
 /// 
 /// \sa \ref usdGeom_xformableExamples "Using the Authoring API"
 /// 
-/// <b>Data Encoding</b>
+/// <b>Data Encoding and Op Ordering</b>
 /// 
 /// Because there is no "fixed schema" of operations, all of the attributes
-/// that encode transform operations are \em custom, and are scoped in 
+/// that encode transform operations are dynamic, and are scoped in 
 /// the namespace "xformOp". The second component of an attribute's name provides
 /// the \em type of operation, as listed above.  An "xformOp" attribute can 
 /// have additional namespace components derived from the \em opSuffix argument 
@@ -130,41 +124,68 @@ class SdfAssetPath;
 /// "xformOp:translate:maya:pivot", "translate" is the type of operation and
 /// "maya:pivot" is the suffix.
 /// 
-/// For example, the following ordered list of attribute declarations in usda
+/// The following ordered list of attribute declarations in usda
 /// define a basic Scale-Rotate-Translate with XYZ Euler angles, wherein the
-/// translation is double-precision, and the remainder of the ops are single.
+/// translation is double-precision, and the remainder of the ops are single,
+/// in which we will:
+/// 
+/// <ol>
+/// <li> Scale by 2.0 in each dimension
+/// <li> Rotate about the X, Y, and Z axes by 30, 60, and 90 degrees, respectively
+/// <li> Translate by 100 units in the Y direction
+/// </ol>
+/// 
 /// \code
-/// double3 xformOp:translate
-/// float3 xformOp:rotateXYZ
-/// float3 xformOp:scale
+/// float3 xformOp:rotateXYZ = (30, 60, 90)
+/// float3 xformOp:scale = (2, 2, 2)
+/// double3 xformOp:translate = (0, 100, 0)
+/// uniform token xformOpOrder = [ "xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale" ]
 /// \endcode
+/// 
+/// The attributes appear in the dictionary order in which USD, by default,
+/// sorts them.  To ensure the ops are recovered and evaluated in the correct
+/// order, the schema introduces the **xformOpOrder** attribute, which
+/// contains the names of the op attributes, in the precise sequence in which
+/// they should be pushed onto a transform stack. **Note** that the order is
+/// opposite to what you might expect, given the matrix algebra described in
+/// \ref UsdGeom_LinAlgBasics.  This also dictates order of op creation,
+/// since each call to AddXformOp() adds a new op to the end of the
+/// \b xformOpOrder array, as a new "most-local" operation.  See 
+/// \ref usdGeom_xformableExamples "Example 2 below" for C++ code that could
+/// have produced this USD.
 /// 
 /// If it were important for the prim's rotations to be independently 
 /// overridable, we could equivalently (at some performance cost) encode
 /// the transformation also like so:
 /// \code
-/// double3 xformOp:translate
-/// float xformOp:rotateZ
-/// float xformOp:rotateY
-/// float xformOp:rotateX
-/// float3 xformOp:scale
+/// float xformOp:rotateX = 30
+/// float xformOp:rotateY = 60
+/// float xformOp:rotateZ = 90
+/// float3 xformOp:scale = (2, 2, 2)
+/// double3 xformOp:translate = (0, 100, 0)
+/// uniform token xformOpOrder = [ "xformOp:translate", "xformOp:rotateZ", "xformOp:rotateY", "xformOp:rotateX", "xformOp:scale" ]
 /// \endcode
+/// 
+/// Again, note that although we are encoding an XYZ rotation, the three
+/// rotations appear in the **xformOpOrder** in the opposite order, with Z,
+/// followed, by Y, followed by X.
 /// 
 /// Were we to add a Maya-style scalePivot to the above example, it might 
 /// look like the following:
 /// \code
-/// double3 xformOp:translate
-/// float xformOp:rotateXYZ
+/// float3 xformOp:rotateXYZ = (30, 60, 90)
+/// float3 xformOp:scale = (2, 2, 2)
+/// double3 xformOp:translate = (0, 100, 0)
 /// double3 xformOp:translate:scalePivot
-/// float3 xformOp:scale
+/// uniform token xformOpOrder = [ "xformOp:translate", "xformOp:rotateXYZ", "xformOp:translate:scalePivot", "xformOp:scale" ]
 /// \endcode
 /// 
-/// <b>Paired "Inverted" Ops and Op Ordering</b>
+/// <b>Paired "Inverted" Ops</b>
 /// 
 /// We have been claiming that the ordered list of ops serves as a set
 /// of instructions to a transform stack, but you may have noticed in the last
 /// example that there is a missing operation - the pivot for the scale op
-/// needs to be applied in its inverse-form as a final op!  In the 
+/// needs to be applied in its inverse-form as a final (most local) op!  In the 
 /// AbcGeom::Xform schema, we would have encoded an actual "final" translation
 /// op whose value was authored by the exporter as the negation of the pivot's
 /// value.  However, doing so would be brittle in USD, given that each op can
@@ -172,18 +193,13 @@ class SdfAssetPath;
 /// maintained as the negation of the other in order for successful
 /// re-importation of the schema cannot be expressed in USD.
 /// 
-/// Our solution leverages the last component of the encoding: we already
-/// require a statement of the op ordering (since they are attributes, they
-/// will, in general be retrieved in dictionary order using the core API's).
-/// We express this as a uniform builtin VtTokenArray attribute
-/// \em xformOpOrder, whose elements contain the full attribute names, 
-/// in order, of the UsdGeomXformable transform operations.  It also may
-/// contain one of two special tokens that address the paired op and
-/// "stack resetting" behavior.
+/// Our solution leverages the **xformOpOrder** member of the schema, which,
+/// in addition to ordering the ops, may also contain one of two special
+/// tokens that address the paired op and "stack resetting" behavior.
 /// 
 /// The "paired op" behavior is encoded as an "!invert!" prefix in 
-/// \em xformOpOrder, as the result of an AddXformOp(isInverseOp=True) call.  
-/// The \em xformOpOrder for the last example would look like:
+/// \b xformOpOrder, as the result of an AddXformOp(isInverseOp=True) call.  
+/// The \b xformOpOrder for the last example would look like:
 /// \code
 /// uniform token[] xformOpOrder = [ "xformOp:translate", "xformOp:rotateXYZ", "xformOp:translate:scalePivot", "xformOp:scale", "!invert!xformOp:translate:scalePivot" ]
 /// \endcode
@@ -218,13 +234,16 @@ class SdfAssetPath;
 /// \anchor usdGeom_xformableExamples
 /// <b>Using the C++ API</b>
 /// 
-/// #1. Writing out a simple transform matrix encoding
+/// #1. Creating a simple transform matrix encoding
 /// \snippet examples.cpp CreateMatrixWithDefault
 /// 
-/// #2. Writing out an SRT with pivot using UsdGeomXformCommonAPI
+/// #2. Creating the simple SRT from the example above
+/// \snippet examples.cpp CreateExampleSRT
+/// 
+/// #3. Creating a parameterized SRT with pivot using UsdGeomXformCommonAPI
 /// \snippet examples.cpp CreateSRTWithDefaults
 /// 
-/// #3. Writing out a rotate-only pivot transform with animated
+/// #4. Creating a rotate-only pivot transform with animated
 /// rotation and translation
 /// \snippet examples.cpp CreateAnimatedTransform
 /// 
@@ -257,15 +276,17 @@ public:
     }
 
     /// Destructor.
+    USDGEOM_API
     virtual ~UsdGeomXformable();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDGEOM_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdGeomXformable holding the prim adhering to this
+    /// Return a UsdGeomXformable holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -274,6 +295,7 @@ public:
     /// UsdGeomXformable(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDGEOM_API
     static UsdGeomXformable
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
@@ -281,11 +303,13 @@ public:
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDGEOM_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDGEOM_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -306,6 +330,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->TokenArray
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetXformOpOrderAttr() const;
 
     /// See GetXformOpOrderAttr(), and also 
@@ -313,6 +338,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateXformOpOrderAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -320,14 +346,16 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 
-    /// \class UsdGeomXformable::XformQuery
+    /// \class XformQuery
     /// 
-    /// \brief Helper class that caches the ordered vector of UsGeomXformOps that 
+    /// Helper class that caches the ordered vector of UsGeomXformOps that 
     /// contribute to the local transformation of an xformable prim
     /// 
     /// Internally, the class initializes UsdAttributeQuery objects for the 
@@ -349,10 +377,12 @@ public:
             /// Constructs an XformQuery object for the given xformable prim.
             /// Caches the ordered xformOps and initializes an UsdAttributeQuery
             /// internally for all the associated attributes.
+            USDGEOM_API
             XformQuery(const UsdGeomXformable &xformable);
 
             /// Utilizes the internally cached UsdAttributeQuery's to efficiently
             /// compute the transform value at the given \p time.
+            USDGEOM_API
             bool GetLocalTransformation(GfMatrix4d *transform,
                                         const UsdTimeCode time) const;
 
@@ -362,16 +392,19 @@ public:
             }
 
             /// Returns whether the xform value might change over time.
+            USDGEOM_API
             bool TransformMightBeTimeVarying() const;
 
             /// Sets the vector of times at which xformOp samples have been 
             /// authored in the cached set of xform ops.
             /// 
             /// \sa UsdXformable::GetTimeSamples
+            USDGEOM_API
             bool GetTimeSamples(std::vector<double> *times);
 
             /// Returns whether the given attribute affects the local 
             /// transformation computed for this query.
+            USDGEOM_API
             bool IsAttributeIncludedInLocalTransform(const TfToken &attrName);
 
         private:
@@ -418,117 +451,130 @@ public:
     /// of the requested precision, a coding error is issued, but a valid 
     /// xformOp is returned with the existing attribute.
     ///
+    USDGEOM_API
     UsdGeomXformOp AddXformOp(UsdGeomXformOp::Type const opType, 
                               UsdGeomXformOp::Precision const
                               precision=UsdGeomXformOp::PrecisionDouble, 
                               TfToken const &opSuffix = TfToken(), 
                               bool isInverseOp=false) const;
     
-    /// \brief Add a translate operation to the local stack represented by this 
+    /// Add a translate operation to the local stack represented by this 
     /// xformable.
     /// 
     /// \sa AddXformOp()
+    USDGEOM_API
     UsdGeomXformOp AddTranslateOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionDouble,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a scale operation to the local stack represented by this 
+    /// Add a scale operation to the local stack represented by this 
     /// xformable.
     /// 
     /// \sa AddXformOp()
+    USDGEOM_API
     UsdGeomXformOp AddScaleOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation about the X-axis to the local stack represented by 
+    /// Add a rotation about the X-axis to the local stack represented by 
     /// this xformable.
     /// 
     /// Set the angle value of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp()
+    USDGEOM_API
     UsdGeomXformOp AddRotateXOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation about the YX-axis to the local stack represented by 
+    /// Add a rotation about the YX-axis to the local stack represented by 
     /// this xformable.
     /// 
     /// Set the angle value of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp()
+    USDGEOM_API
     UsdGeomXformOp AddRotateYOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation about the Z-axis to the local stack represented by 
+    /// Add a rotation about the Z-axis to the local stack represented by 
     /// this xformable.
     /// 
     /// \sa AddXformOp()
+    USDGEOM_API
     UsdGeomXformOp AddRotateZOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation op with XYZ rotation order to the local stack 
+    /// Add a rotation op with XYZ rotation order to the local stack 
     /// represented by this xformable.
     /// 
     /// Set the angle value of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp(), \ref usdGeom_rotationPackingOrder "note on angle packing order"
+    USDGEOM_API
     UsdGeomXformOp AddRotateXYZOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation op with XZY rotation order to the local stack 
+    /// Add a rotation op with XZY rotation order to the local stack 
     /// represented by this xformable.
     /// 
     /// Set the angle values of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp(), \ref usdGeom_rotationPackingOrder "note on angle packing order"
+    USDGEOM_API
     UsdGeomXformOp AddRotateXZYOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation op with YXZ rotation order to the local stack 
+    /// Add a rotation op with YXZ rotation order to the local stack 
     /// represented by this xformable.
     /// 
     /// Set the angle values of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp(), \ref usdGeom_rotationPackingOrder "note on angle packing order"
+    USDGEOM_API
     UsdGeomXformOp AddRotateYXZOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation op with YZX rotation order to the local stack 
+    /// Add a rotation op with YZX rotation order to the local stack 
     /// represented by this xformable.
     /// 
     /// Set the angle values of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp(), \ref usdGeom_rotationPackingOrder "note on angle packing order"
+    USDGEOM_API
     UsdGeomXformOp AddRotateYZXOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation op with ZXY rotation order to the local stack 
+    /// Add a rotation op with ZXY rotation order to the local stack 
     /// represented by this xformable.
     /// 
     /// Set the angle values of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp(), \ref usdGeom_rotationPackingOrder "note on angle packing order"
+    USDGEOM_API
     UsdGeomXformOp AddRotateZXYOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a rotation op with ZYX rotation order to the local stack 
+    /// Add a rotation op with ZYX rotation order to the local stack 
     /// represented by this xformable.
     /// 
     /// Set the angle values of the resulting UsdGeomXformOp <b>in degrees</b>
     /// \sa AddXformOp(), \ref usdGeom_rotationPackingOrder "note on angle packing order"
+    USDGEOM_API
     UsdGeomXformOp AddRotateZYXOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a orient op (arbitrary axis/angle rotation) to the local stack 
+    /// Add a orient op (arbitrary axis/angle rotation) to the local stack 
     /// represented by this xformable.
     /// 
     /// \sa AddXformOp()
+    USDGEOM_API
     UsdGeomXformOp AddOrientOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionFloat,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Add a tranform op (4x4 matrix transformation) to the local stack 
+    /// Add a tranform op (4x4 matrix transformation) to the local stack 
     /// represented by this xformable.
     /// 
     /// \sa AddXformOp()
@@ -537,11 +583,12 @@ public:
     /// with the other types of xformOps. The only valid precision here is 
     /// double since matrix values cannot be encoded in floating-pt precision
     /// in Sdf.
+    USDGEOM_API
     UsdGeomXformOp AddTransformOp(
         UsdGeomXformOp::Precision const precision=UsdGeomXformOp::PrecisionDouble,
         TfToken const &opSuffix = TfToken(), bool isInverseOp=false) const;
 
-    /// \brief Specify whether this prim's transform should reset the transformation
+    /// Specify whether this prim's transform should reset the transformation
     /// stack inherited from its parent prim.  
     /// 
     /// By default, parent transforms are inherited. SetResetXformStack() can be 
@@ -550,14 +597,16 @@ public:
     /// does not exist already.  If one already exists, and \p resetXform is 
     /// false, it will remove all ops upto and including the last 
     /// "!resetXformStack!" op.
+    USDGEOM_API
     bool SetResetXformStack(bool resetXform) const;
 
-    /// \brief Does this prim reset its parent's inherited transformation?
+    /// Does this prim reset its parent's inherited transformation?
     /// 
     /// Returns true if "!resetXformStack!" appears \em anywhere in xformOpOrder.
     /// When this returns true, all ops upto the last "!resetXformStack!" in
     /// xformOpOrder are ignored when computing the local transformation.
     /// 
+    USDGEOM_API
     bool GetResetXformStack() const;
 
     /// Reorder the already-existing transform ops on this prim.
@@ -581,6 +630,7 @@ public:
     /// metadata.  Under either condition, no scene description is authored.
     /// 
     /// \sa GetOrderedXformOps()
+    USDGEOM_API
     bool SetXformOpOrder(std::vector<UsdGeomXformOp> const &orderedXformOps, 
                          bool resetXformStack = false) const;
     
@@ -601,9 +651,11 @@ public:
     /// \note A coding error is issued if resetsXformStack is NULL. 
     ///
     /// \sa GetResetXformStack()
+    USDGEOM_API
     std::vector<UsdGeomXformOp> GetOrderedXformOps(bool *resetsXformStack) const;
 
     /// Clears the local transform stack.
+    USDGEOM_API
     bool ClearXformOpOrder() const;
 
     /// Clears the existing local transform stack and creates a new xform op of 
@@ -614,6 +666,7 @@ public:
     /// 
     /// \sa ClearXformOpOrder()
     /// \sa AddTransformOp()
+    USDGEOM_API
     UsdGeomXformOp MakeMatrixXform() const;
 
     /// Determine whether there is any possibility that this prim's \em local
@@ -622,6 +675,7 @@ public:
     /// The determination is based on a snapshot of the authored state of the
     /// op attributes on the prim, and may become invalid in the face of
     /// further authoring.
+    USDGEOM_API
     bool TransformMightBeTimeVarying() const;
 
     /// \overload
@@ -632,6 +686,7 @@ public:
     /// The determination is based on a snapshot of the authored state of the
     /// op attributes on the prim, and may become invalid in the face of
     /// further authoring.
+    USDGEOM_API
     bool TransformMightBeTimeVarying(
         const std::vector<UsdGeomXformOp> &ops) const;
 
@@ -639,12 +694,14 @@ public:
     /// are included in the xformOpOrder attribute are authored. 
     /// 
     /// \sa UsdAttribute::GetTimeSamples
+    USDGEOM_API
     bool GetTimeSamples(std::vector<double> *timeSamples) const;
 
     /// Returns the union of all the timesamples at which the attributes 
     /// belonging to the given \p orderedXformOps are authored.
     /// 
     /// \sa UsdGeomXformable::GetTimeSamples
+    USDGEOM_API
     static bool GetTimeSamples(std::vector<UsdGeomXformOp> const &orderedXformOps,
                                std::vector<double> *times);
 
@@ -667,6 +724,7 @@ public:
     ///
     /// \note A coding error is issued if resetsXformStack is NULL. 
     ///
+    USDGEOM_API
     bool GetLocalTransformation(GfMatrix4d *transform,
                                 bool *resetsXformStack,
                                 const UsdTimeCode time = UsdTimeCode::Default()) const;
@@ -690,6 +748,7 @@ public:
     /// 
     /// \note A coding error is issued if resetsXformStack is NULL. 
     ///
+    USDGEOM_API
     bool GetLocalTransformation(GfMatrix4d *transform,
                                 bool *resetsXformStack,
                                 const std::vector<UsdGeomXformOp> &ops,
@@ -707,12 +766,14 @@ public:
     /// 
     /// \return true on success, false if there was an error reading data.
     ///
+    USDGEOM_API
     static bool GetLocalTransformation(GfMatrix4d *transform,
         std::vector<UsdGeomXformOp> const &ops, 
         const UsdTimeCode time);
 
     /// Returns true if the attribute named \p attrName could affect the local
     /// transformation of an xformable prim.
+    USDGEOM_API
     static bool IsTransformationAffectedByAttrNamed(const TfToken &attrName);
 
 private:
@@ -725,5 +786,7 @@ private:
     bool _GetXformOpOrderValue(VtTokenArray *xformOpOrder, 
                                bool *hasAuthoredValue=NULL) const;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

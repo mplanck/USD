@@ -24,7 +24,11 @@
 #ifndef _usdExport_MayaNurbsSurfaceWriter_h_
 #define _usdExport_MayaNurbsSurfaceWriter_h_
 
+#include "pxr/pxr.h"
 #include "usdMaya/MayaTransformWriter.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class UsdGeomNurbsPatch;
 
@@ -32,12 +36,13 @@ class UsdGeomNurbsPatch;
 class MayaNurbsSurfaceWriter : public MayaTransformWriter
 {
   public:
-    MayaNurbsSurfaceWriter(MDagPath & iDag, 
-            UsdStageRefPtr stage, 
-            const JobExportArgs & iArgs);
+    MayaNurbsSurfaceWriter(const MDagPath & iDag,
+            const SdfPath& uPath,
+            bool instanceSource,
+            usdWriteJobCtx& jobCtx);
     virtual ~MayaNurbsSurfaceWriter() {};
     
-    virtual UsdPrim write(const UsdTimeCode &usdTime);
+    virtual void write(const UsdTimeCode &usdTime);
 
     /// \override
     virtual bool exportsGprims() const;
@@ -46,6 +51,9 @@ class MayaNurbsSurfaceWriter : public MayaTransformWriter
     bool writeNurbsSurfaceAttrs(const UsdTimeCode &usdTime, UsdGeomNurbsPatch &primSchema);
 };
 
-typedef shared_ptr < MayaNurbsSurfaceWriter > MayaNurbsSurfaceWriterPtr;
+typedef std::shared_ptr<MayaNurbsSurfaceWriter> MayaNurbsSurfaceWriterPtr;
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // _usdExport_MayaNurbsSurfaceWriter_h_

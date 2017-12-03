@@ -23,10 +23,16 @@
 //
 #include "pxr/imaging/glf/glew.h"
 #include "pxr/imaging/hd/copyComputation.h"
-#include "pxr/imaging/hd/bufferArrayRange.h"
+#include "pxr/imaging/hd/bufferArrayRangeGL.h"
+#include "pxr/imaging/hd/bufferResourceGL.h"
 #include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/renderContextCaps.h"
 #include "pxr/imaging/hd/tokens.h"
+
+#include "pxr/imaging/hf/perfLog.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 HdCopyComputationGPU::HdCopyComputationGPU(
     HdBufferArrayRangeSharedPtr const &src, TfToken const &name)
@@ -35,39 +41,67 @@ HdCopyComputationGPU::HdCopyComputationGPU(
 }
 
 void
-HdCopyComputationGPU::Execute(HdBufferArrayRangeSharedPtr const &range)
+HdCopyComputationGPU::Execute(HdBufferArrayRangeSharedPtr const &range_,
+                              HdResourceRegistry *resourceRegistry)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
-    if (not glBufferSubData) return;
+    if (!glBufferSubData) {
+        return;
+    }
 
-    HdBufferResourceSharedPtr src = _src->GetResource(_name);
-    HdBufferResourceSharedPtr dst = range->GetResource(_name);
+    HdBufferArrayRangeGLSharedPtr srcRange =
+        boost::static_pointer_cast<HdBufferArrayRangeGL> (_src);
+    HdBufferArrayRangeGLSharedPtr range =
+        boost::static_pointer_cast<HdBufferArrayRangeGL> (range_);
 
-    if (not TF_VERIFY(src)) return;
-    if (not TF_VERIFY(dst)) return;
+    HdBufferResourceGLSharedPtr src = srcRange->GetResource(_name);
+    HdBufferResourceGLSharedPtr dst = range->GetResource(_name);
 
-    GLint srcId = src->GetId();
-    GLint dstId = dst->GetId();
-
-    if (not TF_VERIFY(srcId)) return;
-    if (not TF_VERIFY(dstId)) return;
+    if (!TF_VERIFY(src)) {
+        return;
+    }
+    if (!TF_VERIFY(dst)) {
+        return;
+    }
 
     int srcBytesPerElement = src->GetNumComponents() * src->GetComponentSize();
     int dstBytesPerElement = dst->GetNumComponents() * dst->GetComponentSize();
 
-    if (not TF_VERIFY(srcBytesPerElement == dstBytesPerElement)) return;
+    if (!TF_VERIFY(srcBytesPerElement == dstBytesPerElement)) {
+        return;
+    }
 
     GLintptr readOffset = _src->GetOffset() *  srcBytesPerElement;
     GLintptr writeOffset = range->GetOffset() * dstBytesPerElement;
     GLsizeiptr copySize = _src->GetNumElements() * srcBytesPerElement;
 
-    if (not TF_VERIFY(_src->GetNumElements() <= range->GetNumElements())) return;
+    if (!TF_VERIFY(_src->GetNumElements() <= range->GetNumElements())) {
+         return;
+    }
 
     HdRenderContextCaps const &caps = HdRenderContextCaps::GetInstance();
 
+    // Unfortunately at the time the copy computation is added, we don't
+    // know if the source buffer has 0 length.  So we can get here with
+    // a zero sized copy.
     if (copySize > 0) {
+
+        // If the buffer's have 0 size, resources for them would not have
+        // be allocated, so the check for resource allocation has been moved
+        // until after the copy size check.
+
+        GLint srcId = src->GetId();
+        GLint dstId = dst->GetId();
+
+        if (!TF_VERIFY(srcId)) {
+            return;
+        }
+        if (!TF_VERIFY(dstId)) {
+            return;
+        }
+
         HD_PERF_COUNTER_INCR(HdPerfTokens->glCopyBufferSubData);
 
         if (caps.directStateAccessEnabled) {
@@ -94,8 +128,14 @@ HdCopyComputationGPU::GetNumOutputElements() const
 void
 HdCopyComputationGPU::AddBufferSpecs(HdBufferSpecVector *specs) const
 {
-    HdBufferResourceSharedPtr const &resource = _src->GetResource(_name);
+    HdBufferArrayRangeGLSharedPtr srcRange =
+        boost::static_pointer_cast<HdBufferArrayRangeGL> (_src);
+
+    HdBufferResourceGLSharedPtr const &resource = srcRange->GetResource(_name);
     specs->push_back(HdBufferSpec(_name,
                                   resource->GetGLDataType(),
                                   resource->GetNumComponents()));
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -24,6 +24,8 @@
 #ifndef HDX_RENDER_SETUP_TASK_H
 #define HDX_RENDER_SETUP_TASK_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hdx/api.h"
 #include "pxr/imaging/hdx/version.h"
 #include "pxr/imaging/hd/task.h"
 #include "pxr/imaging/hd/enums.h"
@@ -34,32 +36,60 @@
 
 #include <boost/shared_ptr.hpp>
 
-typedef boost::shared_ptr<class HdCamera> HdCameraSharedPtr;
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class HdRenderPassShader> HdRenderPassShaderSharedPtr;
 typedef boost::shared_ptr<class HdRenderPassState> HdRenderPassStateSharedPtr;
 typedef boost::shared_ptr<class HdxRenderSetupTask> HdxRenderSetupTaskSharedPtr;
+typedef boost::shared_ptr<class HdShaderCode> HdShaderCodeSharedPtr;
 struct HdxRenderTaskParams;
+class HdStCamera;
 
-/// A task for setting up render pass state
-///  (camera, renderpass shader, GL states)
+
+/// \class HdxRenderSetupTask
 ///
-class HdxRenderSetupTask : public HdSceneTask
-{
+/// A task for setting up render pass state (camera, renderpass shader, GL
+/// states).
+///
+class HdxRenderSetupTask : public HdSceneTask {
 public:
+    HDX_API
     HdxRenderSetupTask(HdSceneDelegate* delegate, SdfPath const& id);
 
     // compatibility APIs used from HdxRenderTask
+    HDX_API
     void Sync(HdxRenderTaskParams const &params);
+    HDX_API
     void SyncCamera();
     HdRenderPassStateSharedPtr const &GetRenderPassState() const {
         return _renderPassState;
     }
+    TfTokenVector const &GetRenderTags() const {
+        return _renderTags;
+    }
+
+    /// The ID render pass encodes the ID as color in a specific order.
+    /// Use this method to ensure the read back is done in an endian
+    /// correct fashion.
+    ///
+    /// As packing of IDs may change in the future we encapuslate the
+    /// correct behavior here.
+    /// \param idColor a byte buffer of length 4.
+    static inline int DecodeIDRenderColor(unsigned char const idColor[4]) {
+        return (int32_t(idColor[0] & 0xff) << 0)  |
+               (int32_t(idColor[1] & 0xff) << 8)  |
+               (int32_t(idColor[2] & 0xff) << 16) |
+               (int32_t(idColor[3] & 0xff) << 24);
+    }
 
 protected:
     /// Execute render pass task
+    HDX_API
     virtual void _Execute(HdTaskContext* ctx);
 
     /// Sync the render pass resources
+    HDX_API
     virtual void _Sync(HdTaskContext* ctx);
 
 private:
@@ -67,10 +97,17 @@ private:
     HdRenderPassShaderSharedPtr _colorRenderPassShader;
     HdRenderPassShaderSharedPtr _idRenderPassShader;
     GfVec4d _viewport;
-    HdCameraSharedPtr _camera;
+    const HdStCamera *_camera;
+    TfTokenVector _renderTags;
+
+    static HdShaderCodeSharedPtr _overrideShader;
+
+    static void _CreateOverrideShader();
 };
 
-/// RenderTask parameters (renderpass state)
+/// \class HdxRenderTaskParams
+///
+/// RenderTask parameters (renderpass state).
 ///
 struct HdxRenderTaskParams : public HdTaskParams
 {
@@ -83,6 +120,7 @@ struct HdxRenderTaskParams : public HdTaskParams
         , tessLevel(1.0)
         , drawingRange(0.0, -1.0)
         , enableHardwareShading(true)
+        , renderTags()
         , depthBiasUseDefault(true)
         , depthBiasEnable(false)
         , depthBiasConstantFactor(0.0f)
@@ -106,13 +144,13 @@ struct HdxRenderTaskParams : public HdTaskParams
     float tessLevel;
     GfVec2f drawingRange;
     bool enableHardwareShading;
+    TfTokenVector renderTags;
 
     // Depth Bias Raster State
     // When use default is true - state
     // is inherited and onther values are
     // ignored.  Otherwise the raster state
     // is set using the values specified.
-
     bool depthBiasUseDefault;
     bool depthBiasEnable;
     float depthBiasConstantFactor;
@@ -132,10 +170,15 @@ struct HdxRenderTaskParams : public HdTaskParams
     GfVec4d viewport;
 };
 
-
 // VtValue requirements
+HDX_API
 std::ostream& operator<<(std::ostream& out, const HdxRenderTaskParams& pv);
+HDX_API
 bool operator==(const HdxRenderTaskParams& lhs, const HdxRenderTaskParams& rhs);
+HDX_API
 bool operator!=(const HdxRenderTaskParams& lhs, const HdxRenderTaskParams& rhs);
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HDX_RENDER_SETUP_TASK_H

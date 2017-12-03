@@ -24,30 +24,25 @@
 #ifndef HD_VT_BUFFER_SOURCE_H
 #define HD_VT_BUFFER_SOURCE_H
 
-#include "pxr/base/tf/token.h"
-#include "pxr/base/gf/matrix4d.h"
-#include "pxr/base/gf/matrix4f.h"
-#include "pxr/base/gf/vec2d.h"
-#include "pxr/base/gf/vec2f.h"
-#include "pxr/base/gf/vec2i.h"
-#include "pxr/base/gf/vec3d.h"
-#include "pxr/base/gf/vec3f.h"
-#include "pxr/base/gf/vec3i.h"
-#include "pxr/base/gf/vec4d.h"
-#include "pxr/base/gf/vec4f.h"
-#include "pxr/base/gf/vec4i.h"
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/bufferSource.h"
-#include "pxr/imaging/hd/patchIndex.h"
+
+#include "pxr/base/tf/token.h"
+#include "pxr/base/gf/matrix4d.h"
 #include "pxr/base/vt/value.h"
 
 #include <vector>
-#include <boost/noncopyable.hpp>
 #include <boost/shared_ptr.hpp>
-#include <boost/mpl/vector/vector30.hpp>
 
 #include <iosfwd>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class HdVtBufferSource
+///
 /// A transient buffer of data that has not yet been committed to the GPU.
 ///
 /// This class is primarily used in the interaction between HdRprim and the
@@ -62,54 +57,11 @@
 class HdVtBufferSource : public HdBufferSource {
 public:
 
-    // TODO: Add support for scalar types (float, int, bool)
-
-    // TODO: Make this internal or perhaps use a TfHashMap/dispatch table.
-
-    // This struct is required to avoid instantiation of the actual types during
-    // type dispatch.
-    template <typename T> struct THolder {
-    typedef T Type;
-    };
-
-    // The valid types a HdBufferSource can be constructed from.
-    typedef boost::mpl::vector30<
-            THolder<int>,
-            THolder<float>,
-            THolder<double>,
-            THolder<size_t>,
-            THolder<VtIntArray>,
-            THolder<VtFloatArray>,
-            THolder<VtDoubleArray>,
-            THolder<VtVec2fArray>,
-            THolder<VtVec3fArray>,
-            THolder<VtVec4fArray>,
-            THolder<VtVec2dArray>,
-            THolder<VtVec3dArray>,
-            THolder<VtVec4dArray>,
-            THolder<VtVec2iArray>,
-            THolder<VtVec3iArray>,
-            THolder<VtVec4iArray>,
-            THolder<GfMatrix4d>,
-            THolder<GfMatrix4f>,
-            THolder<GfVec2f>,
-            THolder<GfVec3f>,
-            THolder<GfVec4f>,
-            THolder<GfVec2d>,
-            THolder<GfVec3d>,
-            THolder<GfVec4d>,
-            THolder<GfVec2i>,
-            THolder<GfVec3i>,
-            THolder<GfVec4i>,
-            THolder<VtArray<GfMatrix4f> >,
-            THolder<VtArray<GfMatrix4d> >,
-            THolder<VtArray<Hd_BSplinePatchIndex> >
-            > AcceptedTypes;
-
     /// Constructs a new buffer from an existing VtValue, the data is fully
     /// copied into a new internal buffer.
     ///
     /// We may be able to map this to GPU memory in the glorious future.
+    HD_API
     HdVtBufferSource(TfToken const &name, VtValue const& value,
                      bool staticArray=false);
 
@@ -118,6 +70,7 @@ public:
     /// (GL_FLOAT by default, GL_DOUBLE when HD_ENABLE_DOUBLE_MATRIX=1)
     /// note that if we use above VtValue taking constructor, we can use
     /// either float or double matrix regardless the default type.
+    HD_API
     HdVtBufferSource(TfToken const &name, GfMatrix4d const &matrix);
 
     /// Constructs a new buffer from matrix array. The data is copied
@@ -125,13 +78,16 @@ public:
     /// (GL_FLOAT by default, GL_DOUBLE when HD_ENABLE_DOUBLE_MATRIX=1)
     /// note that if we use above VtValue taking constructor, we can use
     /// either float or double matrix regardless the default type.
+    HD_API
     HdVtBufferSource(TfToken const &name, VtArray<GfMatrix4d> const &matrices,
                      bool staticArray=false);
 
     /// Returns the default matrix type (GL_FLOAT or GL_DOUBLE)
+    HD_API
     static GLenum GetDefaultMatrixType();
 
     /// Destructor deletes the internal storage.
+    HD_API
     ~HdVtBufferSource();
 
     /// Return the name of this buffer source.
@@ -151,6 +107,7 @@ public:
 
     /// Returns the number of elements (e.g. VtVec3dArray().GetLength()) from
     /// the source array.
+    HD_API
     virtual int GetNumElements() const;
 
     /// Returns the number of components in a single element.
@@ -170,17 +127,19 @@ public:
 
     /// Prepare the access of GetData().
     virtual bool Resolve() {
-        if (not _TryLock()) return false;
+        if (!_TryLock()) return false;
 
         // nothing. just marks as resolved, and returns _data in GetData()
         _SetResolved();
         return true;
     }
 
+    HD_API
     friend std::ostream &operator <<(std::ostream &out,
                                      const HdVtBufferSource& self);
 
 protected:
+    HD_API
     virtual bool _CheckValid() const;
 
 private:
@@ -202,5 +161,8 @@ private:
     short _numComponents;
     bool _staticArray;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HD_VT_BUFFER_SOURCE_H

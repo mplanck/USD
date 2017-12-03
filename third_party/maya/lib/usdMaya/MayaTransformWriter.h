@@ -24,12 +24,16 @@
 #ifndef _usdExport_MayaTransformWriter_h_
 #define _usdExport_MayaTransformWriter_h_
 
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
 #include "usdMaya/MayaPrimWriter.h"
 
 #include "pxr/usd/usdGeom/xform.h"
 #include "pxr/usd/usdGeom/xformOp.h"
 #include <maya/MFnTransform.h>
 #include <maya/MPlugArray.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 class UsdGeomXformable;
 class UsdTimeCode;
@@ -55,39 +59,47 @@ struct AnimChannel
 // Writes an MFnTransform
 class MayaTransformWriter : public MayaPrimWriter
 {
-  public:
+public:
 
-    MayaTransformWriter(MDagPath & iDag, UsdStageRefPtr stage, const JobExportArgs & iArgs);
+    PXRUSDMAYA_API
+    MayaTransformWriter(const MDagPath & iDag, const SdfPath& uPath, bool instanceSource, usdWriteJobCtx& jobCtx);
     virtual ~MayaTransformWriter() {};
 
+    PXRUSDMAYA_API
     virtual void pushTransformStack(
             const MFnTransform& iTrans, 
             const UsdGeomXformable& usdXForm, 
             bool writeAnim);
     
-    virtual UsdPrim write(const UsdTimeCode &usdTime);
+    PXRUSDMAYA_API
+    virtual void write(const UsdTimeCode &usdTime);
 
     virtual bool isShapeAnimated()     const { return mIsShapeAnimated; };
 
     const MDagPath& getTransformDagPath() { return mXformDagPath; };
 
-  protected:
+protected:
+    PXRUSDMAYA_API
     bool writeTransformAttrs(
             const UsdTimeCode& usdTime, 
             UsdGeomXformable& primSchema);
 
-  private:
+private:
     bool mWriteTransformAttrs;
     MDagPath mXformDagPath;
     bool mIsShapeAnimated;
     std::vector<AnimChannel> mAnimChanList;
+    bool mIsInstanceSource;
 
     size_t mJointOrientOpIndex[3];
     size_t mRotateOpIndex[3];
     size_t mRotateAxisOpIndex[3];
-    
+
 };
 
-typedef shared_ptr < MayaTransformWriter > MayaTransformWriterPtr;
+typedef std::shared_ptr<MayaTransformWriter> MayaTransformWriterPtr;
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // _usdExport_MayaTransformWriter_h_

@@ -21,13 +21,24 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/JobArgs.h"
 
 #include "usdMaya/shadingModeRegistry.h"
+
+#include "pxr/base/tf/staticTokens.h"
 #include "pxr/usd/usdGeom/tokens.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+
+TF_DEFINE_PUBLIC_TOKENS(PxrUsdMayaTranslatorTokens,
+        PXRUSDMAYA_TRANSLATOR_TOKENS);
 
 TF_DEFINE_PUBLIC_TOKENS(PxUsdExportJobArgsTokens, 
         PXRUSDMAYA_JOBARGS_TOKENS);
+
 
 JobExportArgs::JobExportArgs()
     :
@@ -35,6 +46,7 @@ JobExportArgs::JobExportArgs()
         exportDisplayColor(true),
         shadingMode(PxrUsdMayaShadingModeTokens->displayColor),
         mergeTransformAndShape(true),
+        exportInstances(true),
         exportAnimation(false),
         excludeInvisible(false),
         exportDefaultCameras(false),
@@ -50,12 +62,19 @@ JobExportArgs::JobExportArgs()
 {
 }
 
+
 JobImportArgs::JobImportArgs()
     :
         shadingMode(PxrUsdMayaShadingModeTokens->displayColor),
         defaultMeshScheme(UsdGeomTokens->catmullClark),
         assemblyRep(PxUsdExportJobArgsTokens->Collapsed),
-        readAnimData(false),
+        readAnimData(true),
+        useCustomFrameRange(false),
+        startTime(1.0),
+        endTime(1.0),
         importWithProxyShapes(false)
 {
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

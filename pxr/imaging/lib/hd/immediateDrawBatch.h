@@ -24,30 +24,47 @@
 #ifndef HD_IMMEDIATE_DRAW_BATCH_H
 #define HD_IMMEDIATE_DRAW_BATCH_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/drawBatch.h"
-class HdDrawItemInstance;
 
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class Hd_ImmediateDrawBatch
+///
 /// Drawing batch that is executed immediately.
 ///
 class Hd_ImmediateDrawBatch : public Hd_DrawBatch {
 public:
+    HD_API
     Hd_ImmediateDrawBatch(HdDrawItemInstance * drawItemInstance);
+    HD_API
     virtual ~Hd_ImmediateDrawBatch();
 
     // Hd_DrawBatch overrides
+    HD_API
     virtual bool Validate(bool deepValidation);
 
     /// Prepare draw commands and apply view frustum culling for this batch.
-    virtual void PrepareDraw(HdRenderPassStateSharedPtr const &renderPassState);
+    HD_API
+    virtual void PrepareDraw(HdRenderPassStateSharedPtr const &renderPassState,
+                             HdResourceRegistrySharedPtr const & resourceRegistry);
 
     /// Executes the drawing commands for this batch.
-    virtual void ExecuteDraw(HdRenderPassStateSharedPtr const &renderPassState);
+    HD_API
+    virtual void ExecuteDraw(HdRenderPassStateSharedPtr const &renderPassState,
+                             HdResourceRegistrySharedPtr const & resourceRegistry);
 
 protected:
+    HD_API
     virtual void _Init(HdDrawItemInstance * drawItemInstance);
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // HD_IMMEDIATE_DRAW_BATCH_H

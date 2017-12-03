@@ -24,8 +24,10 @@
 #ifndef TF_DENSE_HASH_MAP_H
 #define TF_DENSE_HASH_MAP_H
 
-///
-/// \file Tf/DenseHashMap.h
+/// \file tf/denseHashMap.h
+
+#include "pxr/pxr.h"
+#include "pxr/base/tf/hashmap.h"
 
 #include <vector>
 
@@ -33,11 +35,10 @@
 #include <boost/operators.hpp>
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/scoped_ptr.hpp>
-#include "pxr/base/tf/hashmap.h"
 #include <boost/utility.hpp>
 
-///////////////////////////////////////////////////////////////////////////////
-///
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \class TfDenseHashMap
 ///
 /// This is a space efficent container that mimics the TfHashMap API that
@@ -46,9 +47,7 @@
 /// When the map gets bigger than \p Threshold a TfHashMap is allocated
 /// that is used to accelerate lookup in the vector.
 ///
-/// WARNING:
-///
-/// Note that this differs from a TfHashMap in so far that inserting and
+/// \warning This differs from a TfHashMap in so far that inserting and
 /// removing elements invalidate all iterators of the container.
 ///
 template <
@@ -366,7 +365,7 @@ public:
             std::pair<typename _HashMap::iterator, bool> res =
                 _h->insert(std::make_pair(v.first, size()));
 
-            if (not res.second)
+            if (!res.second)
                 return insert_result(_vec().begin() + res.first->second, false);
         } else {
             // Bail if already inserted.
@@ -379,7 +378,7 @@ public:
         _vec().push_back(_InternalValueType(v.first, v.second));
         _CreateTableIfNeeded();
 
-        return insert_result(boost::prior(end()), true);
+        return insert_result(std::prev(end()), true);
     }
 
     /// Insert a range into the hash map.  Note that \p i0 and \p i1 can't 
@@ -423,13 +422,16 @@ public:
         return insert(value_type(key, Data())).first->second;
     }
 
-    /// Erase element with key \p k.
+    /// Erase element with key \p k.  Returns the number of elements erased.
     ///
-    void erase(const key_type &k) {
+    size_t erase(const key_type &k) {
 
         iterator iter = find(k);
-        if (iter != end())
+        if (iter != end()) {
             erase(iter);
+            return 1;
+        }
+        return 0;
     }
 
     /// Erases element pointed to by \p iter.
@@ -441,7 +443,7 @@ public:
             _h->erase(iter->first);
     
         // If we are not removing that last element...
-        if (iter != boost::prior(end())) {
+        if (iter != std::prev(end())) {
     
             // Need to get the underlying vector iterator directly, because
             // we want to operate on the vector.
@@ -484,7 +486,7 @@ public:
         //XXX: When switching to c++0x we should call _vec().shrink_to_fit().
         _Vector(_vec()).swap(_vec());
 
-        if (not _h)
+        if (!_h)
             return;
 
         size_t sz = size();
@@ -577,7 +579,7 @@ private:
     // Unconditionally create the acceleration table if it doesn't already
     // exist.
     inline void _CreateTable() {
-        if (not _h) {
+        if (!_h) {
             _h.reset(new _HashMap(Threshold, _hash(), _equ()));
             for(size_t i=0; i < size(); ++i)
                 _h->insert(std::make_pair(_vec()[i].GetValue().first, i));
@@ -600,5 +602,6 @@ private:
     boost::scoped_ptr<_HashMap> _h;
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
 
+#endif // TF_DENSE_HASH_MAP_H

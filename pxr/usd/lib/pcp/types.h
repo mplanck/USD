@@ -24,15 +24,25 @@
 #ifndef PCP_TYPES_H
 #define PCP_TYPES_H
 
-#include "pxr/usd/sdf/layer.h"
+#include "pxr/pxr.h"
+#include "pxr/usd/pcp/api.h"
 #include "pxr/usd/pcp/site.h"
+#include "pxr/usd/sdf/layer.h"
+#include "pxr/base/tf/denseHashSet.h"
 
 #include <limits>
 #include <vector>
+
 #include <boost/operators.hpp>
 
+/// \file pcp/types.h
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \enum PcpArcType
+///
 /// Describes the type of arc connecting two nodes in the prim index.
+///
 enum PcpArcType {
     // The root arc is a special value used for the direct/root node of 
     // the prim index. Unlike the following arcs, it has no parent node.
@@ -84,7 +94,7 @@ enum PcpRangeType {
 inline bool 
 PcpIsInheritArc(PcpArcType arcType)
 {
-    return (arcType == PcpArcTypeLocalInherit or
+    return (arcType == PcpArcTypeLocalInherit ||
             arcType == PcpArcTypeGlobalInherit);
 }
 
@@ -93,7 +103,7 @@ PcpIsInheritArc(PcpArcType arcType)
 inline bool 
 PcpIsSpecializesArc(PcpArcType arcType)
 {
-    return (arcType == PcpArcTypeLocalSpecializes or
+    return (arcType == PcpArcTypeLocalSpecializes ||
             arcType == PcpArcTypeGlobalSpecializes);
 }
 
@@ -106,7 +116,7 @@ PcpIsSpecializesArc(PcpArcType arcType)
 inline bool
 PcpIsClassBasedArc(PcpArcType arcType)
 {
-    return PcpIsInheritArc(arcType) or PcpIsSpecializesArc(arcType);
+    return PcpIsInheritArc(arcType) || PcpIsSpecializesArc(arcType);
 }
 
 /// Returns true if \p arcType represents a local class-based
@@ -114,29 +124,25 @@ PcpIsClassBasedArc(PcpArcType arcType)
 inline bool
 PcpIsLocalClassBasedArc(PcpArcType arcType)
 {
-    return (arcType == PcpArcTypeLocalInherit or
+    return (arcType == PcpArcTypeLocalInherit ||
             arcType == PcpArcTypeLocalSpecializes);
 }
 
 /// \struct PcpSiteTrackerSegment
+///
 /// Used to keep track of which sites have been visited and through
 /// what type of arcs. 
+///
 struct PcpSiteTrackerSegment {
     PcpLayerStackSite site;
     PcpArcType arcType;
 };
 
+/// \typedef std::vector<PcpSiteTrackerSegment> PcpSiteTracker
 /// Represents a single path through the composition tree. As the tree
 /// is being built, we add segments to the tracker. If we encounter a 
 /// site that we've already visited, we've found a cycle.
 typedef std::vector<PcpSiteTrackerSegment> PcpSiteTracker;
-
-/// \enum PcpDependencyType
-/// Defines the types of dependencies.
-enum PcpDependencyType {
-    PcpDirect    = (1 << 0),
-    PcpAncestral = (1 << 1)
-};
 
 // Internal type for Sd sites.
 struct Pcp_SdSiteRef : boost::totally_ordered<Pcp_SdSiteRef> {
@@ -153,8 +159,8 @@ struct Pcp_SdSiteRef : boost::totally_ordered<Pcp_SdSiteRef> {
 
     bool operator<(const Pcp_SdSiteRef& other) const
     {
-        return layer < other.layer or
-               (not (other.layer < layer) and path < other.path);
+        return layer < other.layer ||
+               (!(other.layer < layer) && path < other.path);
     }
 
     // These are held by reference for performance,
@@ -166,10 +172,11 @@ struct Pcp_SdSiteRef : boost::totally_ordered<Pcp_SdSiteRef> {
 // Internal type for Sd sites.
 struct Pcp_CompressedSdSite {
     Pcp_CompressedSdSite(size_t nodeIndex_, size_t layerIndex_) :
-        nodeIndex(nodeIndex_), layerIndex(layerIndex_)
+        nodeIndex(static_cast<uint16_t>(nodeIndex_)),
+        layerIndex(static_cast<uint16_t>(layerIndex_))
     {
-        TF_VERIFY(nodeIndex_  < (1 << 16));
-        TF_VERIFY(layerIndex_ < (1 << 16));
+        TF_VERIFY(nodeIndex_  < (size_t(1) << 16));
+        TF_VERIFY(layerIndex_ < (size_t(1) << 16));
     }
 
     // These are small to minimize the size of vectors of these.
@@ -178,7 +185,14 @@ struct Pcp_CompressedSdSite {
 };
 typedef std::vector<Pcp_CompressedSdSite> Pcp_CompressedSdSiteVector;
 
-/// A list of fallbacks to attempt to use when evaluating
+// XXX Even with <map> included properly, doxygen refuses to acknowledge
+// the existence of std::map, so if we include the full typedef in the
+// \typedef directive, it will warn and fail to produce an entry for 
+// PcpVariantFallbackMap.  So we instead put the decl inline.
+/// \typedef PcpVariantFallbackMap
+/// typedef std::map<std::string, std::vector<std::string>> PcpVariantFallbackMap
+///
+/// A "map of lists" of fallbacks to attempt to use when evaluating
 /// variant sets that lack an authored selection.
 ///
 /// This maps a name of a variant set (ex: "shadingComplexity") to a
@@ -188,9 +202,18 @@ typedef std::vector<Pcp_CompressedSdSite> Pcp_CompressedSdSiteVector;
 ///
 typedef std::map<std::string, std::vector<std::string>> PcpVariantFallbackMap;
 
+typedef TfDenseHashSet<TfToken, TfToken::HashFunctor> PcpTokenSet;
+
+/// \var size_t PCP_INVALID_INDEX
 /// A value which indicates an invalid index. This is simply used inplace of
 /// either -1 or numeric_limits::max() (which are equivalent for size_t). 
 /// for better clarity.
+#if defined(doxygen)
+constexpr size_t PCP_INVALID_INDEX = unspecified;
+#else
 constexpr size_t PCP_INVALID_INDEX = std::numeric_limits<size_t>::max();
+#endif
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PCP_TYPES_H

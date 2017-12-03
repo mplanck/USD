@@ -24,10 +24,17 @@
 #ifndef USDIMAGING_BASIS_CURVES_ADAPTER_H
 #define USDIMAGING_BASIS_CURVES_ADAPTER_H
 
+#include "pxr/pxr.h"
+#include "pxr/usdImaging/usdImaging/api.h"
 #include "pxr/usdImaging/usdImaging/primAdapter.h"
 #include "pxr/usdImaging/usdImaging/gprimAdapter.h"
 
-/// Delegate support for UsdGeomBasisCurves
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class UsdImagingBasisCurvesAdapter
+///
+/// Delegate support for UsdGeomBasisCurves.
 ///
 class UsdImagingBasisCurvesAdapter : public UsdImagingGprimAdapter {
 public:
@@ -36,43 +43,35 @@ public:
     UsdImagingBasisCurvesAdapter()
         : UsdImagingGprimAdapter()
     {}
+    USDIMAGING_API
     virtual ~UsdImagingBasisCurvesAdapter();
 
+    USDIMAGING_API
     virtual SdfPath Populate(UsdPrim const& prim,
                      UsdImagingIndexProxy* index,
                      UsdImagingInstancerContext const* instancerContext = NULL);
 
+    USDIMAGING_API
+    virtual bool IsSupported(HdRenderIndex* renderIndex);
+
     // ---------------------------------------------------------------------- //
     /// \name Parallel Setup and Resolve
     // ---------------------------------------------------------------------- //
-    
-    virtual void TrackVariabilityPrep(UsdPrim const& prim,
-                                      SdfPath const& cachePath,
-                                      int requestedBits,
-                                      UsdImagingInstancerContext const* 
-                                          instancerContext = NULL);
 
     /// Thread Safe.
+    USDIMAGING_API
     virtual void TrackVariability(UsdPrim const& prim,
                                   SdfPath const& cachePath,
-                                  int requestedBits,
-                                  int* dirtyBits,
+                                  HdDirtyBits* timeVaryingBits,
                                   UsdImagingInstancerContext const* 
                                       instancerContext = NULL);
 
-    virtual void UpdateForTimePrep(UsdPrim const& prim,
-                                   SdfPath const& cachePath, 
-                                   UsdTimeCode time,
-                                   int requestedBits,
-                                   UsdImagingInstancerContext const* 
-                                       instancerContext = NULL);
-
     /// Thread Safe.
+    USDIMAGING_API
     virtual void UpdateForTime(UsdPrim const& prim,
                                SdfPath const& cachePath, 
                                UsdTimeCode time,
-                               int requestedBits,
-                               int* dirtyBits,
+                               HdDirtyBits requestedBits,
                                UsdImagingInstancerContext const* 
                                    instancerContext = NULL);
 
@@ -83,5 +82,7 @@ private:
                                  UsdTimeCode time);
 };
 
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USDIMAGING_BASIS_CURVES_ADAPTER_H

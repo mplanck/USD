@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/proxyShape.h"
 #include "usdMaya/query.h"
 #include "usdMaya/stageCache.h"
@@ -38,19 +39,23 @@
 #include "pxr/usd/usdGeom/tokens.h"
 #include "pxr/usd/usd/stageCacheContext.h"
 #include "pxr/usd/usdUtils/stageCache.h"
-#include "pxr/base/work/threadLimits.h"
 #include "pxr/base/gf/bbox3d.h"
 
 #include <maya/MDagPath.h>
-#include <maya/MFnNumericAttribute.h>
-#include <maya/MFnTypedAttribute.h>
-#include <maya/MFnEnumAttribute.h>
 #include <maya/MFnCompoundAttribute.h>
-#include <maya/MFnStringData.h>
-#include <maya/MGlobal.h>
+#include <maya/MFnEnumAttribute.h>
+#include <maya/MFnNumericAttribute.h>
 #include <maya/MFnPluginData.h>
+#include <maya/MFnStringData.h>
+#include <maya/MFnTypedAttribute.h>
+#include <maya/MFnUnitAttribute.h>
+#include <maya/MGlobal.h>
+#include <maya/MTime.h>
 
 #include <mutex>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // Hydra performs its own high-performance frustum culling, so
 // we don't want to rely on Maya to do it on the CPU. AS such, the best
@@ -62,6 +67,12 @@
 //
 TF_DEFINE_ENV_SETTING(PIXMAYA_ENABLE_BOUNDING_BOX_MODE, false,
                       "Enable bounding box rendering (slows refresh rate)");
+
+bool
+UsdMayaIsBoundingBoxModeEnabled()
+{
+    return TfGetEnvSetting(PIXMAYA_ENABLE_BOUNDING_BOX_MODE);
+}
 
 // ========================================================
 
@@ -80,18 +91,14 @@ UsdMayaProxyShape::initialize(
 {
     MStatus retValue = MS::kSuccess;
 
-    static std::once_flag once;
-    std::call_once(once, [](){
-        WorkSetMaximumConcurrencyLimit();
-    });
-
     //
     // create attr factories
     //
+    MFnCompoundAttribute compoundAttrFn;
+    MFnEnumAttribute     enumAttrFn;
     MFnNumericAttribute  numericAttrFn;
     MFnTypedAttribute    typedAttrFn;
-    MFnEnumAttribute     enumAttrFn;
-    MFnCompoundAttribute compoundAttrFn;
+    MFnUnitAttribute     unitAttrFn;
 
     psData->filePath = typedAttrFn.create(
         "filePath",
@@ -138,18 +145,18 @@ UsdMayaProxyShape::initialize(
     retValue = addAttribute(psData->excludePrimPaths);
     CHECK_MSTATUS_AND_RETURN_IT(retValue);
 
-    psData->time = numericAttrFn.create(
+    psData->time = unitAttrFn.create(
         "time",
         "tm",
-        MFnNumericData::kDouble,
-        0,    // Default to "default"
+        MFnUnitAttribute::kTime,
+        0.0,
         &retValue);
-    numericAttrFn.setCached(true);
-    numericAttrFn.setConnectable(true);
-    numericAttrFn.setReadable(true);
-    numericAttrFn.setStorable(true);
-    numericAttrFn.setWritable(true);
-    numericAttrFn.setAffectsAppearance(true);
+    unitAttrFn.setCached(true);
+    unitAttrFn.setConnectable(true);
+    unitAttrFn.setReadable(true);
+    unitAttrFn.setStorable(true);
+    unitAttrFn.setWritable(true);
+    unitAttrFn.setAffectsAppearance(true);
     CHECK_MSTATUS_AND_RETURN_IT(retValue);
     retValue = addAttribute(psData->time);
     CHECK_MSTATUS_AND_RETURN_IT(retValue);
@@ -310,6 +317,18 @@ UsdMayaProxyShape::initialize(
     retValue = addAttribute(psData->displayRenderGuides);
     CHECK_MSTATUS_AND_RETURN_IT(retValue);
 
+    psData->softSelectable = numericAttrFn.create(
+        "softSelectable",
+        "softSelectable",
+        MFnNumericData::kBoolean,
+        0.0,
+        &retValue);
+    numericAttrFn.setKeyable(false);
+    numericAttrFn.setStorable(false);
+    numericAttrFn.setAffectsAppearance(true);
+    retValue = addAttribute(psData->softSelectable);
+    CHECK_MSTATUS_AND_RETURN_IT(retValue);
+
     //
     // add attribute dependencies
     //
@@ -401,68 +420,50 @@ MStatus UsdMayaProxyShape::computeInStageDataCached(MDataBlock& dataBlock)
         //
         std::string fileString = TfStringTrimRight(file.asChar());
 
-        if (not TfStringStartsWith(fileString, "./")) {
-            fileString = PxrUsdMayaQuery::ResolvePath(fileString);
-        }
-
-        // Fall back on checking if path is just a standard absolute path
-        if ( fileString.empty() ) {
-            fileString = file.asChar();
-        }
-
         // == Load the Stage
         UsdStageRefPtr usdStage;
         SdfPath        primPath;
 
-        // Check path validity
-        // Don't try to create a stage for a non-existent file. Some processes
-        // such as mbuild may author a file path here does not yet exist until a
-        // later operation (e.g., the mayaConvert target will produce the .mb
-        // for the USD standin before the usd target runs the usdModelForeman to
-        // assemble all the necessary usd files).
-        bool isValidPath = (TfStringStartsWith(fileString, "//") ||
-                            TfIsFile(fileString, true /*resolveSymlinks*/));
+        // get the variantKey
+        MDataHandle variantKeyHandle = 
+            dataBlock.inputValue(_psData.variantKey, &retValue);
+        CHECK_MSTATUS_AND_RETURN_IT(retValue);
+        const MString variantKey = variantKeyHandle.asString();
+        
+        SdfLayerRefPtr sessionLayer;
+        std::vector<std::pair<std::string, std::string> > variantSelections;
+        std::string variantKeyString = variantKey.asChar();
+        if (!variantKeyString.empty()) {
+            variantSelections.push_back(
+                std::make_pair("modelingVariant",variantKeyString));
 
-        if (isValidPath) {
-
-            // get the variantKey
-            MDataHandle variantKeyHandle = 
-                dataBlock.inputValue(_psData.variantKey, &retValue);
+            // Get the primPath
+            const MString primPathMString =
+                dataBlock.inputValue(_psData.primPath, &retValue).asString();
             CHECK_MSTATUS_AND_RETURN_IT(retValue);
-            const MString variantKey = variantKeyHandle.asString();
-            
-            SdfLayerRefPtr sessionLayer;
-            std::vector<std::pair<std::string, std::string> > variantSelections;
-            std::string variantKeyString = variantKey.asChar();
-            if (not variantKeyString.empty()) {
-                variantSelections.push_back(
-                    std::make_pair("modelingVariant",variantKeyString));
 
-                // Get the primPath
-                const MString primPathMString =
-                    dataBlock.inputValue(_psData.primPath, &retValue).asString();
-                CHECK_MSTATUS_AND_RETURN_IT(retValue);
+            std::vector<std::string> primPathEltStrs =
+                TfStringTokenize(primPathMString.asChar(),"/");
+            if (primPathEltStrs.size() > 0) {
+                sessionLayer =
+                    UsdUtilsStageCache::GetSessionLayerForVariantSelections(
+                        TfToken(primPathEltStrs[0]), variantSelections);
+            }
+        }
 
-                std::vector<std::string> primPathEltStrs =
-                    TfStringTokenize(primPathMString.asChar(),"/");
-                if (primPathEltStrs.size() > 0) {
-                    sessionLayer =
-                        UsdUtilsStageCache::GetSessionLayerForVariantSelections(
-                            TfToken(primPathEltStrs[0]), variantSelections);
-                }
+        if (SdfLayerRefPtr rootLayer = SdfLayer::FindOrOpen(fileString)) {
+            UsdStageCacheContext ctx(UsdMayaStageCache::Get());
+            if (sessionLayer) {
+                usdStage = UsdStage::Open(rootLayer, 
+                        sessionLayer,
+                        ArGetResolver().GetCurrentContext());
+            } else {
+                usdStage = UsdStage::Open(rootLayer,
+                        ArGetResolver().GetCurrentContext());
             }
-            SdfLayerRefPtr rootLayer = SdfLayer::FindOrOpen(fileString);
-            {
-                UsdStageCacheContext ctx(UsdMayaStageCache::Get());
-                if (sessionLayer) {
-                    usdStage = UsdStage::Open(rootLayer, 
-                            sessionLayer,
-                            ArGetResolver().GetCurrentContext());
-                } else {
-                    usdStage = UsdStage::Open(rootLayer,
-                            ArGetResolver().GetCurrentContext());
-                }
-            }
+        }
+
+        if (usdStage) {
             primPath = usdStage->GetPseudoRoot().GetPath();
         }
 
@@ -603,8 +604,8 @@ MBoundingBox UsdMayaProxyShape::boundingBox() const
     // If we could cheaply determine whether a stage only has static geometry,
     // we could make this value a constant one for that case, avoiding the
     // memory overhead of a cache entry per frame
-    MDataHandle timeHandle = dataBlock.inputValue( _psData.time, &status);
-    UsdTimeCode currTime = UsdTimeCode(timeHandle.asDouble());
+    MDataHandle timeHandle = dataBlock.inputValue(_psData.time, &status);
+    UsdTimeCode currTime = UsdTimeCode(timeHandle.asTime().value());
 
     std::map<UsdTimeCode, MBoundingBox>::const_iterator cacheLookup =
         _boundingBoxCache.find(currTime);
@@ -619,20 +620,20 @@ MBoundingBox UsdMayaProxyShape::boundingBox() const
         UsdGeomImageable imageablePrim( prim );
         bool showGuides = displayGuides();
         bool showRenderGuides = displayRenderGuides();
-        if (showGuides and showRenderGuides) {
+        if (showGuides && showRenderGuides) {
             allBox = imageablePrim.ComputeUntransformedBound(
                 currTime,
                 UsdGeomTokens->default_, 
                 UsdGeomTokens->proxy,
                 UsdGeomTokens->guide, 
                 UsdGeomTokens->render);
-        } else if (showGuides and not showRenderGuides) {
+        } else if (showGuides && !showRenderGuides) {
             allBox = imageablePrim.ComputeUntransformedBound(
                 currTime,
                 UsdGeomTokens->default_, 
                 UsdGeomTokens->proxy,
                 UsdGeomTokens->guide);
-        } else if (not showGuides and showRenderGuides) {
+        } else if (!showGuides && showRenderGuides) {
             allBox = imageablePrim.ComputeUntransformedBound(
                 currTime,
                 UsdGeomTokens->default_, 
@@ -764,7 +765,7 @@ UsdTimeCode UsdMayaProxyShape::_GetTime( MDataBlock dataBlock ) const
 {
     MStatus status;
 
-    return UsdTimeCode(dataBlock.inputValue( _psData.time, &status).asDouble());
+    return UsdTimeCode(dataBlock.inputValue(_psData.time, &status).asTime().value());
 }
 
 SdfPathVector
@@ -906,4 +907,32 @@ UsdMayaProxyShape::~UsdMayaProxyShape()
     // empty
     //
 }
+
+MSelectionMask  
+UsdMayaProxyShape::getShapeSelectionMask() const
+{
+    if (_CanBeSoftSelected()) {
+        // to support soft selection (mode=Object), we need to add kSelectMeshes
+        // to our selection mask.  
+        MSelectionMask::SelectionType selType = MSelectionMask::kSelectMeshes;
+        return MSelectionMask(selType);
+    }
+    return MPxSurfaceShape::getShapeSelectionMask();
+}
+
+bool
+UsdMayaProxyShape::_CanBeSoftSelected() const
+{
+    UsdMayaProxyShape* nonConstThis = const_cast<UsdMayaProxyShape*>(this);
+    MDataBlock dataBlock = nonConstThis->forceCache();
+    MStatus status;
+    MDataHandle softSelHandle = dataBlock.inputValue(_psData.softSelectable, &status);
+    if (!status) {
+        return false;
+    }
+    return softSelHandle.asBool();
+
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

@@ -21,7 +21,11 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/pyModule.h"
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 TF_WRAP_MODULE {
     TF_WRAP( AnyWeakPtr );
@@ -56,6 +60,7 @@ TF_WRAP_MODULE {
     TF_WRAP( TimeStamp );
     TF_WRAP( Token );
     TF_WRAP( Type );
+    TF_WRAP( Tf_TestPyAnnotatedBoolResult );
     TF_WRAP( Tf_TestPyContainerConversions );
     TF_WRAP( Tf_TestPyDateTime );
     TF_WRAP( Tf_TestPyStaticTokens );

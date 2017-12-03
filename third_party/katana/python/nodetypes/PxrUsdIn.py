@@ -23,6 +23,7 @@
 #
 from Katana import (
     Nodes3DAPI,
+    NodegraphAPI,
     FnAttribute,
     FnGeolibServices,
 )
@@ -39,6 +40,8 @@ gb = FnAttribute.GroupBuilder()
 gb.set('fileName', '')
 nb.setHintsForParameter('fileName', {
     'help' : 'The USD file to read.',
+    'widget':'assetIdInput',
+    'fileTypes':'usd|usda|usdb|usdc',
 })
 
 gb.set('location', '/root/world/geo')
@@ -54,7 +57,14 @@ nb.setHintsForParameter('isolatePath', {
 
 gb.set('variants', '')
 nb.setHintsForParameter('variants', {
-    'help' : 'Specify variant selections. Variant selections are specified via whitespace-separated variant selection paths. Example: /Foo{X=Y} /Bar{Z=w}',
+    # 'conditionalVisOp': 'notEqualTo',
+    # 'conditionalVisPath': '../variants', # can't really point to self... :(
+    # 'conditionalVisValue': '',
+    'helpAlert': 'warning',
+    'help' : 'DEPRECATED! Use PxrUsdInVariantSelect instead.'\
+        ' Specify variant '\
+        'selections. Variant selections are specified via whitespace-separated'\
+        ' variant selection paths. Example: /Foo{X=Y} /Bar{Z=w}',
 })
 
 gb.set('ignoreLayerRegex', '')
@@ -78,6 +88,17 @@ nb.setHintsForParameter('instanceMode', {
       When using <i>as sources and instances</i>, masters will be created
       under a sibling of World named /Masters. Instanced USD prims will
       be of type "instance" and have no children.
+    """,
+})
+
+gb.set('prePopulate', FnAttribute.IntAttribute(1))
+nb.setHintsForParameter('prePopulate', {
+    'widget' : 'boolean',
+    'help' : """
+      Controls USD pre-population.  Pre-population loads all payloads
+      and pre-populates the stage.  Assuming the entire stage will be
+      needed, this is more efficient since USD can use its internal
+      multithreading.
     """,
 })
 
@@ -118,6 +139,10 @@ def buildOpChain(self, interface):
     
     gb.set('instanceMode', interface.buildAttrFromParam(
         self.getParameter('instanceMode')))
+    
+    gb.set('prePopulate', interface.buildAttrFromParam(
+        self.getParameter('prePopulate'),
+        numberType=FnAttribute.IntAttribute))
 
     sessionValues = (
             interface.getGraphState().getDynamicEntry("var:pxrUsdInSession"))
@@ -126,6 +151,7 @@ def buildOpChain(self, interface):
 
     
     gb.set('system', interface.getGraphState().getOpSystemArgs())
+    gb.set('processStageWideQueries', FnAttribute.IntAttribute(1))
 
     # our primary op in the chain that will create the root location
     sscb = FnGeolibServices.OpArgsBuilders.StaticSceneCreate(True)
@@ -151,6 +177,26 @@ def buildOpChain(self, interface):
 
 nb.setGetScenegraphLocationFnc(getScenegraphLocation)
 nb.setBuildOpChainFnc(buildOpChain)
+
+
+# XXX prePopulate exists in some production data with an incorrect default
+#     value. Assume all studio uses of it prior to this fix intend for
+#     it to be enabled.
+def pxrUsdInUpgradeToVersionTwo(nodeElement):
+    prePopulateElement = NodegraphAPI.Xio.Node_getParameter(
+            nodeElement, 'prePopulate')
+    if prePopulateElement:
+        NodegraphAPI.Xio.Parameter_setValue(prePopulateElement, 1)
+
+nb.setNodeTypeVersion(2)
+nb.setNodeTypeVersionUpdateFnc(2, pxrUsdInUpgradeToVersionTwo)
+
+
+
+
+
+
+
 nb.build()
 
 
@@ -284,6 +330,287 @@ def appendToParametersOpChain(self, interface):
 
 nb.setAppendToParametersOpChainFnc(appendToParametersOpChain)
 
+nb.build()
 
+#-----------------------------------------------------------------------------
+
+nb = Nodes3DAPI.NodeTypeBuilder('PxrUsdInDefaultMotionSamples')
+nb.setInputPortNames(("in",))
+
+nb.setParametersTemplateAttr(FnAttribute.GroupBuilder()
+    .set('locations', '')
+    .build(),
+        forceArrayNames=('locations',))
+
+nb.setHintsForParameter('locations', {
+    'widget' : 'scenegraphLocationArray',
+    'help' : 'Hierarchy root location paths for which to use default motion sample times.'
+})
+
+def buildOpChain(self, interface):
+    interface.setExplicitInputRequestsEnabled(True)
+    
+    graphState = interface.getGraphState()
+    frameTime = interface.getFrameTime()
+    locations = self.getParameter("locations")
+
+    if locations:
+        gb = FnAttribute.GroupBuilder()
+
+        for loc in locations.getChildren():
+            gb.set("overrides." + FnAttribute.DelimiterEncode(
+                    loc.getValue(frameTime)) + ".motionSampleTimes",
+                    FnAttribute.IntAttribute(1))
+
+        existingValue = (
+                interface.getGraphState().getDynamicEntry("var:pxrUsdInSession"))
+        
+        if isinstance(existingValue, FnAttribute.GroupAttribute):
+            gb.deepUpdate(existingValue)
+        
+        graphState = (graphState.edit()
+                .setDynamicEntry("var:pxrUsdInSession", gb.build())
+                .build())
+        
+    interface.addInputRequest("in", graphState)
+
+nb.setBuildOpChainFnc(buildOpChain)
+
+nb.build()
+
+#-----------------------------------------------------------------------------
+
+nb = Nodes3DAPI.NodeTypeBuilder('PxrUsdInMotionOverrides')
+nb.setInputPortNames(('in',))
+
+nb.setParametersTemplateAttr(FnAttribute.GroupBuilder()
+    .set('locations', '')
+    .set('overrides.motionSampleTimes', '')
+    .set('overrides.currentTime', '')
+    .set('overrides.shutterOpen', '')
+    .set('overrides.shutterClose', '')
+    .build(),
+        forceArrayNames=('locations',))
+
+nb.setHintsForParameter('locations', {
+    'widget': 'scenegraphLocationArray',
+    'help': 'Hierarchy root location paths for which overrides will be applied.'
+})
+
+nb.setHintsForParameter('overrides', {
+    'help': 'Any non-empty overrides will be used for motion calculations.',
+    'open': True,
+})
+
+def buildOpChain(self, interface):
+    interface.setExplicitInputRequestsEnabled(True)
+
+    graphState = interface.getGraphState()
+    frameTime = interface.getFrameTime()
+
+    locations = self.getParameter('locations')
+    overrides = self.getParameter('overrides')
+
+    if locations.getNumChildren() > 0:
+
+        # Build overrides as a child group
+        gb1 = FnAttribute.GroupBuilder()
+
+        motionSampleTimes = overrides.getChild('motionSampleTimes').getValue(frameTime)
+        currentTime = overrides.getChild('currentTime').getValue(frameTime)
+        shutterOpen = overrides.getChild('shutterOpen').getValue(frameTime)
+        shutterClose = overrides.getChild('shutterClose').getValue(frameTime)
+
+        if motionSampleTimes:
+            floatTimes = [float(t) for t in motionSampleTimes.split(' ')]
+            gb1.set('motionSampleTimes', FnAttribute.FloatAttribute(floatTimes))
+
+        if currentTime:
+            gb1.set('currentTime', FnAttribute.FloatAttribute(float(currentTime)))
+
+        if shutterOpen:
+            gb1.set('shutterOpen', FnAttribute.FloatAttribute(float(shutterOpen)))
+
+        if shutterClose:
+            gb1.set('shutterClose', FnAttribute.FloatAttribute(float(shutterClose)))
+
+        overridesAttr = gb1.build()
+
+        if overridesAttr.getNumberOfChildren() > 0:
+
+            # Encode per-location overrides in the graph state
+            gb2 = FnAttribute.GroupBuilder()
+
+            for loc in locations.getChildren():
+                encodedLoc = FnAttribute.DelimiterEncode(loc.getValue(frameTime))
+                if encodedLoc:
+                    gb2.set('overrides.' + encodedLoc, overridesAttr)
+
+            existingValue = (
+                interface.getGraphState().getDynamicEntry('var:pxrUsdInSession'))
+            if isinstance(existingValue, FnAttribute.GroupAttribute):
+                gb2.deepUpdate(existingValue)
+
+            graphState = (graphState.edit()
+                    .setDynamicEntry('var:pxrUsdInSession', gb2.build())
+                    .build())
+
+    interface.addInputRequest('in', graphState)
+
+nb.setBuildOpChainFnc(buildOpChain)
+
+nb.build()
+
+#-----------------------------------------------------------------------------
+
+nb = Nodes3DAPI.NodeTypeBuilder('PxrUsdInActivationSet')
+nb.setInputPortNames(("in",))
+
+nb.setParametersTemplateAttr(FnAttribute.GroupBuilder()
+    .set('locations', '')
+    .set('active', 0)
+    .build(),
+        forceArrayNames=('locations',))
+
+nb.setHintsForParameter('locations', {
+    'widget' : 'scenegraphLocationArray',
+    'help' : 'locations to activate or deactivate.'
+})
+
+nb.setHintsForParameter('active', {
+    'widget' : 'boolean',
+})
+
+def buildOpChain(self, interface):
+    interface.setExplicitInputRequestsEnabled(True)
+    
+    graphState = interface.getGraphState()
+    frameTime = interface.getFrameTime()
+    locations = self.getParameter("locations")
+
+    if locations:
+        state = FnAttribute.IntAttribute(
+            bool(self.getParameter("active").getValue(frameTime)))
+        
+        gb = FnAttribute.GroupBuilder()
+
+        for loc in locations.getChildren():
+            gb.set("activations." + FnAttribute.DelimiterEncode(
+                    loc.getValue(frameTime)), state)
+
+        existingValue = (
+                interface.getGraphState().getDynamicEntry("var:pxrUsdInSession"))
+        
+        if isinstance(existingValue, FnAttribute.GroupAttribute):
+            gb.deepUpdate(existingValue)
+        
+        graphState = (graphState.edit()
+                .setDynamicEntry("var:pxrUsdInSession", gb.build())
+                .build())
+        
+    interface.addInputRequest("in", graphState)
+
+nb.setBuildOpChainFnc(buildOpChain)
+
+nb.build()
+
+
+#-----------------------------------------------------------------------------
+
+nb = Nodes3DAPI.NodeTypeBuilder('PxrUsdInAttributeSet')
+
+nb.setInputPortNames(("in",))
+
+nb.setParametersTemplateAttr(FnAttribute.GroupBuilder()
+    .set('locations', '')
+    .set('attrName', 'attr')
+    .set('type', 'float')
+    
+    .set('numberValue', 1.0)
+    .set('stringValue', '')
+    .build(),
+        forceArrayNames=(
+            'locations',
+            'numberValue',
+            'stringValue'))
+
+nb.setHintsForParameter('locations', {
+    'widget' : 'scenegraphLocationArray',
+    'help' : 'locations on which to set.'
+})
+
+nb.setHintsForParameter('type', {
+    'widget' : 'popup',
+    'options' : ['int', 'float', 'double', 'string'],
+})
+
+nb.setHintsForParameter('numberValue', {
+    'widget' : 'sortableArray',
+    'conditionalVisOp' : 'notEqualTo',
+    'conditionalVisPath' : '../type',
+    'conditionalVisValue' : 'string',
+})
+
+nb.setHintsForParameter('stringValue', {
+    'widget' : 'sortableArray',
+    'conditionalVisOp' : 'equalTo',
+    'conditionalVisPath' : '../type',
+    'conditionalVisValue' : 'string',
+})
+
+__numberAttrTypes = {
+    'int' : FnAttribute.IntAttribute,
+    'float' : FnAttribute.FloatAttribute,
+    'double': FnAttribute.DoubleAttribute,
+}
+
+def buildOpChain(self, interface):
+    interface.setExplicitInputRequestsEnabled(True)
+    
+    graphState = interface.getGraphState()
+    frameTime = interface.getFrameTime()
+    locationsParam = self.getParameter("locations")
+    
+    attrName = self.getParameter('attrName').getValue(
+            frameTime).replace('.', ':')
+    
+    locations = [y for y in
+        (x.getValue(frameTime) for x in locationsParam.getChildren()) if y]
+    
+    if attrName and locations:
+        typeValue = self.getParameter('type').getValue(frameTime)
+        if typeValue == 'string':
+            valueAttr = interface.buildAttrFromParam(
+                    self.getParameter('stringValue'))
+        else:
+            valueAttr =  interface.buildAttrFromParam(
+                    self.getParameter('numberValue'),
+                    numberType=__numberAttrTypes.get(typeValue,
+                                FnAttribute.FloatAttribute))
+        
+        
+        entryGroup = (FnAttribute.GroupBuilder()
+            .set('value', valueAttr)
+            .build())
+        
+        gb = FnAttribute.GroupBuilder()
+
+        for loc in locations:
+            gb.set("attrs.%s.%s" % (
+                    FnAttribute.DelimiterEncode(loc), attrName,), entryGroup)
+
+        existingValue = (
+                interface.getGraphState().getDynamicEntry("var:pxrUsdInSession"))
+        
+        if isinstance(existingValue, FnAttribute.GroupAttribute):
+            gb.deepUpdate(existingValue)
+        
+        graphState = (graphState.edit()
+                .setDynamicEntry("var:pxrUsdInSession", gb.build())
+                .build())
+        
+    interface.addInputRequest("in", graphState)
+
+nb.setBuildOpChainFnc(buildOpChain)
 
 nb.build()

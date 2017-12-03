@@ -21,12 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/kind/registry.h"
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/registry.h"
 #include "pxr/base/tf/instantiateSingleton.h"
 #include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/stringUtils.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_INSTANTIATE_SINGLETON(KindRegistry);
 TF_DEFINE_PUBLIC_TOKENS(KindTokens, KIND_TOKENS);
@@ -57,7 +61,7 @@ void
 KindRegistry::_Register(const TfToken& kind,
                         const TfToken& baseKind)
 {
-    if (not TfIsValidIdentifier(kind.GetString())) {
+    if (!TfIsValidIdentifier(kind.GetString())) {
         TF_CODING_ERROR("Invalid kind: '%s'", kind.GetText());
         return;
     }
@@ -85,7 +89,7 @@ KindRegistry::HasKind(const TfToken& kind)
 bool
 KindRegistry::_HasKind(const TfToken& kind) const
 {
-    return _kindMap.count(kind);
+    return _kindMap.count(kind) != 0;
 }
 
 /* static */
@@ -137,21 +141,21 @@ KindRegistry::_IsA(const TfToken& derivedKind, const TfToken &baseKind) const
     return _IsA(it->second.baseKind, baseKind);
 }
 
-TfToken::HashSet
+std::vector<TfToken>
 KindRegistry::GetAllKinds()
 {
     return KindRegistry::GetInstance()._GetAllKinds();
 }
 
-TfToken::HashSet
+std::vector<TfToken>
 KindRegistry::_GetAllKinds() const
 {
-    TfToken::HashSet kinds;
-
-    TF_FOR_ALL(it, _kindMap)
-        kinds.insert(it->first);
-
-    return kinds;
+    std::vector<TfToken> r;
+    r.reserve(_kindMap.size());
+    for (const auto &entry: _kindMap) {
+        r.push_back(entry.first);
+    }
+    return r;
 }
 
 // Helper function to make reading from dictionaries easier
@@ -160,7 +164,7 @@ _GetKey(const JsObject &dict, const std::string &key, JsObject *value)
 {
     JsObject::const_iterator i = dict.find(key);
     if (i != dict.end() && i->second.IsObject()) {
-        *value = i->second.GetObject();
+        *value = i->second.GetJsObject();
         return true;
     }
     return false;
@@ -215,3 +219,4 @@ KindRegistry::_RegisterDefaults()
     }
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

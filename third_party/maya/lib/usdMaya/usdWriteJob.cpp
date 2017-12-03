@@ -21,27 +21,26 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/usdWriteJob.h"
 
-#include "usdMaya/MayaMeshWriter.h"
-#include "usdMaya/MayaNurbsCurveWriter.h"
-#include "usdMaya/MayaNurbsSurfaceWriter.h"
+#include "usdMaya/JobArgs.h"
+#include "usdMaya/MayaPrimWriter.h"
 #include "usdMaya/MayaTransformWriter.h"
-#include "usdMaya/MayaCameraWriter.h"
 
-#include "usdMaya/translatorLook.h"
+#include "usdMaya/translatorMaterial.h"
 #include "usdMaya/primWriterRegistry.h"
-#include "usdMaya/PluginPrimWriter.h"
 
 #include "usdMaya/Chaser.h"
 #include "usdMaya/ChaserRegistry.h"
 
+#include "pxr/usd/ar/resolver.h"
 #include "pxr/usd/usd/modelAPI.h"
 #include "pxr/usd/kind/registry.h"
 
 #include "pxr/usd/usd/variantSets.h"
 #include "pxr/usd/usd/editContext.h"
-#include "pxr/usd/usd/treeIterator.h"
+#include "pxr/usd/usd/primRange.h"
 #include "pxr/usd/usdGeom/metrics.h"
 #include "pxr/usd/usdGeom/xform.h"
 #include "pxr/usd/usdUtils/pipeline.h"
@@ -67,9 +66,11 @@
 #include <map>
 #include <unordered_set>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 usdWriteJob::usdWriteJob(const JobExportArgs & iArgs) :
-    mArgs(iArgs),
-    mExportedGprims(false)
+    mModelKindWriter(iArgs), mJobCtx(iArgs)
 {
 }
 
@@ -86,8 +87,8 @@ bool usdWriteJob::beginJob(const std::string &iFileName,
     // Check for DAG nodes that are a child of an already specified DAG node to export
     // if that's the case, report the issue and skip the export
     PxrUsdMayaUtil::ShapeSet::const_iterator m, n;
-    PxrUsdMayaUtil::ShapeSet::const_iterator endPath = mArgs.dagPaths.end();
-    for (m = mArgs.dagPaths.begin(); m != endPath; ) {
+    PxrUsdMayaUtil::ShapeSet::const_iterator endPath = mJobCtx.mArgs.dagPaths.end();
+    for (m = mJobCtx.mArgs.dagPaths.begin(); m != endPath; ) {
         MDagPath path1 = *m; m++;
         for (n = m; n != endPath; n++) {
             MDagPath path2 = *n;
@@ -102,38 +103,30 @@ bool usdWriteJob::beginJob(const std::string &iFileName,
         }  // for n
     }  // for m
 
-    // make sure the file is a valid one with proper extension
-    if (TfStringEndsWith(iFileName,".usd") || 
-        TfStringEndsWith(iFileName,".usda") ||
-        TfStringEndsWith(iFileName,".usdb") ||
-        TfStringEndsWith(iFileName,".usdc")) {
+    // Make sure the file name is a valid one with a proper USD extension.
+    const std::string iFileExtension = TfStringGetSuffix(iFileName, '.');
+    if (SdfLayer::IsAnonymousLayerIdentifier(iFileName) ||
+            iFileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionDefault || 
+            iFileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionASCII || 
+            iFileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionCrate) {
         mFileName = iFileName;
     } else {
-        mFileName = iFileName + ".usda";
+        mFileName = TfStringPrintf("%s.%s",
+                                   iFileName.c_str(),
+                                   PxrUsdMayaTranslatorTokens->UsdFileExtensionDefault.GetText());
     }
-    
+
     MGlobal::displayInfo("usdWriteJob::beginJob: Create stage file "+MString(mFileName.c_str()));
 
-    if (append) {
-        mStage = UsdStage::Open(SdfLayer::FindOrOpen(mFileName));
-        if (!mStage) {
-            MGlobal::displayError("Failed to open stage file "+MString(mFileName.c_str()));
-            return false;
-            }
-    } else {
-        mStage = UsdStage::CreateNew(mFileName);
-        if (!mStage) {
-            MGlobal::displayError("Failed to create stage file "+MString(mFileName.c_str()));
-            return false;
-        }
+    if (!mJobCtx.openFile(mFileName, append)) {
+        return false;
     }
 
     // Set time range for the USD file
-    mStage->SetStartTimeCode(startTime);
-    mStage->SetEndTimeCode(endTime);
+    mJobCtx.mStage->SetStartTimeCode(startTime);
+    mJobCtx.mStage->SetEndTimeCode(endTime);
     
-    mPathsThatMayHaveKind.clear();
-    mExportedGprims = false;
+    mModelKindWriter.Reset();
 
     // Setup the requested render layer mode:
     //     defaultLayer    - Switch to the default render layer before exporting,
@@ -150,17 +143,17 @@ bool usdWriteJob::beginJob(const std::string &iFileName,
     MFnRenderLayer currentLayer(MFnRenderLayer::currentLayer());
     mCurrentRenderLayerName = currentLayer.name();
 
-    if (mArgs.renderLayerMode == PxUsdExportJobArgsTokens->modelingVariant) {
+    if (mJobCtx.mArgs.renderLayerMode == PxUsdExportJobArgsTokens->modelingVariant) {
         // Handle usdModelRootOverridePath for USD Variants
         MFnRenderLayer::listAllRenderLayers(mRenderLayerObjs);
         if (mRenderLayerObjs.length() > 1) {
-            mArgs.usdModelRootOverridePath = SdfPath("/_BaseModel_");
+            mJobCtx.mArgs.usdModelRootOverridePath = SdfPath("/_BaseModel_");
         }
     }
 
     // Switch to the default render layer unless the renderLayerMode is
     // 'currentLayer', or the default layer is already the current layer.
-    if (mArgs.renderLayerMode != PxUsdExportJobArgsTokens->currentLayer &&
+    if (mJobCtx.mArgs.renderLayerMode != PxUsdExportJobArgsTokens->currentLayer &&
             MFnRenderLayer::currentLayer() != MFnRenderLayer::defaultRenderLayer()) {
         // Set the RenderLayer to the default render layer
         MFnRenderLayer defaultLayer(MFnRenderLayer::defaultRenderLayer());
@@ -175,8 +168,8 @@ bool usdWriteJob::beginJob(const std::string &iFileName,
     // less work to hash and compare than full path names.
     TfHashSet<std::string, TfHash> argDagPaths;
     TfHashSet<std::string, TfHash> argDagPathParents;
-    PxrUsdMayaUtil::ShapeSet::const_iterator end = mArgs.dagPaths.end();
-    for (PxrUsdMayaUtil::ShapeSet::const_iterator it = mArgs.dagPaths.begin();
+    PxrUsdMayaUtil::ShapeSet::const_iterator end = mJobCtx.mArgs.dagPaths.end();
+    for (PxrUsdMayaUtil::ShapeSet::const_iterator it = mJobCtx.mArgs.dagPaths.begin();
             it != end; ++it) {
         MDagPath curDagPath = *it;
         std::string curDagPathStr(curDagPath.partialPathName().asChar());
@@ -215,65 +208,74 @@ bool usdWriteJob::beginJob(const std::string &iFileName,
             continue;
         }
 
-        if (!addToPrimWriterList(curDagPath) && curDagPath.length() > 0) {
+        if (!needToTraverse(curDagPath) &&
+            curDagPath.length() > 0) {
             // This dagPath and all of its children should be pruned.
             itDag.prune();
-            continue;
-        }
-    }
+        } else {
+            MayaPrimWriterPtr primWriter = mJobCtx.createPrimWriter(curDagPath);
 
-    // Write Data (non-animated)
-    for ( MayaPrimWriterPtr const & primWriter :  mMayaPrimWriterList) {
-        if (UsdPrim usdPrim = primWriter->write( UsdTimeCode::Default() )) {
-            mDagPathToUsdPathMap[primWriter->getDagPath()] = usdPrim.GetPath();
+            if (primWriter) {
+                mJobCtx.mMayaPrimWriterList.push_back(primWriter);
 
-            // if we are merging transforms and the object derives from
-            // MayaTransformWriter but isn't actually a transform node, we need
-            // to add it's parent.
-            if (mArgs.mergeTransformAndShape) {
-                if (MayaTransformWriterPtr transformWriter 
-                        = boost::dynamic_pointer_cast<MayaTransformWriter>(primWriter)) {
-                    mDagPathToUsdPathMap[transformWriter->getTransformDagPath()] =
-                        usdPrim.GetPath();
+                // Write out data (non-animated/default values).
+                if (const auto& usdPrim = primWriter->getPrim()) {
+                    primWriter->write(UsdTimeCode::Default());
+
+                    MDagPath dag = primWriter->getDagPath();
+                    mDagPathToUsdPathMap[dag] = usdPrim.GetPath();
+
+                    // If we are merging transforms and the object derives from
+                    // MayaTransformWriter but isn't actually a transform node, we
+                    // need to add its parent.
+                    if (mJobCtx.mArgs.mergeTransformAndShape) {
+                        MayaTransformWriterPtr xformWriter =
+                            std::dynamic_pointer_cast<MayaTransformWriter>(primWriter);
+                        if (xformWriter) {
+                            MDagPath xformDag = xformWriter->getTransformDagPath();
+                            mDagPathToUsdPathMap[xformDag] = usdPrim.GetPath();
+                        }
+                    }
+
+                     mModelKindWriter.OnWritePrim(usdPrim, primWriter);
+                }
+
+                if (primWriter->shouldPruneChildren()) {
+                    itDag.prune();
                 }
             }
-
-            if (primWriter->exportsGprims()){
-                mExportedGprims = true;
-            }
-            if (primWriter->exportsReferences()){
-                mPathsThatMayHaveKind.push_back(usdPrim.GetPath());
-            }
         }
     }
 
-    // Writing Looks/Shading
-    PxrUsdMayaTranslatorLook::ExportShadingEngines(
-                mStage, 
-                mArgs.dagPaths,
-                mArgs.shadingMode,
-                mArgs.mergeTransformAndShape,
-                mArgs.usdModelRootOverridePath);
+    // Writing Materials/Shading
+    PxrUsdMayaTranslatorMaterial::ExportShadingEngines(
+                mJobCtx.mStage,
+                mJobCtx.mArgs.dagPaths,
+                mJobCtx.mArgs.shadingMode,
+                mJobCtx.mArgs.mergeTransformAndShape,
+                mJobCtx.mArgs.usdModelRootOverridePath);
 
-    UsdPrimSiblingRange usdRootPrims = mStage->GetPseudoRoot().GetChildren();
-    makeModelHierarchy(usdRootPrims);
+    if (!mModelKindWriter.MakeModelHierarchy(mJobCtx.mStage)) {
+        return false;
+    }
 
     // now we populate the chasers and run export default
     mChasers.clear();
-    PxrUsdMayaChaserRegistry::FactoryContext ctx(mStage, mDagPathToUsdPathMap, mArgs);
-    for (const std::string& chaserName: mArgs.chaserNames) {
+    PxrUsdMayaChaserRegistry::FactoryContext ctx(mJobCtx.mStage, mDagPathToUsdPathMap, mJobCtx.mArgs);
+    for (const std::string& chaserName : mJobCtx.mArgs.chaserNames) {
         if (PxrUsdMayaChaserRefPtr fn = 
                 PxrUsdMayaChaserRegistry::GetInstance().Create(chaserName, ctx)) {
             mChasers.push_back(fn);
         }
         else {
-            std::string error = TfStringPrintf("chaser %s failed\n", chaserName.c_str());
+            std::string error = TfStringPrintf("Failed to create chaser: %s",
+                                               chaserName.c_str());
             MGlobal::displayError(MString(error.c_str()));
         }
     }
 
     for (const PxrUsdMayaChaserRefPtr& chaser : mChasers) {
-        if (not chaser->ExportDefault()) {
+        if (!chaser->ExportDefault()) {
             return false;
         }
     }
@@ -286,7 +288,7 @@ bool usdWriteJob::beginJob(const std::string &iFileName,
 //  Frame to process
 void usdWriteJob::evalJob(double iFrame)
 {
-    for ( MayaPrimWriterPtr const & primWriter :  mMayaPrimWriterList) {
+    for ( MayaPrimWriterPtr const & primWriter :  mJobCtx.mMayaPrimWriterList) {
         UsdTimeCode usdTime(iFrame);
         primWriter->write(usdTime);
     }
@@ -297,106 +299,10 @@ void usdWriteJob::evalJob(double iFrame)
 }
 
 
-void usdWriteJob::makeModelHierarchy(UsdPrimSiblingRange const &usdRootPrims)
-{
-    // For any root-prim that doesn't already have an authored kind 
-    // (thinking ahead to being able to specify USD_kind per bug/128430),
-    // make it a model.  If there were any gprims authored directly during
-    // export, we will make the roots be component models, and author
-    // kind=subcomponent on any prim-references that would otherwise
-    // evaluate to some model-kind; we may in future make this behavior
-    // a jobargs option.
-    //
-    // If there were no gprims directly authored, we'll make it an assembly 
-    // instead, and attempt to create a valid model-hierarchy if any of the
-    // references we authored are references to models.
-    //
-    // Note that the code below does its best to facilitate having multiple,
-    // independent root-trees/models in the same export, however the
-    // analysis we have done about gprims and references authored is global,
-    // so all trees will get the same treatment/kind.
-
-    TfToken defaultRootKind = (mExportedGprims ? 
-                               KindTokens->component :
-                               KindTokens->assembly);
-    std::map<SdfPath, bool> rootPrimIsComponent;
-    
-    // One pass through root prims to fill in root-kinds
-    for ( UsdPrim const& prim : usdRootPrims) {
-        UsdModelAPI usdRootModel(prim);
-        TfToken  kind;
-        if (not usdRootModel.GetKind(&kind) or kind.IsEmpty()){
-            usdRootModel.SetKind(kind=defaultRootKind);
-        }
-        rootPrimIsComponent[prim.GetPath()] = KindRegistry::IsA(kind, 
-                                                        KindTokens->component);
-    }
-    
-    std::unordered_set<SdfPath, SdfPath::Hash> pathsToBeGroup;
-    for (SdfPath const &path : mPathsThatMayHaveKind){
-        // The kind of the root prim under which each reference was authored
-        // informs how we will fix-up/fill-in kind on it and its ancestors
-        UsdPrim prim = mStage->GetPrimAtPath(path);
-        if (not prim)
-            continue;
-        UsdModelAPI usdModel(prim);
-        TfToken  kind;
-        
-        // Nothing to fix if there's no resolved kind
-        if (not usdModel.GetKind(&kind) or kind.IsEmpty())
-            continue;
-        
-        SdfPathVector  ancestorPaths;
-        path.GetParentPath().GetPrefixes(&ancestorPaths);
-        if (ancestorPaths.size() < 1) {
-            continue;
-        }
-        if (rootPrimIsComponent[ancestorPaths[0]]){
-            // override any authored kind below the root to subcomponent
-            // to avoid broken model-hierarchy
-            usdModel.SetKind(KindTokens->subcomponent);
-        } else {
-            // Just insert the paths into a set at this point so that we
-            // can do the authoring in batch Sdf API for efficiency.
-            for (size_t i=1; i<ancestorPaths.size(); ++i){
-                UsdPrim ancestorPrim = mStage->GetPrimAtPath(ancestorPaths[i]);
-                if (not ancestorPrim)
-                    continue;
-                UsdModelAPI ancestorModel(ancestorPrim);
-                TfToken  kind;
-                
-                if (not usdModel.GetKind(&kind) or 
-                    not KindRegistry::IsA(kind, KindTokens->group)){
-                    pathsToBeGroup.insert(ancestorPaths[i]);
-                }
-            }
-        }
-    }
-
-    {        
-        // We drop down to Sdf to do the kind-authoring, because authoring
-        // kind induces recomposition since we cache model-hierarchy.  Using
-        // Sdf api, we can bundle the changes into a change block, and do all
-        // the recomposition at once
-        SdfLayerHandle layer = mStage->GetEditTarget().GetLayer();
-        SdfChangeBlock block;
-
-        for (SdfPath const &path : pathsToBeGroup){
-            SdfPrimSpecHandle primSpec = SdfCreatePrimInLayer(layer, path);
-            if (not primSpec){
-                MGlobal::displayError("Failed to create primSpec for setting kind at path:" + MString(path.GetText()));
-            }
-            else {
-                primSpec->SetKind(KindTokens->group);
-            }
-        }       
-    }
-}
-
-
 void usdWriteJob::endJob()
 {
-    UsdPrimSiblingRange usdRootPrims = mStage->GetPseudoRoot().GetChildren();
+    mJobCtx.processInstances();
+    UsdPrimSiblingRange usdRootPrims = mJobCtx.mStage->GetPseudoRoot().GetChildren();
     
     // Write Variants (to first root prim path)
     UsdPrim usdRootPrim;
@@ -408,7 +314,7 @@ void usdWriteJob::endJob()
     }
 
     if (usdRootPrim && mRenderLayerObjs.length() > 1 && 
-        !mArgs.usdModelRootOverridePath.IsEmpty()) {
+        !mJobCtx.mArgs.usdModelRootOverridePath.IsEmpty()) {
             // Get RenderLayers
             //   mArgs.usdModelRootOverridePath:
             //     Require mArgs.usdModelRootOverridePath to be set so that 
@@ -437,17 +343,17 @@ void usdWriteJob::endJob()
     if (MGlobal::isZAxisUp()){
         upAxis = UsdGeomTokens->z;
     }
-    UsdGeomSetStageUpAxis(mStage, upAxis);
+    UsdGeomSetStageUpAxis(mJobCtx.mStage, upAxis);
     if (usdRootPrim){
         // We have already decided above that 'usdRootPrim' is the important
         // prim for the export... usdVariantRootPrimPath
-        mStage->GetRootLayer()->SetDefaultPrim(defaultPrim);
+        mJobCtx.mStage->GetRootLayer()->SetDefaultPrim(defaultPrim);
     }
-    if (mStage->GetRootLayer()->PermissionToSave()) {
-        mStage->GetRootLayer()->Save();
+    if (mJobCtx.mStage->GetRootLayer()->PermissionToSave()) {
+        mJobCtx.mStage->GetRootLayer()->Save();
     }
-    mStage->Close();
-    mMayaPrimWriterList.clear(); // clear this so that no stage references are left around
+    mJobCtx.mStage = UsdStageRefPtr();
+    mJobCtx.mMayaPrimWriterList.clear(); // clear this so that no stage references are left around
     MGlobal::displayInfo("usdWriteJob::endJob Saving Stage");
 }
 
@@ -457,7 +363,7 @@ TfToken usdWriteJob::writeVariants(const UsdPrim &usdRootPrim)
     std::string defaultModelingVariant;
 
     // Get the usdVariantRootPrimPath (optionally filter by renderLayer prefix)
-    MayaPrimWriterPtr firstPrimWriterPtr = *mMayaPrimWriterList.begin();
+    MayaPrimWriterPtr firstPrimWriterPtr = *mJobCtx.mMayaPrimWriterList.begin();
     std::string firstPrimWriterPathStr( firstPrimWriterPtr->getDagPath().fullPathName().asChar() );
     std::replace( firstPrimWriterPathStr.begin(), firstPrimWriterPathStr.end(), '|', '/');
     std::replace( firstPrimWriterPathStr.begin(), firstPrimWriterPathStr.end(), ':', '_'); // replace namespace ":" with "_"
@@ -466,9 +372,9 @@ TfToken usdWriteJob::writeVariants(const UsdPrim &usdRootPrim)
 
     // Create a new usdVariantRootPrim and reference the Base Model UsdRootPrim
     //   This is done for reasons as described above under mArgs.usdModelRootOverridePath
-    UsdPrim usdVariantRootPrim = mStage->DefinePrim(usdVariantRootPrimPath);
+    UsdPrim usdVariantRootPrim = mJobCtx.mStage->DefinePrim(usdVariantRootPrimPath);
     TfToken defaultPrim = usdVariantRootPrim.GetName();
-    usdVariantRootPrim.GetReferences().AddInternal(usdRootPrim.GetPath());
+    usdVariantRootPrim.GetReferences().AddInternalReference(usdRootPrim.GetPath());
     usdVariantRootPrim.SetActive(true);
     usdRootPrim.SetActive(false);
 
@@ -516,19 +422,18 @@ TfToken usdWriteJob::writeVariants(const UsdPrim &usdRootPrim)
         }
         if (!tableOfActivePaths.empty()) {
             { // == BEG: Scope for Variant EditContext
-                // See xref: /mainline/third/plugin/px_usdBuildPlug/testenv/testPxUsdBuildPlugConstraints.py
                 // Create the variantSet and variant
-                UsdVariantSet modelingVariantSet = usdVariantRootPrim.GetVariantSets().FindOrCreate("modelingVariant");
-                modelingVariantSet.FindOrCreateVariant(variantName);
+                UsdVariantSet modelingVariantSet = usdVariantRootPrim.GetVariantSets().AddVariantSet("modelingVariant");
+                modelingVariantSet.AddVariant(variantName);
                 modelingVariantSet.SetVariantSelection(variantName);
                 // Set the Edit Context
                 UsdEditTarget editTarget = modelingVariantSet.GetVariantEditTarget();
-                UsdEditContext editContext(mStage, editTarget);
+                UsdEditContext editContext(mJobCtx.mStage, editTarget);
 
                 // == Activate/Deactivate UsdPrims
-                UsdTreeIterator it = UsdTreeIterator::AllPrims(mStage->GetPseudoRoot());
+                UsdPrimRange rng = UsdPrimRange::AllPrims(mJobCtx.mStage->GetPseudoRoot());
                 std::vector<UsdPrim> primsToDeactivate;
-                for ( ; it; ++it) {
+                for (auto it = rng.begin(); it != rng.end(); ++it) {
                     UsdPrim usdPrim = *it;
                     // For all xformable usdPrims...
                     if (usdPrim && usdPrim.IsA<UsdGeomXformable>()) {
@@ -546,7 +451,7 @@ TfToken usdWriteJob::writeVariants(const UsdPrim &usdRootPrim)
                         }
                     }
                 }
-                // Now deactivate the prims (done outside of the UsdTreeIterator 
+                // Now deactivate the prims (done outside of the UsdPrimRange 
                 // so not to modify the iterator while in the loop)
                 for ( UsdPrim const& prim : primsToDeactivate ) {
                     prim.SetActive(false);
@@ -563,100 +468,19 @@ TfToken usdWriteJob::writeVariants(const UsdPrim &usdRootPrim)
     return defaultPrim;
 }
 
-// This method returns false if the given dagPath should be ignored and
-// its subgraph should be pruned from the traversal. Otherwise, it returns true.
-bool usdWriteJob::addToPrimWriterList(MDagPath &curDag)
+bool usdWriteJob::needToTraverse(const MDagPath& curDag)
 {
-    MObject ob = curDag.node();
-
-    // NOTE: Already skipping all intermediate objects
-    // skip all intermediate nodes (and their children)
-    if (PxrUsdMayaUtil::isIntermediate(ob))
-    {
-        return false;
-    }
-
-    // skip nodes that aren't renderable (and their children)
-    if (mArgs.excludeInvisible && !PxrUsdMayaUtil::isRenderable(ob))
-    {
-        return false;
-    }
-
-    // Check whether a PluginPrimWriter exists for the node first, since plugin
-    // nodes may provide the same function sets as native Maya nodes. If a
-    // writer can't be found, we'll fall back on the standard writers below.
-    if (ob.hasFn(MFn::kPluginDependNode) && ob.hasFn(MFn::kDagNode) && ob.hasFn(MFn::kDependencyNode)) {
-        MFnDependencyNode depNodeFn(ob);
-        MPxNode *pxNode = depNodeFn.userNode();
-
-        std::string mayaTypeName(pxNode->typeName().asChar());
-
-        if (PxrUsdMayaPrimWriterRegistry::WriterFn primWriter =
-                PxrUsdMayaPrimWriterRegistry::Find(mayaTypeName)) {
-            PxrUsdExport_PluginPrimWriter::Ptr primPtr(new PxrUsdExport_PluginPrimWriter(
-                        curDag, mStage, mArgs, primWriter));
-            if (primPtr->isValid()) {
-                mMayaPrimWriterList.push_back(primPtr);
-                // We found a PluginPrimWriter that handles this node type, so
-                // return now.
-                return true;
-            }
-        }
-    }
-
-    if (ob.hasFn(MFn::kTransform) || ob.hasFn(MFn::kLocator)) {
-        MayaTransformWriterPtr primPtr(new MayaTransformWriter(curDag, mStage, mArgs));
-        if (primPtr->isValid() ) {
-            mMayaPrimWriterList.push_back( primPtr );
-        }
-    }
-    else if (ob.hasFn(MFn::kMesh)) {
-        MayaMeshWriterPtr primPtr(new MayaMeshWriter(curDag, mStage, mArgs));
-        if (primPtr->isValid() ) {
-            mMayaPrimWriterList.push_back( primPtr );
-        }
-    }
-    else if (ob.hasFn(MFn::kNurbsCurve)) {
-        MayaNurbsCurveWriterPtr primPtr(new MayaNurbsCurveWriter(curDag, mStage, mArgs));
-        if (primPtr->isValid() ) {
-            mMayaPrimWriterList.push_back( primPtr );
-        }
-    }
-    else if (ob.hasFn(MFn::kNurbsSurface)) {
-        MayaNurbsSurfaceWriterPtr primPtr(new MayaNurbsSurfaceWriter(curDag, mStage, mArgs));
-        if (primPtr->isValid() ) {
-            mMayaPrimWriterList.push_back( primPtr );
-        }
-    }
-    else if (ob.hasFn(MFn::kCamera)) {
-        if (!mArgs.exportDefaultCameras) {
-            // Ignore default cameras
-            MString fullPathName = curDag.fullPathName();
-            if (fullPathName == "|persp|perspShape" ||
-                fullPathName == "|top|topShape"     ||
-                fullPathName == "|front|frontShape" ||
-                fullPathName == "|side|sideShape") {
-                return false;
-            }
-        }
-        MayaCameraWriterPtr primPtr(new MayaCameraWriter(curDag, mStage, mArgs));
-        if (primPtr->isValid() ) {
-            mMayaPrimWriterList.push_back( primPtr );
-        }
-    }
-
-    return true;
+    return mJobCtx.needToTraverse(curDag);
 }
-
 
 void usdWriteJob::perFrameCallback(double iFrame)
 {
-    if (!mArgs.melPerFrameCallback.empty()) {
-        MGlobal::executeCommand(mArgs.melPerFrameCallback.c_str(), true);
+    if (!mJobCtx.mArgs.melPerFrameCallback.empty()) {
+        MGlobal::executeCommand(mJobCtx.mArgs.melPerFrameCallback.c_str(), true);
     }
 
-    if (!mArgs.pythonPerFrameCallback.empty()) {
-        MGlobal::executePythonCommand(mArgs.pythonPerFrameCallback.c_str(), true);
+    if (!mJobCtx.mArgs.pythonPerFrameCallback.empty()) {
+        MGlobal::executePythonCommand(mJobCtx.mArgs.pythonPerFrameCallback.c_str(), true);
     }
 }
 
@@ -665,13 +489,16 @@ void usdWriteJob::perFrameCallback(double iFrame)
 // Also call the post callbacks
 void usdWriteJob::postCallback()
 {
-    if (!mArgs.melPostCallback.empty()) {
-        MGlobal::executeCommand(mArgs.melPostCallback.c_str(), true);
+    if (!mJobCtx.mArgs.melPostCallback.empty()) {
+        MGlobal::executeCommand(mJobCtx.mArgs.melPostCallback.c_str(), true);
     }
 
-    if (!mArgs.pythonPostCallback.empty()) {
-        MGlobal::executePythonCommand(mArgs.pythonPostCallback.c_str(), true);
+    if (!mJobCtx.mArgs.pythonPostCallback.empty()) {
+        MGlobal::executePythonCommand(mJobCtx.mArgs.pythonPostCallback.c_str(), true);
     }
 }
 
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

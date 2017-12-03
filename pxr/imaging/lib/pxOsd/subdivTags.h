@@ -21,16 +21,20 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file pxOsd/subdivTags.h
-///
-
 #ifndef PXOSD_SUBDIV_TAGS_H
 #define PXOSD_SUBDIV_TAGS_H
 
+/// \file pxOsd/subdivTags.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/pxOsd/api.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/base/tf/token.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class PxOsdSubdivTags
 ///
 /// Tags for non-hierarchial subdiv surfaces.
 ///
@@ -161,6 +165,7 @@ public:
     typedef size_t ID;
 
     /// Returns the hash value of this topology to be used for instancing.
+    PXOSD_API
     ID ComputeHash() const;
 
 private:
@@ -183,10 +188,14 @@ private:
     VtIntArray   _holeIndices;
 };
 
-std::ostream& operator << (std::ostream &out, PxOsdSubdivTags const &);
+PXOSD_API
+std::ostream& operator<<(std::ostream &out, PxOsdSubdivTags const &);
+PXOSD_API
 bool operator==(const PxOsdSubdivTags& lhs, const PxOsdSubdivTags& rhs);
+PXOSD_API
 bool operator!=(const PxOsdSubdivTags& lhs, const PxOsdSubdivTags& rhs);
 
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // PXOSD_SUBDIV_TAGS_H
-
-

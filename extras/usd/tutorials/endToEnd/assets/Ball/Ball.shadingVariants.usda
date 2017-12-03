@@ -1,4 +1,7 @@
 #usda 1.0
+(
+    defaultPrim = "Ball"
+)
 
 over "Ball" (
     variants = {
@@ -13,7 +16,7 @@ over "Ball" (
 
     over "Looks"
     {
-        over "BallLook"
+        over "BallMaterial"
         {
             over "BallTexture"
             {
@@ -24,7 +27,7 @@ over "Ball" (
         "Ball_1" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -42,7 +45,7 @@ over "Ball" (
         "Ball_10" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -60,7 +63,7 @@ over "Ball" (
         "Ball_11" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -78,7 +81,7 @@ over "Ball" (
         "Ball_12" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -96,7 +99,7 @@ over "Ball" (
         "Ball_13" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -114,7 +117,7 @@ over "Ball" (
         "Ball_14" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -132,7 +135,7 @@ over "Ball" (
         "Ball_15" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -150,7 +153,7 @@ over "Ball" (
         "Ball_2" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -168,7 +171,7 @@ over "Ball" (
         "Ball_3" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -186,7 +189,7 @@ over "Ball" (
         "Ball_4" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -204,7 +207,7 @@ over "Ball" (
         "Ball_5" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -222,7 +225,7 @@ over "Ball" (
         "Ball_6" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -240,7 +243,7 @@ over "Ball" (
         "Ball_7" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -258,7 +261,7 @@ over "Ball" (
         "Ball_8" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -276,7 +279,7 @@ over "Ball" (
         "Ball_9" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {
@@ -294,7 +297,7 @@ over "Ball" (
         "Cue" {
             over "Looks"
             {
-                over "BallLook"
+                over "BallMaterial"
                 {
                     over "BallTexture"
                     {

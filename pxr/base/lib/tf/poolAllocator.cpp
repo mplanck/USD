@@ -21,13 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/poolAllocator.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/mallocTag.h"
+
 #include <new>
 #include <algorithm>
 
-
+PXR_NAMESPACE_OPEN_SCOPE
 
 TfPoolAllocator::TfPoolAllocator(size_t elementSize, size_t bytesPerChunk)
     : _elementSize(elementSize),
@@ -87,7 +90,7 @@ TfPoolAllocator::GetElement(size_t index) const
 {
     // Verify assumption that there is no waste per chunk.
     TF_AXIOM(_bytesPerChunk % _elementSize == 0);
-    TF_AXIOM(not _freeCalled);
+    TF_AXIOM(!_freeCalled);
     size_t nelem = _bytesPerChunk / _elementSize;
     size_t chunk = index / nelem;
     TF_AXIOM(chunk < _chunks.size());
@@ -118,7 +121,7 @@ typedef std::pair<void*, size_t> _ChunkRecord;
  * Used by std::sort
  */
 static bool
-_RecordComparison (::_ChunkRecord a, ::_ChunkRecord b)
+_RecordComparison (_ChunkRecord a, _ChunkRecord b)
 {
     return a.first < b.first;
 }
@@ -138,16 +141,16 @@ _AddressInChunk(void* addr, void* start, size_t bytesPerChunk)
 /*
  * Return v[i] owning addr.
  */
-static ::_ChunkRecord*
-_LocateOwner(::_ChunkRecord v[],
+static _ChunkRecord*
+_LocateOwner(_ChunkRecord v[],
              size_t n, void* addr, size_t bytesPerChunk)
 {
     TF_AXIOM(n > 0);
-    ::_ChunkRecord* owner = NULL;
+    _ChunkRecord* owner = NULL;
     
     if (n < 5) {
         for (size_t i = 0; i < n; i++) {
-            if (::_AddressInChunk(addr, v[i].first, bytesPerChunk)) {
+            if (_AddressInChunk(addr, v[i].first, bytesPerChunk)) {
                 owner = &v[i];
                 break;
             }
@@ -162,7 +165,7 @@ _LocateOwner(::_ChunkRecord v[],
         while (low < high) {
             size_t middle = (low + high) / 2;
 
-            if (::_AddressInChunk(addr, v[middle].first, bytesPerChunk)) {
+            if (_AddressInChunk(addr, v[middle].first, bytesPerChunk)) {
                 owner = &v[middle];
                 break;
             }
@@ -172,7 +175,7 @@ _LocateOwner(::_ChunkRecord v[],
                 low = middle + 1;
         }
 
-        if (::_AddressInChunk(addr, v[low].first, bytesPerChunk))
+        if (_AddressInChunk(addr, v[low].first, bytesPerChunk))
             owner = &v[low];
     }
     
@@ -212,20 +215,20 @@ TfPoolAllocator::Reclaim()
            chunksFreed = 0,
            nChunks = _chunks.size();
 
-    ::_ChunkRecord* v = new ::_ChunkRecord[nChunks];
+    _ChunkRecord* v = new _ChunkRecord[nChunks];
     for (size_t i = 0; i < nChunks; i++)
-        v[i] = ::_ChunkRecord(_chunks[i], itemsPerChunk);
-    std::sort(&v[0], &v[nChunks], &::_RecordComparison);
+        v[i] = _ChunkRecord(_chunks[i], itemsPerChunk);
+    std::sort(&v[0], &v[nChunks], &_RecordComparison);
     
     for (_PoolNode* node = _freeList; node; node = node->next)  // (2)
-        ::_LocateOwner(v, nChunks, node, _bytesPerChunk)->second--;
+        _LocateOwner(v, nChunks, node, _bytesPerChunk)->second--;
 
                                                                 
     _PoolNode  dummyNode;                                       // (3)
     _PoolNode** tailPtr = &dummyNode.next;  // tail of new free list
 
     for (_freeListLength = 0; _freeList ; _freeList = _freeList->next) {
-        if (::_LocateOwner(v, nChunks, _freeList, _bytesPerChunk)->second > 0) {
+        if (_LocateOwner(v, nChunks, _freeList, _bytesPerChunk)->second > 0) {
             *tailPtr = _freeList;
             tailPtr = &_freeList->next;
             _freeListLength++;
@@ -238,7 +241,7 @@ TfPoolAllocator::Reclaim()
     _chunks.clear();                                            // (4)
     for (size_t i = 0; i < nChunks; i++) {
         if (v[i].second == 0) {
-            :: delete [] reinterpret_cast<char*>(v[i].first);
+             delete [] reinterpret_cast<char*>(v[i].first);
             chunksFreed++;
         }
         else
@@ -250,4 +253,4 @@ TfPoolAllocator::Reclaim()
     return chunksFreed * _bytesPerChunk;
 }
 
-
+PXR_NAMESPACE_CLOSE_SCOPE

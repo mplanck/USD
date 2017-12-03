@@ -24,16 +24,21 @@
 #ifndef SDF_PYLISTOP_H
 #define SDF_PYLISTOP_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/listOp.h"
-
 #include "pxr/base/arch/demangle.h"
 #include "pxr/base/tf/pyUtils.h"
 #include "pxr/base/tf/stringUtils.h"
 #include <boost/python.hpp>
 
-/// \class SdfPyWrapListOp<T>
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// \class SdfPyWrapListOp
+///
 /// Helper class for wrapping SdfListOp objects for Python. The template
-/// parameter is the specific SdfListOp type being wrapped (e.g., SdfPathListOp)
+/// parameter is the specific SdfListOp type being wrapped (e.g.,
+/// SdfPathListOp)
+///
 template <class T>
 class SdfPyWrapListOp {
 public:
@@ -48,6 +53,20 @@ public:
     }
  
 private:
+    static ItemVector _ApplyOperations1(const T& listOp, ItemVector input) {
+        ItemVector result = input;
+        listOp.ApplyOperations(&result);
+        return result;
+    }
+    static boost::python::object
+    _ApplyOperations2(const T& outer, const T& inner) {
+        if (boost::optional<T> r = outer.ApplyOperations(inner)) {
+            return boost::python::object(*r);
+        } else {
+            return boost::python::object();
+        }
+    }
+
     static void _Wrap(const std::string& name)
     {
         using namespace boost::python;
@@ -60,6 +79,8 @@ private:
 
             .def("Clear", &T::Clear)
             .def("ClearAndMakeExplicit", &T::ClearAndMakeExplicit)
+            .def("ApplyOperations", &This::_ApplyOperations1)
+            .def("ApplyOperations", &This::_ApplyOperations2)
 
             .add_property("explicitItems",
                 make_function(&T::GetExplicitItems,
@@ -69,6 +90,14 @@ private:
                 make_function(&T::GetAddedItems,
                               return_value_policy<return_by_value>()),
                 &T::SetAddedItems)
+            .add_property("prependedItems",
+                make_function(&T::GetPrependedItems,
+                              return_value_policy<return_by_value>()),
+                &T::SetPrependedItems)
+            .add_property("appendedItems",
+                make_function(&T::GetAppendedItems,
+                              return_value_policy<return_by_value>()),
+                &T::SetAppendedItems)
             .add_property("deletedItems",
                 make_function(&T::GetDeletedItems,
                               return_value_policy<return_by_value>()),
@@ -77,9 +106,8 @@ private:
                 make_function(&T::GetOrderedItems,
                               return_value_policy<return_by_value>()),
                 &T::SetOrderedItems)
-            .add_property("addedOrExplicitItems",
-                &This::_GetAddedOrExplicitItems,
-                &This::_SetAddedOrExplicitItems)
+            .def("GetAddedOrExplicitItems",
+                &This::_GetAddedOrExplicitItems)
 
             .add_property("isExplicit", &T::IsExplicit)
 
@@ -95,17 +123,13 @@ private:
     static 
     ItemVector _GetAddedOrExplicitItems(const T& listOp)
     {
-        return (listOp.IsExplicit() ? 
-                listOp.GetExplicitItems() : listOp.GetAddedItems());
-    }
-
-    static 
-    void _SetAddedOrExplicitItems(T& listOp, ItemVector& v)
-    {
-        listOp.IsExplicit() ? 
-            listOp.SetExplicitItems(v) : listOp.SetAddedItems(v);
+        ItemVector result;
+        listOp.ApplyOperations(&result);
+        return result;
     }
 
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_PYLISTOP_H

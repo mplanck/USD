@@ -21,12 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/usdReadJob.h"
 
 #include "usdMaya/primReaderRegistry.h"
 #include "usdMaya/shadingModeRegistry.h"
 #include "usdMaya/stageCache.h"
-#include "usdMaya/translatorLook.h"
+#include "usdMaya/translatorMaterial.h"
 #include "usdMaya/translatorModelAssembly.h"
 #include "usdMaya/translatorXformable.h"
 
@@ -38,7 +39,7 @@
 #include "pxr/usd/usd/stage.h"
 #include "pxr/usd/usd/stageCacheContext.h"
 #include "pxr/usd/usd/timeCode.h"
-#include "pxr/usd/usd/treeIterator.h"
+#include "pxr/usd/usd/primRange.h"
 #include "pxr/usd/usd/variantSets.h"
 #include "pxr/usd/usdGeom/xform.h"
 #include "pxr/usd/usdGeom/xformCommonAPI.h"
@@ -54,6 +55,9 @@
 #include <map>
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 
 // for now, we hard code this to use displayColor.  But maybe the more
@@ -90,7 +94,7 @@ bool usdReadJob::doIt(std::vector<MDagPath>* addedDagPaths)
     MStatus status;
 
     SdfLayerRefPtr rootLayer = SdfLayer::FindOrOpen(mFileName);
-    if (not rootLayer) {
+    if (!rootLayer) {
         return false;
     }
 
@@ -111,28 +115,50 @@ bool usdReadJob::doIt(std::vector<MDagPath>* addedDagPaths)
     // Layer and Stage used to Read in the USD file
     UsdStageCacheContext stageCacheContext(UsdMayaStageCache::Get());
     UsdStageRefPtr stage = UsdStage::Open(rootLayer, sessionLayer);
-    if (not stage) {
+    if (!stage) {
         return false;
     }
 
-    // If readAnimData is true, we adjust the Min/Max time sliders
+    // If readAnimData is true, we expand the Min/Max time sliders to include
+    // the stage's range if necessary.
     if (mArgs.readAnimData) {
-        double startTimeCode = stage->GetStartTimeCode();
-        double endTimeCode = stage->GetEndTimeCode();
-        MAnimControl::setMinTime(MTime(startTimeCode));
-        MAnimControl::setMaxTime(MTime(endTimeCode));
+        MTime currentMinTime = MAnimControl::minTime();
+        MTime currentMaxTime = MAnimControl::maxTime();
+
+        double startTimeCode, endTimeCode;
+        if (mArgs.useCustomFrameRange) {
+            if (mArgs.startTime > mArgs.endTime) {
+                std::string errorMsg = TfStringPrintf(
+                    "Frame range start (%f) was greater than end (%f)",
+                    mArgs.startTime, mArgs.endTime);
+                MGlobal::displayError(errorMsg.c_str());
+                return false;
+            }
+            startTimeCode = mArgs.startTime;
+            endTimeCode = mArgs.endTime;
+        } else {
+            startTimeCode = stage->GetStartTimeCode();
+            endTimeCode = stage->GetEndTimeCode();
+        }
+
+        if (startTimeCode < currentMinTime.value()) {
+            MAnimControl::setMinTime(MTime(startTimeCode));
+        }
+        if (endTimeCode > currentMaxTime.value()) {
+            MAnimControl::setMaxTime(MTime(endTimeCode));
+        }
     }
 
     // Use the primPath to get the root usdNode
     UsdPrim usdRootPrim = mPrimPath.empty() ? stage->GetDefaultPrim() :
         stage->GetPrimAtPath(SdfPath(mPrimPath));
-    if (not usdRootPrim and not (mPrimPath.empty() or mPrimPath == "/")) {
+    if (!usdRootPrim && !(mPrimPath.empty() || mPrimPath == "/")) {
         usdRootPrim = stage->GetPseudoRoot();
     }
 
     bool isImportingPsuedoRoot = (usdRootPrim == stage->GetPseudoRoot());
 
-    if (not usdRootPrim) {
+    if (!usdRootPrim) {
         std::string errorMsg = TfStringPrintf(
             "No default prim found in USD file \"%s\"",
             mFileName.c_str());
@@ -142,7 +168,7 @@ bool usdReadJob::doIt(std::vector<MDagPath>* addedDagPaths)
 
     SdfPrimSpecHandle usdRootPrimSpec =
         SdfCreatePrimInLayer(sessionLayer, usdRootPrim.GetPrimPath());
-    if (not usdRootPrimSpec) {
+    if (!usdRootPrimSpec) {
         return false;
     }
 
@@ -156,17 +182,17 @@ bool usdReadJob::doIt(std::vector<MDagPath>* addedDagPaths)
         mArgs.shadingMode = ASSEMBLY_SHADING_MODE;
     }
 
-    UsdTreeIterator primIt(usdRootPrim);
+    UsdPrimRange range(usdRootPrim);
 
     // We maintain a registry mapping SdfPaths to MObjects as we create Maya
     // nodes, so prime the registry with the root Maya node and the
     // usdRootPrim's path.
     SdfPath rootPathToRegister = usdRootPrim.GetPath();
 
-    if (isImportingPsuedoRoot or isSceneAssembly) {
+    if (isImportingPsuedoRoot || isSceneAssembly) {
         // Skip the root prim if it is the pseudoroot, or if we are importing
         // on behalf of a scene assembly.
-        ++primIt;
+        range.increment_begin();
     } else {
         // Otherwise, associate the usdRootPrim's *parent* with the root Maya
         // node instead.
@@ -178,9 +204,9 @@ bool usdReadJob::doIt(std::vector<MDagPath>* addedDagPaths)
                 mMayaRootDagPath.node()));
 
     if (mArgs.importWithProxyShapes) {
-        _DoImportWithProxies(primIt);
+        _DoImportWithProxies(range);
     } else {
-        _DoImport(primIt, usdRootPrim);
+        _DoImport(range, usdRootPrim);
     }
 
     SdfPathSet topImportedPaths;
@@ -207,19 +233,25 @@ bool usdReadJob::doIt(std::vector<MDagPath>* addedDagPaths)
 }
 
 
-bool usdReadJob::_DoImport(UsdTreeIterator& primIt,
+bool usdReadJob::_DoImport(UsdPrimRange& range,
                            const UsdPrim& usdRootPrim)
 {
-    for(; primIt; ++primIt) {
+    for (auto primIt = range.begin(); primIt != range.end(); ++primIt) {
         const UsdPrim& prim = *primIt;
 
         PxrUsdMayaPrimReaderArgs args(prim,
                                       mArgs.shadingMode,
                                       mArgs.defaultMeshScheme,
-                                      mArgs.readAnimData);
+                                      mArgs.readAnimData,
+                                      mArgs.useCustomFrameRange,
+                                      mArgs.startTime,
+                                      mArgs.endTime);
         PxrUsdMayaPrimReaderContext ctx(&mNewNodeRegistry);
 
-        // we should likely be checking if this is a nested model as well.
+        // If we are NOT importing on behalf of an assembly, then we'll create
+        // reference assembly nodes that target the asset file and the root
+        // prims of those assets directly. This ensures that a re-export will
+        // work correctly, since USD references can only target root prims.
         std::string assetIdentifier;
         SdfPath assetPrimPath;
         if (PxrUsdMayaTranslatorModelAssembly::ShouldImportAsAssembly(
@@ -227,6 +259,14 @@ bool usdReadJob::_DoImport(UsdTreeIterator& primIt,
                 prim,
                 &assetIdentifier,
                 &assetPrimPath)) {
+            const bool isSceneAssembly = mMayaRootDagPath.node().hasFn(MFn::kAssembly);
+            if (isSceneAssembly) {
+                // If we ARE importing on behalf of an assembly, we use the
+                // file path of the top-level assembly and the path to the prim
+                // within that file when creating the reference assembly.
+                assetIdentifier = mFileName;
+                assetPrimPath = prim.GetPath();
+            }
 
             // XXX: At some point, if assemblyRep == "import" we'd like
             // to import everything instead of just making an assembly.
@@ -301,4 +341,7 @@ bool usdReadJob::undoIt()
     }
     return (status == MS::kSuccess);
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

@@ -24,22 +24,24 @@
 #ifndef HD_TOKENS_H
 #define HD_TOKENS_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/base/tf/staticTokens.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
             
 #define HD_TOKENS                               \
     (adjacency)                                 \
-    (attachments)                               \
     (bboxLocalMin)                              \
     (bboxLocalMax)                              \
     (bbox)                                      \
     (bezier)                                    \
     (bSpline)                                   \
     (camera)                                    \
-    (cameraFrustum)                             \
     (catmullRom)                                \
     (children)                                  \
-    (clipPlanes)                                \
     (color)                                     \
     (collection)                                \
     (computeShader)                             \
@@ -47,7 +49,6 @@
     (cubic)                                     \
     (culledInstanceIndices)                     \
     (cullStyle)                                 \
-    (depthClearValue)                           \
     (doubleSided)                               \
     (dispatchBuffer)                            \
     (drawDispatch)                              \
@@ -59,10 +60,12 @@
     (drawingCoord0)                             \
     (drawingCoord1)                             \
     (drawingCoordI)                             \
-    (enable)                                    \
+    (elementCount)                              \
     (extent)                                    \
     (faceColors)                                \
     (geometry)                                  \
+    (guide)                                     \
+    (hidden)                                    \
     (hull)                                      \
     (hullIndices)                               \
     (indices)                                   \
@@ -77,16 +80,11 @@
     (isFlipped)                                 \
     (itemsDrawn)                                \
     (layout)                                    \
-    (lightingContext)                           \
-    (lightingShader)                            \
-    (lightParams)                               \
-    (lightShadowCollection)                     \
-    (lightShadowParams)                         \
-    (lightTransform)                            \
     (leftHanded)                                \
     (linear)                                    \
     (nonperiodic)                               \
     (normals)                                   \
+    (packedNormals)                             \
     (params)                                    \
     (patchParam)                                \
     (periodic)                                  \
@@ -95,16 +93,17 @@
     (primVar)                                   \
     (primID)                                    \
     (primitiveParam)                            \
+    (proxy)                                     \
     (quadInfo)                                  \
     (refineLevel)                               \
     (refined)                                   \
     (refinedWire)                               \
     (refinedWireOnSurf)                         \
+    (renderTags)                                \
     (ulocDrawCommandNumUints)                   \
     (ulocResetPass)                             \
     (ulocCullMatrix)                            \
     (ulocDrawRangeNDC)                          \
-    (resolution)                                \
     (rightHanded)                               \
     (segmented)                                 \
     (smoothHull)                                \
@@ -119,10 +118,10 @@
     (visibility)                                \
     (widths)                                    \
     (wire)                                      \
-    (wireOnSurf)                                \
-    (windowPolicy)
-            
+    (wireOnSurf)
+
 #define HD_PERF_TOKENS                          \
+    (adjacencyBufSize)                          \
     (basisCurvesTopology)                       \
     (bufferSourcesResolved)                     \
     (bufferArrayRangeMerged)                    \
@@ -144,21 +143,32 @@
     (instBasisCurvesTopologyRange)              \
     (instMeshTopology)                          \
     (instMeshTopologyRange)                     \
+    (instPrimvarRange)                          \
     (instVertexAdjacency)                       \
     (meshTopology)                              \
+    (nonUniformSize)                            \
     (quadrangulateCPU)                          \
     (quadrangulateGPU)                          \
     (quadrangulateFaceVarying)                  \
     (quadrangulatedVerts)                       \
     (rebuildBatches)                            \
+    (singleBufferSize)                          \
+    (ssboSize)                                  \
     (subdivisionRefineCPU)                      \
     (subdivisionRefineGPU)                      \
+    (textureResourceMemory)                     \
+    (textureMemory)                             \
     (triangulateFaceVarying)                    \
+    (uboSize)                                   \
     (vboRelocated)
 
 #define HD_GLSL_PROGRAM_TOKENS                  \
-    (smoothNormalsFloat)                        \
-    (smoothNormalsDouble)                       \
+    (smoothNormalsFloatToFloat)                 \
+    (smoothNormalsFloatToDouble)                \
+    (smoothNormalsFloatToPacked)                \
+    (smoothNormalsDoubleToFloat)                \
+    (smoothNormalsDoubleToDouble)               \
+    (smoothNormalsDoubleToPacked)               \
     (quadrangulateFloat)                        \
     (quadrangulateDouble)
 
@@ -188,11 +198,33 @@
 #define HD_OPTION_TOKENS                        \
     (parallelRprimSync)                        
 
+#define HD_PRIMTYPE_TOKENS                      \
+    /* Rprims */                                \
+    (mesh)                                      \
+    (basisCurves)                               \
+    (points)                                    \
+                                                \
+    /* Sprims */                                \
+    (camera)                                    \
+    (drawTarget)                                \
+    (shader)                                    \
+    /* Sprims Lights */                         \
+    (light)                                     \
+    (domeLight)                                 \
+    (rectLight)                                 \
+    (sphereLight)                               \
+                                                \
+    /* Bprims */                                \
+    (texture)
 
-TF_DECLARE_PUBLIC_TOKENS(HdTokens, HD_TOKENS);
-TF_DECLARE_PUBLIC_TOKENS(HdPerfTokens, HD_PERF_TOKENS);
-TF_DECLARE_PUBLIC_TOKENS(HdGLSLProgramTokens, HD_GLSL_PROGRAM_TOKENS);
-TF_DECLARE_PUBLIC_TOKENS(HdShaderTokens, HD_SHADER_TOKENS);
-TF_DECLARE_PUBLIC_TOKENS(HdOptionTokens, HD_OPTION_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(HdTokens, HD_API, HD_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(HdPerfTokens, HD_API, HD_PERF_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(HdGLSLProgramTokens, HD_API, HD_GLSL_PROGRAM_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(HdShaderTokens, HD_API, HD_SHADER_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(HdOptionTokens, HD_API, HD_OPTION_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(HdPrimTypeTokens, HD_API, HD_PRIMTYPE_TOKENS);
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HD_TOKENS_H

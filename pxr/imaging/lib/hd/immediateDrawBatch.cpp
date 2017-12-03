@@ -26,7 +26,7 @@
 #include "pxr/imaging/hd/immediateDrawBatch.h"
 #include "pxr/imaging/hd/drawItemInstance.h"
 
-#include "pxr/imaging/hd/bufferArrayRange.h"
+#include "pxr/imaging/hd/bufferArrayRangeGL.h"
 #include "pxr/imaging/hd/commandBuffer.h"
 #include "pxr/imaging/hd/debugCodes.h"
 #include "pxr/imaging/hd/geometricShader.h"
@@ -35,11 +35,14 @@
 #include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/renderPassState.h"
 #include "pxr/imaging/hd/resourceRegistry.h"
-#include "pxr/imaging/hd/shader.h"
+#include "pxr/imaging/hd/shaderCode.h"
 #include "pxr/imaging/hd/tokens.h"
 
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/iterator.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 Hd_ImmediateDrawBatch::Hd_ImmediateDrawBatch(
     HdDrawItemInstance * drawItemInstance)
@@ -63,7 +66,7 @@ Hd_ImmediateDrawBatch::~Hd_ImmediateDrawBatch()
 bool
 Hd_ImmediateDrawBatch::Validate(bool deepValidation)
 {
-    if (not TF_VERIFY(not _drawItemInstances.empty())) return false;
+    if (!TF_VERIFY(!_drawItemInstances.empty())) return false;
 
     HdDrawItem const* batchItem = _drawItemInstances.front()->GetDrawItem();
 
@@ -77,7 +80,7 @@ Hd_ImmediateDrawBatch::Validate(bool deepValidation)
             HdDrawItem const * drawItem
                 = _drawItemInstances[item]->GetDrawItem();
 
-            if (not _IsAggregated(batchItem, drawItem)) {
+            if (!_IsAggregated(batchItem, drawItem)) {
                 return false;
             }
         }
@@ -88,46 +91,48 @@ Hd_ImmediateDrawBatch::Validate(bool deepValidation)
 
 void
 Hd_ImmediateDrawBatch::PrepareDraw(
-    HdRenderPassStateSharedPtr const &renderPassState)
+    HdRenderPassStateSharedPtr const &renderPassState,
+    HdResourceRegistrySharedPtr const &resourceRegistry)
 {
 }
 
 void
 Hd_ImmediateDrawBatch::ExecuteDraw(
-    HdRenderPassStateSharedPtr const &renderPassState)
+    HdRenderPassStateSharedPtr const &renderPassState,
+    HdResourceRegistrySharedPtr const &resourceRegistry)
 {
     HD_TRACE_FUNCTION();
 
-    HdBufferArrayRangeSharedPtr indexBarCurrent;
-    HdBufferArrayRangeSharedPtr elementBarCurrent;
-    HdBufferArrayRangeSharedPtr vertexBarCurrent;
-    HdBufferArrayRangeSharedPtr constantBarCurrent;
-    HdBufferArrayRangeSharedPtr fvarBarCurrent;
-    HdBufferArrayRangeSharedPtr instanceIndexBarCurrent;
-    HdBufferArrayRangeSharedPtr shaderBarCurrent;
-    std::vector<HdBufferArrayRangeSharedPtr> instanceBarCurrents;
+    HdBufferArrayRangeGLSharedPtr indexBarCurrent;
+    HdBufferArrayRangeGLSharedPtr elementBarCurrent;
+    HdBufferArrayRangeGLSharedPtr vertexBarCurrent;
+    HdBufferArrayRangeGLSharedPtr constantBarCurrent;
+    HdBufferArrayRangeGLSharedPtr fvarBarCurrent;
+    HdBufferArrayRangeGLSharedPtr instanceIndexBarCurrent;
+    HdBufferArrayRangeGLSharedPtr shaderBarCurrent;
+    std::vector<HdBufferArrayRangeGLSharedPtr> instanceBarCurrents;
 
     if (_drawItemInstances.empty()) return;
 
-    if (not glUseProgram) return;  // glew initialized
+    if (!glUseProgram) return;  // glew initialized
 
     // bind program
     _DrawingProgram & program = _GetDrawingProgram(renderPassState,
-                                                   /*indirect=*/false);
+                                                   /*indirect=*/false,
+                                                   resourceRegistry);
 
     HdGLSLProgramSharedPtr const &glslProgram = program.GetGLSLProgram();
-    if (not TF_VERIFY(glslProgram)) return;
-    if (not TF_VERIFY(glslProgram->Validate())) return;
+    if (!TF_VERIFY(glslProgram)) return;
+    if (!TF_VERIFY(glslProgram->Validate())) return;
 
     const Hd_ResourceBinder &binder = program.GetBinder();
+    const HdShaderCodeSharedPtrVector &shaders = program.GetComposedShaders();
 
     GLuint programId = glslProgram->GetProgram().GetId();
     TF_VERIFY(programId);
 
     glUseProgram(programId);
 
-    HdShaderSharedPtrVector shaders
-        = renderPassState->GetShaders(/*surfaceShader=*/HdShaderSharedPtr());
     bool hasOverrideShader = bool(renderPassState->GetOverrideShader());
 
     TF_FOR_ALL(it, shaders) {
@@ -136,14 +141,13 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
 
     // Set up geometric shader states
     // all batch item should have the same geometric shader.
-    HdDrawItem const* batchItem = _drawItemInstances.front()->GetDrawItem();
     Hd_GeometricShaderSharedPtr const &geometricShader
-        = batchItem->GetGeometricShader();
+        = program.GetGeometricShader();
     geometricShader->BindResources(binder, programId);
 
     size_t numItemsDrawn = 0;
     TF_FOR_ALL(drawItemIt, _drawItemInstances) {
-        if(not (*drawItemIt)->IsVisible()) {
+        if(!(*drawItemIt)->IsVisible()) {
             continue;
         }
 
@@ -160,9 +164,13 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // index buffer data
         //
-        HdBufferArrayRangeSharedPtr const & indexBar =
+        HdBufferArrayRangeSharedPtr const & indexBar_ =
             drawItem->GetTopologyRange();
-        if (indexBar and (not indexBar->IsAggregatedWith(indexBarCurrent))) {
+
+        HdBufferArrayRangeGLSharedPtr indexBar =
+            boost::static_pointer_cast<HdBufferArrayRangeGL>(indexBar_);
+
+        if (indexBar && (!indexBar->IsAggregatedWith(indexBarCurrent))) {
             binder.UnbindBufferArray(indexBarCurrent);
             binder.BindBufferArray(indexBar);
             indexBarCurrent = indexBar;
@@ -171,9 +179,13 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // per-face buffer data (fetched through ElementID in primitiveParam)
         //
-        HdBufferArrayRangeSharedPtr const & elementBar =
+        HdBufferArrayRangeSharedPtr const & elementBar_ =
             drawItem->GetElementPrimVarRange();
-        if (elementBar and (not elementBar->IsAggregatedWith(elementBarCurrent))) {
+
+        HdBufferArrayRangeGLSharedPtr elementBar =
+            boost::static_pointer_cast<HdBufferArrayRangeGL>(elementBar_);
+
+        if (elementBar && (!elementBar->IsAggregatedWith(elementBarCurrent))) {
             binder.UnbindBufferArray(elementBarCurrent);
             binder.BindBufferArray(elementBar);
             elementBarCurrent = elementBar;
@@ -182,10 +194,13 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // vertex attrib buffer data
         //
-        HdBufferArrayRangeSharedPtr const & vertexBar =
+        HdBufferArrayRangeSharedPtr const & vertexBar_ =
             drawItem->GetVertexPrimVarRange();
 
-        if (vertexBar and (not vertexBar->IsAggregatedWith(vertexBarCurrent))) {
+        HdBufferArrayRangeGLSharedPtr vertexBar =
+            boost::static_pointer_cast<HdBufferArrayRangeGL>(vertexBar_);
+
+        if (vertexBar && (!vertexBar->IsAggregatedWith(vertexBarCurrent))) {
             binder.UnbindBufferArray(vertexBarCurrent);
             binder.BindBufferArray(vertexBar);
             vertexBarCurrent = vertexBar;
@@ -194,9 +209,13 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // constant (uniform) buffer data
         //
-        HdBufferArrayRangeSharedPtr const & constantBar =
+        HdBufferArrayRangeSharedPtr const & constantBar_ =
             drawItem->GetConstantPrimVarRange();
-        if (constantBar and (not constantBar->IsAggregatedWith(constantBarCurrent))) {
+
+        HdBufferArrayRangeGLSharedPtr constantBar =
+            boost::static_pointer_cast<HdBufferArrayRangeGL>(constantBar_);
+
+        if (constantBar && (!constantBar->IsAggregatedWith(constantBarCurrent))) {
             binder.UnbindConstantBuffer(constantBarCurrent);
             binder.BindConstantBuffer(constantBar);
             constantBarCurrent = constantBar;
@@ -205,9 +224,13 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // facevarying buffer data
         //
-        HdBufferArrayRangeSharedPtr const & fvarBar =
+        HdBufferArrayRangeSharedPtr const & fvarBar_ =
             drawItem->GetFaceVaryingPrimVarRange();
-        if (fvarBar and (not fvarBar->IsAggregatedWith(fvarBarCurrent))) {
+
+        HdBufferArrayRangeGLSharedPtr fvarBar =
+            boost::static_pointer_cast<HdBufferArrayRangeGL>(fvarBar_);
+
+        if (fvarBar && (!fvarBar->IsAggregatedWith(fvarBarCurrent))) {
             binder.UnbindBufferArray(fvarBarCurrent);
             binder.BindBufferArray(fvarBar);
             fvarBarCurrent = fvarBar;
@@ -219,13 +242,17 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         int instancerNumLevels = drawItem->GetInstancePrimVarNumLevels();
         int instanceIndexWidth = instancerNumLevels + 1;
         for (int i = 0; i < instancerNumLevels; ++i) {
-            HdBufferArrayRangeSharedPtr const & instanceBar =
+            HdBufferArrayRangeSharedPtr const & instanceBar_ =
                 drawItem->GetInstancePrimVarRange(i);
+
+            HdBufferArrayRangeGLSharedPtr instanceBar =
+                boost::static_pointer_cast<HdBufferArrayRangeGL>(instanceBar_);
+
             if (instanceBar) {
                 if (static_cast<size_t>(i) >= instanceBarCurrents.size()) {
                     instanceBarCurrents.push_back(instanceBar);
                     binder.BindInstanceBufferArray(instanceBar, i);
-                } else if (not instanceBar->IsAggregatedWith(
+                } else if (!instanceBar->IsAggregatedWith(
                                instanceBarCurrents[i])) {
                     binder.UnbindInstanceBufferArray(instanceBarCurrents[i], i);
                     binder.BindInstanceBufferArray(instanceBar, i);
@@ -237,9 +264,14 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // instance index indirection buffer
         //
-        HdBufferArrayRangeSharedPtr const & instanceIndexBar =
+        HdBufferArrayRangeSharedPtr const & instanceIndexBar_ =
             drawItem->GetInstanceIndexRange();
-        if (instanceIndexBar and (not instanceIndexBar->IsAggregatedWith(instanceIndexBarCurrent))) {
+
+        HdBufferArrayRangeGLSharedPtr instanceIndexBar =
+            boost::static_pointer_cast<HdBufferArrayRangeGL>(instanceIndexBar_);
+
+        if (instanceIndexBar && 
+            (!instanceIndexBar->IsAggregatedWith(instanceIndexBarCurrent))) {
             binder.UnbindBufferArray(instanceIndexBarCurrent);
             binder.BindBufferArray(instanceIndexBar);
             instanceIndexBarCurrent = instanceIndexBar;
@@ -248,12 +280,15 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // shader buffer
         //
-        HdBufferArrayRangeSharedPtr const & shaderBar =
+        HdBufferArrayRangeSharedPtr const & shaderBar_ =
             renderPassState->GetOverrideShader()
-                ? HdBufferArrayRangeSharedPtr()
-                : drawItem->GetSurfaceShader()->GetShaderData();
+                ? HdBufferArrayRangeGLSharedPtr()
+                : program.GetSurfaceShader()->GetShaderData();
+        HdBufferArrayRangeGLSharedPtr shaderBar =
+            boost::static_pointer_cast<HdBufferArrayRangeGL> (shaderBar_);
+
         // shaderBar isn't needed when the surfaceShader is overriden
-        if (shaderBar and (not shaderBar->IsAggregatedWith(shaderBarCurrent))) {
+        if (shaderBar && (!shaderBar->IsAggregatedWith(shaderBarCurrent))) {
             if (shaderBarCurrent) {
                 binder.UnbindBuffer(HdTokens->surfaceShaderParams,
                                     shaderBarCurrent->GetResource());
@@ -266,8 +301,8 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
         //
         // shader textures
         //
-        if (not hasOverrideShader) {
-            drawItem->GetSurfaceShader()->BindResources(binder, programId);
+        if (!hasOverrideShader) {
+            program.GetSurfaceShader()->BindResources(binder, programId);
         }
 
         /*
@@ -354,7 +389,7 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
                                      instancerNumLevels, &instanceDrawingCoords[0]);
         }
 
-        if (indexCount > 0 and indexBar) {
+        if (indexCount > 0 && indexBar) {
             glDrawElementsInstancedBaseVertex(
                 geometricShader->GetPrimitiveMode(),
                 indexCount,
@@ -370,8 +405,8 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
                 instanceCount);
         }
 
-        if (not hasOverrideShader) {
-            drawItem->GetSurfaceShader()->UnbindResources(binder, programId);
+        if (!hasOverrideShader) {
+            program.GetSurfaceShader()->UnbindResources(binder, programId);
         }
 
         HD_PERF_COUNTER_INCR(HdPerfTokens->drawCalls);
@@ -407,3 +442,6 @@ Hd_ImmediateDrawBatch::ExecuteDraw(
 
     glUseProgram(0);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

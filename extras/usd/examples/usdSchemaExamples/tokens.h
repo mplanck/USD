@@ -24,6 +24,8 @@
 #ifndef USDSCHEMAEXAMPLES_TOKENS_H
 #define USDSCHEMAEXAMPLES_TOKENS_H
 
+/// \file usdSchemaExamples/tokens.h
+
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 // 
 // This is an automatically generated file (by usdGenSchema.py).
@@ -31,9 +33,11 @@
 // 
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
+#include "pxr/pxr.h"
+#include "./api.h"
 #include "pxr/base/tf/staticTokens.h"
 
-/// \file ./tokens.h
+PXR_NAMESPACE_OPEN_SCOPE
 
 /// \hideinitializer
 #define USDSCHEMAEXAMPLES_TOKENS \
@@ -45,7 +49,8 @@
     (target)
 
 /// \anchor UsdSchemaExamplesTokens
-/// \brief <b>UsdSchemaExamplesTokens</b> provides static, efficient TfToken's for
+///
+/// <b>UsdSchemaExamplesTokens</b> provides static, efficient TfToken's for
 /// use in all public USD API
 ///
 /// These tokens are auto-generated from the module's schema, representing
@@ -69,6 +74,8 @@
 /// \li <b>paramsVelocity</b> - UsdSchemaExamplesParamsAPI
 /// \li <b>paramsVolume</b> - UsdSchemaExamplesParamsAPI
 /// \li <b>target</b> - UsdSchemaExamplesSimple
-TF_DECLARE_PUBLIC_TOKENS(UsdSchemaExamplesTokens, USDSCHEMAEXAMPLES_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(UsdSchemaExamplesTokens, USDSCHEMAEXAMPLES_API, USDSCHEMAEXAMPLES_TOKENS);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

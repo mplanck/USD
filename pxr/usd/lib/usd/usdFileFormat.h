@@ -24,10 +24,15 @@
 #ifndef USD_USD_FILE_FORMAT_H
 #define USD_USD_FILE_FORMAT_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/sdf/fileFormat.h"
 #include "pxr/base/tf/staticTokens.h"
 
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DECLARE_WEAK_AND_REF_PTRS(UsdUsdFileFormat);
 TF_DECLARE_WEAK_PTRS(SdfLayerBase);
@@ -38,7 +43,7 @@ TF_DECLARE_WEAK_PTRS(SdfLayerBase);
     ((Target,       "usd"))         \
     ((FormatArg,    "format"))
 
-TF_DECLARE_PUBLIC_TOKENS(UsdUsdFileFormatTokens, USD_USD_FILE_FORMAT_TOKENS);
+TF_DECLARE_PUBLIC_TOKENS(UsdUsdFileFormatTokens, USD_API, USD_USD_FILE_FORMAT_TOKENS);
 
 /// \class UsdUsdFileFormat
 ///
@@ -52,36 +57,44 @@ TF_DECLARE_PUBLIC_TOKENS(UsdUsdFileFormatTokens, USD_USD_FILE_FORMAT_TOKENS);
 ///
 /// If no UsdUsdFileFormatTokens->FormatArg is supplied, the default is
 /// UsdUsdcFileFormatTokens->Id.
+///
 class UsdUsdFileFormat : public SdfFileFormat
 {
 public:
     using SdfFileFormat::FileFormatArguments;
 
+    USD_API
     virtual SdfAbstractDataRefPtr
     InitData(const FileFormatArguments& args) const;
 
+    USD_API
     virtual bool CanRead(const std::string &file) const;
 
-    virtual bool ReadFromFile(
+    USD_API
+    virtual bool Read(
         const SdfLayerBasePtr& layerBase,
-        const std::string& filePath,
+        const std::string& resolvedPath,
         bool metadataOnly) const;
 
+    USD_API
     virtual bool WriteToFile(
         const SdfLayerBase* layerBase,
         const std::string& filePath,
         const std::string& comment = std::string(),
         const FileFormatArguments& args = FileFormatArguments()) const;
 
+    USD_API
     virtual bool ReadFromString(
         const SdfLayerBasePtr& layerBase,
         const std::string& str) const;
 
+    USD_API
     virtual bool WriteToString(
         const SdfLayerBase* layerBase,
         std::string* str,
         const std::string& comment = std::string()) const;
 
+    USD_API
     virtual bool WriteToStream(
         const SdfSpecHandle &spec,
         std::ostream& out,
@@ -99,5 +112,8 @@ private:
 
     virtual bool _IsStreamingLayer(const SdfLayerBase& layer) const;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_USD_FILE_FORMAT_H

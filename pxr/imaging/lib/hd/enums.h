@@ -24,7 +24,14 @@
 #ifndef HD_ENUMS_H
 #define HD_ENUMS_H
 
-/// Abstraction of the Graphics compare functions
+#include "pxr/pxr.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// \enum HdCompareFunction
+///
+/// Abstraction of the Graphics compare functions.
+///
 enum HdCompareFunction
 {
     HdCmpFuncNever,
@@ -39,9 +46,16 @@ enum HdCompareFunction
     HdCmpFuncLast
 };
 
-/// Face culling options
+/// \enum HdCullStyle
+///
+/// Face culling options.
+///
+/// DontCare indicates this prim doesn't determine what should be culled.
+/// Any other CullStyle opinion will override this (such as from the viewer).
+///
 /// BackUnlessDoubleSided and FrontUnlessDoubleSided will only cull back or
 /// front faces if prim isn't marked as doubleSided.
+///
 enum HdCullStyle
 {
     HdCullStyleDontCare,
@@ -58,7 +72,10 @@ enum HdPolygonMode
     HdPolygonModeLine
 };
 
-/// Hydra native geom styles
+/// \enum HdMeshGeomStyle
+///
+/// Hydra native geom styles.
+///
 enum HdMeshGeomStyle {
     HdMeshGeomStyleInvalid,
     HdMeshGeomStyleSurf,
@@ -82,8 +99,14 @@ enum HdPointsGeomStyle {
     HdPointsGeomStylePoints
 };
 
+/// \enum HdGeomStyle
+///
 /// Defines geometric styles for how each polygon/triangle
 /// of a gprim is to be rendered.
+///
+/// Unspecified indicates this gprim does not indicate how it should be drawn
+/// (ie, it will always be overriden by another opinion).
+/// The actual geomstyle must come from somewhere else, such as the viewer.
 ///
 /// The polygons/triangles of a gprim can be drawn as Lines or Polygons.
 /// The HiddenLine, FeyRay, and Sheer styles are combinations
@@ -97,8 +120,10 @@ enum HdPointsGeomStyle {
 ///  <li> Sheer draws lines and polygons but with the polygons mostly
 ///       transparent.</li>
 /// </ul>
+///
 enum HdGeomStyle
 {
+    HdGeomStyleUnspecified,
     HdGeomStyleLines,
     HdGeomStylePolygons,
     HdGeomStyleHiddenLine,
@@ -107,10 +132,9 @@ enum HdGeomStyle
     HdGeomStyleOutline
 };
 
-
+/// \enum HdComplexity
 ///
-/// Defines the display complexity for primitives that support
-///        refinement.
+/// Defines the display complexity for primitives that support refinement.
 ///
 /// <ul>
 ///     <li>\b BoundingBoxComplexity:  Complexity is bounding box.</li>
@@ -132,12 +156,15 @@ enum HdComplexity
     HdComplexityVeryHigh,
 };
 
-/// Enumerates wrapping attributes type values
+/// \enum HdWrap
+///
+/// Enumerates wrapping attributes type values.
 ///
 /// <ul>
 ///     <li>\b HdWrapClamp               Clamp coordinate to range [1/(2N),1-1/(2N)] where N is the size of the texture in the direction of clamping</li>
 ///     <li>\b HdWrapRepeat              Creates a repeating pattern</li>
 ///     <li>\b HdWrapBlack</c></b>       Clamp coordinate to range [-1/(2N),1+1/(2N)] where N is the size of the texture in the direction of clamping</li>
+///     <li>\b HdWrapUseMetaDict</c></b> Texture can define its own wrap mode, if not defined by the texture it will use HdWrapRepeat</li>
 /// </ul>
 ///
 enum HdWrap 
@@ -145,9 +172,12 @@ enum HdWrap
     HdWrapClamp,
     HdWrapRepeat,
     HdWrapBlack,
+    HdWrapUseMetaDict,
 };
 
-/// Enumerates minFilter attribute type values
+/// \enum HdMinFilter
+///
+/// Enumerates minFilter attribute type values.
 ///
 /// <ul>
 ///     <li>\b HdMinFilterNearest                Nearest to center of the pixel</li>
@@ -168,7 +198,9 @@ enum HdMinFilter
     HdMinFilterLinearMipmapLinear,
 };
 
-/// Enumerates magFilter attribute type values
+/// \enum HdMagFilter
+///
+/// Enumerates magFilter attribute type values.
 ///
 /// <ul>
 ///     <li>HdFilterNearest       Nearest to center of the pixel</li>
@@ -181,11 +213,17 @@ enum HdMagFilter
     HdMagFilterLinear,
 };
 
-/// Enumerates formats to be used when creating buffers
+/// \enum HdFormat
+///
+/// Enumerates formats to be used when creating buffers.
+///
 /// Format names follow the general pattern:
+///
 ///   Channel identifier, bit precision, type.
-///   with the channel in the lowest bit coming first.
-///   This is the same general naming convention as Vulkan and DXGI
+///
+/// with the channel in the lowest bit coming first. This is the same general
+/// naming convention as Vulkan and DXGI
+///
 enum HdFormat
 {
     HdFormatR8UNorm,
@@ -212,5 +250,56 @@ enum HdFormat
     HdFormatUnknown = -1
 };
 
+///
+/// \enum HdInterpolation
+///
+/// Enumerates Hydra's primVar interpolation modes.
+///
+/// Constant:    One value remains constant over the entire surface primitive.
+///
+/// Uniform:     One value remains constant for each uv patch segment of the
+///              surface primitive.
+///
+/// Varying:     Four values are interpolated over each uv patch segment of
+///              the surface. Bilinear interpolation is used for interpolation
+///              between the four values.
+///
+/// Vertex:      Values are interpolated between each vertex in the surface
+///              primitive. The basis function of the surface is used for
+///              interpolation between vertices.
+///
+/// Facevarying: For polygons and subdivision surfaces, four values are
+///              interpolated over each face of the mesh. Bilinear interpolation
+///              is used for interpolation between the four values.
+///
+enum HdInterpolation
+{
+    HdInterpolationConstant = 0,
+    HdInterpolationUniform,
+    HdInterpolationVarying,
+    HdInterpolationVertex,
+    HdInterpolationFaceVarying,
+
+    HdInterpolationCount
+};
+
+///
+/// \enum HdExtComputationInputType
+///
+/// Identifies the type of the source of an input to an ExtComputation.
+///
+/// Scene:       The input should be sourced from the Scene Delegate
+///
+/// Computation: The input should be sourced from another ExtComputation.
+///
+enum HdExtComputationInputType
+{
+    HdExtComputationInputTypeScene   = 0,
+    HdExtComputationInputTypeComputation,
+
+    HdExtComputationInputTypeCount
+};
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // HD_ENUMS_H

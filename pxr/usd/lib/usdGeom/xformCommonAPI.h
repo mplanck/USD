@@ -24,9 +24,8 @@
 #ifndef USDGEOM_GENERATED_XFORMCOMMONAPI_H
 #define USDGEOM_GENERATED_XFORMCOMMONAPI_H
 
-
-
-
+#include "pxr/pxr.h"
+#include "pxr/usd/usdGeom/api.h"
 #include "pxr/usd/usdGeom/xformable.h"
 #include "pxr/usd/usd/schemaBase.h"
 #include "pxr/usd/usd/stage.h"
@@ -39,10 +38,15 @@
 
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 // -------------------------------------------------------------------------- //
 // XFORMCOMMONAPI                                                             //
 // -------------------------------------------------------------------------- //
 
+/// \class UsdGeomXformCommonAPI
+///
 /// This class provides API for authoring and retrieving a standard set of 
 /// component transformations which include a scale, a rotation, a 
 /// scale-rotate pivot and a translation. The goal of the API is to enhance 
@@ -112,9 +116,10 @@ public:
     }
 
     /// Destructor.
+    USDGEOM_API
     virtual ~UsdGeomXformCommonAPI();
 
-    /// \brief Return a UsdGeomXformCommonAPI holding the xformable adhering 
+    /// Return a UsdGeomXformCommonAPI holding the xformable adhering 
     /// to this API at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this API,
     /// return an invalid API object.  This is shorthand for the following:
@@ -123,11 +128,12 @@ public:
     /// UsdGeomXformCommonAPI(UsdGeomXformable(stage->GetPrimAtPath(path)));
     /// \endcode
     ///
+    USDGEOM_API
     static UsdGeomXformCommonAPI
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
 private:
-
+    USDGEOM_API
     virtual bool _IsCompatible(const UsdPrim &prim) const;
 
 public:
@@ -154,6 +160,7 @@ public:
     /// (either because of an already defined (and compatible) rotate op or 
     /// from calling SetXformVectors() or SetRotate()), it cannot be changed.
     ///
+    USDGEOM_API
     bool SetXformVectors(const GfVec3d &translation,
                          const GfVec3f &rotation,
                          const GfVec3f &scale, 
@@ -171,6 +178,7 @@ public:
     /// When the underlying xformable has an incompatible xform schema, it 
     /// performs a full-on matrix decomposition to XYZ rotation order.
     /// 
+    USDGEOM_API
     bool GetXformVectors(GfVec3d *translation, 
                          GfVec3f *rotation,
                          GfVec3f *scale,
@@ -194,6 +202,7 @@ public:
     /// transforms, it performs a full-on matrix decomposition to XYZ rotation
     /// order.
     ///
+    USDGEOM_API
     bool GetXformVectorsByAccumulation(GfVec3d* translation,
                                        GfVec3f* rotation,
                                        GfVec3f* scale,
@@ -203,6 +212,7 @@ public:
 
     /// Returns whether the xformable resets the transform stack. 
     /// i.e., does not inherit the parent transformation.
+    USDGEOM_API
     bool GetResetXformStack() const;
 
     /// \anchor UsdGeomXformCommonAPI_Set_Individual_Ops
@@ -211,24 +221,29 @@ public:
     /// @{
 
     /// Set translation at \p time to \p translation.
+    USDGEOM_API
     bool SetTranslate(const GfVec3d &translation, 
                       const UsdTimeCode time=UsdTimeCode::Default());
 
     /// Set pivot position at \p time to \p pivot.
+    USDGEOM_API
     bool SetPivot(const GfVec3f &pivot, 
                   const UsdTimeCode time=UsdTimeCode::Default());
 
     /// Set rotation at \p time to \p rotation.
+    USDGEOM_API
     bool SetRotate(const GfVec3f &rotation, 
                    UsdGeomXformCommonAPI::RotationOrder rotOrder=RotationOrderXYZ,
                    const UsdTimeCode time=UsdTimeCode::Default());
 
     /// Set scale at \p time to \p scale.
+    USDGEOM_API
     bool SetScale(const GfVec3f &scale, 
                   const UsdTimeCode time=UsdTimeCode::Default());
 
     /// Set whether the xformable resets the transform stack. 
     /// i.e., does not inherit the parent transformation.
+    USDGEOM_API
     bool SetResetXformStack(bool resetXformStack) const;
 
     /// @}
@@ -256,22 +271,22 @@ private:
 
     // Convenience functions 
     bool _HasTranslateOp() const {
-        return TF_VERIFY(_computedOpIndices) and 
+        return TF_VERIFY(_computedOpIndices) &&
                _translateOpIndex != _InvalidIndex;
     }
 
     bool _HasRotateOp() const {
-        return TF_VERIFY(_computedOpIndices) and 
+        return TF_VERIFY(_computedOpIndices) &&
                _rotateOpIndex != _InvalidIndex;
     }
     
     bool _HasScaleOp() const {
-        return TF_VERIFY(_computedOpIndices) and 
+        return TF_VERIFY(_computedOpIndices) &&
                _scaleOpIndex != _InvalidIndex;
     }
 
     bool _HasPivotOp () const {
-        return TF_VERIFY(_computedOpIndices) and 
+        return TF_VERIFY(_computedOpIndices) &&
                _pivotOpIndex != _InvalidIndex;
     }
 
@@ -295,5 +310,8 @@ private:
     int _scaleOpIndex;
     int _pivotOpIndex;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -24,9 +24,15 @@
 #ifndef USD_SHARED_H
 #define USD_SHARED_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
+
 #include <boost/functional/hash.hpp>
 #include <boost/smart_ptr/intrusive_ptr.hpp>
 #include <atomic>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // Implementation storage + refcount for Usd_Shared.
 template <class T>
@@ -81,11 +87,11 @@ struct Usd_Shared
     // \code
     // if (not shared.IsUnique()) { shared.Clone(); }
     // \endcode
-    void MakeUnique() { if (not IsUnique()) Clone(); }
+    void MakeUnique() { if (!IsUnique()) Clone(); }
 
     // Equality and inequality.
     bool operator==(Usd_Shared const &other) const {
-        return _held == other._held or _held->data == other._held->data;
+        return _held == other._held || _held->data == other._held->data;
     }
     bool operator!=(Usd_Shared const &other) const { return *this != other; }
 
@@ -102,5 +108,7 @@ private:
     boost::intrusive_ptr<Usd_Counted<T>> _held;
 };
 
-#endif // USD_SHARED_H
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // USD_SHARED_H

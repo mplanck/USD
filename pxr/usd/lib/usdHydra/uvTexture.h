@@ -24,6 +24,10 @@
 #ifndef USDHYDRA_GENERATED_UVTEXTURE_H
 #define USDHYDRA_GENERATED_UVTEXTURE_H
 
+/// \file usdHydra/uvTexture.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdHydra/api.h"
 #include "pxr/usd/usdHydra/texture.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -38,12 +42,16 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // UVTEXTURE                                                                  //
 // -------------------------------------------------------------------------- //
 
+/// \class UsdHydraUvTexture
+///
 /// For any described attribute \em Fallback \em Value or \em Allowed \em Values below
 /// that are text/tokens, the actual token is published and defined in \ref UsdHydraTokens.
 /// So to set an attribute to the value "rightHanded", use UsdHydraTokens->rightHanded
@@ -76,15 +84,17 @@ public:
     }
 
     /// Destructor.
+    USDHYDRA_API
     virtual ~UsdHydraUvTexture();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDHYDRA_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdHydraUvTexture holding the prim adhering to this
+    /// Return a UsdHydraUvTexture holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -93,6 +103,7 @@ public:
     /// UsdHydraUvTexture(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDHYDRA_API
     static UsdHydraUvTexture
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
@@ -100,11 +111,13 @@ public:
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDHYDRA_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDHYDRA_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -117,6 +130,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->Float2
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDHYDRA_API
     UsdAttribute GetUvAttr() const;
 
     /// See GetUvAttr(), and also 
@@ -124,6 +138,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDHYDRA_API
     UsdAttribute CreateUvAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -137,6 +152,7 @@ public:
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: No Fallback
     /// \n  \ref UsdHydraTokens "Allowed Values": [clamp, repeat, mirror, black]
+    USDHYDRA_API
     UsdAttribute GetWrapSAttr() const;
 
     /// See GetWrapSAttr(), and also 
@@ -144,6 +160,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDHYDRA_API
     UsdAttribute CreateWrapSAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -157,6 +174,7 @@ public:
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: No Fallback
     /// \n  \ref UsdHydraTokens "Allowed Values": [clamp, repeat, mirror, black]
+    USDHYDRA_API
     UsdAttribute GetWrapTAttr() const;
 
     /// See GetWrapTAttr(), and also 
@@ -164,6 +182,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDHYDRA_API
     UsdAttribute CreateWrapTAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -177,6 +196,7 @@ public:
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: No Fallback
     /// \n  \ref UsdHydraTokens "Allowed Values": [nearest, linear, linearMipmapLinear, linearMipmapNearest, nearestMipmapLinear, nearestMipmapNearest]
+    USDHYDRA_API
     UsdAttribute GetMinFilterAttr() const;
 
     /// See GetMinFilterAttr(), and also 
@@ -184,6 +204,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDHYDRA_API
     UsdAttribute CreateMinFilterAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -197,6 +218,7 @@ public:
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: No Fallback
     /// \n  \ref UsdHydraTokens "Allowed Values": [nearest, linear]
+    USDHYDRA_API
     UsdAttribute GetMagFilterAttr() const;
 
     /// See GetMagFilterAttr(), and also 
@@ -204,6 +226,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDHYDRA_API
     UsdAttribute CreateMagFilterAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -211,10 +234,14 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

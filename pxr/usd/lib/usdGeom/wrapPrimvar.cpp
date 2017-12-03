@@ -21,17 +21,24 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usdGeom/primvar.h"
 
-#include "pxr/usd/usd/conversions.h"
-
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 
 #include <boost/python/class.hpp>
 #include <boost/python/operators.hpp>
 #include <boost/python/implicit.hpp>
 
+#include <vector>
+
 using namespace boost::python;
+using std::vector;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static tuple
 _GetDeclarationInfo(const UsdGeomPrimvar &self)
@@ -75,6 +82,25 @@ _ComputeFlattened(const UsdGeomPrimvar &self,
     return UsdVtValueToPython(retValue);
 }    
 
+static vector<double>
+_GetTimeSamples(const UsdGeomPrimvar &self) 
+{
+    vector<double> result;
+    self.GetTimeSamples(&result);
+    return result;
+}
+
+static vector<double>
+_GetTimeSamplesInInterval(const UsdGeomPrimvar &self,
+                          const GfInterval& interval) 
+{
+    vector<double> result;
+    self.GetTimeSamplesInInterval(interval, &result);
+    return result;
+}
+
+} // anonymous namespace 
+
 void wrapUsdGeomPrimvar()
 {
     typedef UsdGeomPrimvar Primvar;
@@ -105,6 +131,8 @@ void wrapUsdGeomPrimvar()
         .def("IsDefined", &Primvar::IsDefined)
         .def("GetName", &Primvar::GetName,
              return_value_policy<return_by_value>())
+        .def("GetPrimvarName", &Primvar::GetPrimvarName)
+        .def("NameContainsNamespaces", &Primvar::NameContainsNamespaces)
         .def("GetBaseName", &Primvar::GetBaseName)
         .def("GetNamespace", &Primvar::GetNamespace)
         .def("SplitName", &Primvar::SplitName,
@@ -113,9 +141,14 @@ void wrapUsdGeomPrimvar()
         .def("Get", _Get, (arg("time")=UsdTimeCode::Default()))
         .def("Set", _Set, (arg("value"), arg("time")=UsdTimeCode::Default()))
 
+        .def("GetTimeSamples", _GetTimeSamples)
+        .def("GetTimeSamplesInInterval", _GetTimeSamplesInInterval)
+        .def("ValueMightBeTimeVarying", &Primvar::ValueMightBeTimeVarying)
+
         .def("SetIndices", &Primvar::SetIndices, 
             (arg("indices"),
              arg("time")=UsdTimeCode::Default()))
+        .def("BlockIndices", &Primvar::BlockIndices)
         .def("GetIndices", _GetIndices, 
             (arg("time")=UsdTimeCode::Default()))
         .def("IsIndexed", &Primvar::IsIndexed)
@@ -133,3 +166,4 @@ void wrapUsdGeomPrimvar()
 
     implicitly_convertible<Primvar, UsdAttribute>();
 }
+

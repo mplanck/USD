@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/tf/errorMark.h"
 #include "pxr/base/tf/fileUtils.h"
 #include "pxr/base/tf/iterator.h"
@@ -28,17 +29,32 @@
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/pathUtils.h"
 #include "pxr/base/tf/regTest.h"
+#include "pxr/base/arch/pragmas.h"
 
 #include <string>
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <chrono>
+#include <thread>
 #include <sys/types.h>
 #include <sys/stat.h>
+
+#if !defined(ARCH_OS_WINDOWS)
 #include <unistd.h>
+#else
+#define S_IRWXU 0700
+#define S_IRWXG 0070
+#define S_IRWXO 0007
+#define S_IROTH 0004
+#define S_IXOTH 0001
+typedef int mode_t;
+#endif
 
 #include <boost/assign/list_of.hpp>
 #include <boost/bind.hpp>
+
+ARCH_PRAGMA_DEPRECATED_POSIX_NAME
 
 using std::string;
 using std::cerr;
@@ -47,7 +63,24 @@ using std::endl;
 using std::vector;
 using boost::assign::list_of;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 namespace {
+
+#if defined(ARCH_OS_WINDOWS)
+const char* knownDirPath = "c:\\Windows";
+const char* knownFilePath = "c:\\Windows\\System32\\notepad.exe";
+const char* knownNoSuchPath = "c:\\no\\such\\file";
+#elif defined(ARCH_OS_DARWIN)
+const char* knownDirPath = "/private/etc";
+const char* knownFilePath = "/private/etc/passwd";
+const char* knownNoSuchPath = "/no/such/file";
+#else
+const char* knownDirPath = "/etc";
+const char* knownFilePath = "/etc/passwd";
+const char* knownNoSuchPath = "/no/such/file";
+#endif
+bool testSymlinks = true;
 
 struct _DirInfo {
     _DirInfo(
@@ -107,34 +140,43 @@ Setup()
     if (TfIsDir(topDir))
         TfRmTree(topDir);
     else if (TfPathExists(topDir))
-        unlink(topDir.c_str());
+        ArchUnlinkFile(topDir.c_str());
 
     TF_FOR_ALL(i, *_SetupData) {
-        if (not (TfIsDir(i->dirpath) or TfMakeDirs(i->dirpath)))
+        if (!(TfIsDir(i->dirpath) || TfMakeDirs(i->dirpath)))
             TF_FATAL_ERROR("Failed to create directory '%s'",
                 i->dirpath.c_str());
 
         TF_FOR_ALL(d, i->dirnames) {
             string dirPath = TfStringCatPaths(i->dirpath, *d);
-            if (not (TfIsDir(dirPath) or TfMakeDirs(dirPath)))
+            if (!(TfIsDir(dirPath) || TfMakeDirs(dirPath)))
                 TF_FATAL_ERROR("Failed to create directory '%s'",
                     dirPath.c_str());
         }
 
         TF_FOR_ALL(f, i->filenames) {
             string filePath = TfStringCatPaths(i->dirpath, *f);
-            if (not (TfIsFile(filePath) or TfTouchFile(filePath)))
+            if (!(TfIsFile(filePath) || TfTouchFile(filePath)))
                 TF_FATAL_ERROR("Failed to create file '%s'",
                     filePath.c_str());
         }
     }
 
-    // Create a symlink cycle for TfWalkDirs to avoid.
-    TF_AXIOM(TfSymlink("../../../b", "a/b/c/d/cycle_to_b"));
+    // Create a symlink cycle for TfWalkDirs to avoid.  We also use this
+    // to detect if we can create symlinks at all.  If not we skip all
+    // remaining symlink tests.
+    errno = 0;
+    TF_AXIOM(TfSymlink("../../../b", "a/b/c/d/cycle_to_b") || errno == EPERM);
+    if (errno == EPERM) {
+        testSymlinks = false;
+        TF_WARN("Not testing symlinks");
+    }
 
-    // Create a symlink to the top-level directory.
-    unlink("link_to_a");
-    TF_AXIOM(TfSymlink("a", "link_to_a"));
+    if (testSymlinks) {
+        // Create a symlink to the top-level directory.
+        ArchUnlinkFile("link_to_a");
+        TF_AXIOM(TfSymlink("a", "link_to_a"));
+    }
 
     return true;
 }
@@ -144,14 +186,16 @@ TestTfPathExists()
 {
     cout << "Testing TfPathExists" << endl;
 
-    TF_AXIOM(TfPathExists("/tmp"));
-    TF_AXIOM(not TfPathExists("no/such/path"));
-    TF_AXIOM(not TfPathExists(""));
+    TF_AXIOM(TfPathExists(knownDirPath));
+    TF_AXIOM(!TfPathExists(knownNoSuchPath));
+    TF_AXIOM(!TfPathExists(""));
 
-    unlink("link-to-file");
-    symlink("/no/such/file", "link-to-file");
-    TF_AXIOM(TfPathExists("link-to-file"));
-    TF_AXIOM(not TfPathExists("link-to-file", true));
+    if (testSymlinks) {
+        ArchUnlinkFile("link-to-file");
+        TfSymlink(knownNoSuchPath, "link-to-file");
+        TF_AXIOM(TfPathExists("link-to-file"));
+        TF_AXIOM(!TfPathExists("link-to-file", true));
+    }
 
     return true;
 }
@@ -161,14 +205,16 @@ TestTfIsDir()
 {
     cout << "Testing TfIsDir" << endl;
 
-    TF_AXIOM(TfIsDir("/etc"));
-    TF_AXIOM(not TfIsDir("/etc/passwd"));
-    TF_AXIOM(not TfIsDir(""));
+    TF_AXIOM(TfIsDir(knownDirPath));
+    TF_AXIOM(!TfIsDir(knownFilePath));
+    TF_AXIOM(!TfIsDir(""));
 
-    unlink("link-to-dir");
-    symlink("/etc", "link-to-dir");
-    TF_AXIOM(not TfIsDir("link-to-dir"));
-    TF_AXIOM(TfIsDir("link-to-dir", true));
+    if (testSymlinks) {
+        ArchUnlinkFile("link-to-dir");
+        TfSymlink(knownDirPath, "link-to-dir");
+        TF_AXIOM(!TfIsDir("link-to-dir"));
+        TF_AXIOM(TfIsDir("link-to-dir", true));
+    }
 
     return true;
 }
@@ -178,14 +224,16 @@ TestTfIsFile()
 {
     cout << "Testing TfIsFile" << endl;
 
-    TF_AXIOM(TfIsFile("/etc/passwd"));
-    TF_AXIOM(not TfIsFile("/etc"));
-    TF_AXIOM(not TfIsFile(""));
+    TF_AXIOM(!TfIsFile(knownDirPath));
+    TF_AXIOM(TfIsFile(knownFilePath));
+    TF_AXIOM(!TfIsFile(""));
 
-    unlink("link-to-file");
-    symlink("/etc/passwd", "link-to-file");
-    TF_AXIOM(not TfIsFile("link-to-file"));
-    TF_AXIOM(TfIsFile("link-to-file", true));
+    if (testSymlinks) {
+        ArchUnlinkFile("link-to-file");
+        TfSymlink(knownFilePath, "link-to-file");
+        TF_AXIOM(!TfIsFile("link-to-file"));
+        TF_AXIOM(TfIsFile("link-to-file", true));
+    }
 
     return true;
 }
@@ -195,14 +243,17 @@ TestTfIsWritable()
 {
     cout << "Testing TfIsWritable" << endl;
 
-    TF_AXIOM(TfIsWritable("/tmp"));
-    TF_AXIOM(not TfIsWritable(""));
-    TF_AXIOM(not TfIsWritable("/etc"));
-    TF_AXIOM(not TfIsWritable("/etc/passwd"));
+    TF_AXIOM(TfIsWritable(ArchGetTmpDir()));
+    TF_AXIOM(!TfIsWritable(""));
+#if !defined(ARCH_OS_WINDOWS)
+    // We can't be sure these aren't writable on Windows.
+    TF_AXIOM(!TfIsWritable(knownDirPath));
+    TF_AXIOM(!TfIsWritable(knownFilePath));
+#endif
 
     TfTouchFile("testTfIsWritable.txt");
     TF_AXIOM(TfIsWritable("testTfIsWritable.txt"));
-    (void) unlink("testTfIsWritable.txt");
+    (void) ArchUnlinkFile("testTfIsWritable.txt");
 
     return true;
 }
@@ -212,29 +263,31 @@ TestTfIsDirEmpty()
 {
     cout << "Testing TfIsDirEmpty" << endl;
 
-    TF_AXIOM(not TfIsDirEmpty("/etc/passwd"));
-    TF_AXIOM(not TfIsDirEmpty("/etc"));
-    TF_AXIOM(TfIsDir("empty") or TfMakeDirs("empty"));
+    TF_AXIOM(!TfIsDirEmpty(knownFilePath));
+    TF_AXIOM(!TfIsDirEmpty(knownDirPath));
+    TF_AXIOM(TfIsDir("empty") || TfMakeDirs("empty"));
     TF_AXIOM(TfIsDirEmpty("empty"));
-    (void) rmdir("empty");
+    (void) ArchRmDir("empty");
     return true;
 }
 
 static bool
 TestTfSymlink()
 {
-    cout << "Testing TfSymlink/TfIsLink" << endl;
+    if (testSymlinks) {
+        cout << "Testing TfSymlink/TfIsLink" << endl;
 
-    (void) unlink("test-symlink");
+        (void) ArchUnlinkFile("test-symlink");
 
-    TF_AXIOM(not TfIsLink("/no/such/file"));
-    TF_AXIOM(not TfIsLink("/etc/passwd"));
-    TF_AXIOM(not TfIsLink(""));
-    TF_AXIOM(TfSymlink("/etc/passwd", "test-symlink"));
-    TF_AXIOM(TfIsLink("test-symlink"));
-    TF_AXIOM(TfReadLink("test-symlink") == "/etc/passwd");
+        TF_AXIOM(!TfIsLink(knownNoSuchPath));
+        TF_AXIOM(!TfIsLink(knownFilePath));
+        TF_AXIOM(!TfIsLink(""));
+        TF_AXIOM(TfSymlink(knownFilePath, "test-symlink"));
+        TF_AXIOM(TfIsLink("test-symlink"));
+        TF_AXIOM(TfReadLink("test-symlink") == knownFilePath);
 
-    (void) unlink("test-symlink");
+        (void) ArchUnlinkFile("test-symlink");
+    }
 
     return true;
 }
@@ -251,7 +304,7 @@ TestTfDeleteFile()
     // Can't delete (file doesn't exist)
     cerr << "=== BEGIN EXPECTED ERROR ===" << endl;
     TfErrorMark m;
-    TF_AXIOM(not TfDeleteFile(t_file));
+    TF_AXIOM(!TfDeleteFile(t_file));
     m.Clear();
     cerr << "=== END EXPECTED ERROR ===" << endl;
 
@@ -265,7 +318,7 @@ TestTfMakeDir()
 
     // Default permissions
     if (TfIsDir("test-directory-1"))
-        (void) rmdir("test-directory-1");
+        (void) ArchRmDir("test-directory-1");
 
     mode_t oldMask = umask(2);
     TF_AXIOM(TfMakeDir("test-directory-1"));
@@ -274,24 +327,31 @@ TestTfMakeDir()
     struct stat stbuf;
     TF_AXIOM(stat("test-directory-1", &stbuf) != -1);
     TF_AXIOM(S_ISDIR(stbuf.st_mode));
+#if !defined(ARCH_OS_WINDOWS)
     TF_AXIOM((stbuf.st_mode & ~S_IFMT) ==
                 (S_IRWXU|S_IRWXG|S_IROTH|S_IXOTH));
-
-    (void) rmdir("test-directory-1");
+#else
+    TF_AXIOM(((stbuf.st_mode & ~S_IFMT) & S_IRWXU) == S_IRWXU);
+#endif
+    (void) ArchRmDir("test-directory-1");
 
     // Non-default permissions
     if (TfIsDir("test-directory-2"))
-        (void) rmdir("test-directory-2");
+        (void) ArchRmDir("test-directory-2");
 
     TF_AXIOM(TfMakeDir("test-directory-2", S_IRWXU));
     TF_AXIOM(stat("test-directory-2", &stbuf) != -1);
     TF_AXIOM(S_ISDIR(stbuf.st_mode));
+#if !defined(ARCH_OS_WINDOWS)
     TF_AXIOM((stbuf.st_mode & ~S_IFMT) == S_IRWXU);
+#else
+    TF_AXIOM(((stbuf.st_mode & ~S_IFMT) & S_IRWXU) == S_IRWXU);
+#endif
 
-    (void) rmdir("test-directory-2");
+    (void) ArchRmDir("test-directory-2");
 
     // Parent directories don't exist
-    TF_AXIOM(not TfMakeDir("parents/do/not/exist"));
+    TF_AXIOM(!TfMakeDir("parents/do/not/exist"));
 
     return true;
 }
@@ -316,7 +376,7 @@ TestTfMakeDirs()
 
     // Just a slash
     cout << "+ only a slash" << endl;
-    TF_AXIOM(not TfMakeDirs("/"));
+    TF_AXIOM(!TfMakeDirs("/"));
 
     // Begins with a dot
     if (TfIsDir("testTfMakeDirs-3"))
@@ -331,7 +391,7 @@ TestTfMakeDirs()
 
     // Whole path already exists
     cout << "+ whole path already exists" << endl;
-    TF_AXIOM(not TfMakeDirs("testTfMakeDirs-3/bar/baz/leaf"));
+    TF_AXIOM(!TfMakeDirs("testTfMakeDirs-3/bar/baz/leaf"));
 
     // Dots in path
     if (TfIsDir("testTfMakeDirs-4"))
@@ -352,7 +412,7 @@ TestTfMakeDirs()
     TF_AXIOM(TfTouchFile("testTfMakeDirs-5/bar/a"));
     cerr << "=== BEGIN EXPECTED ERROR ===" << endl;
     TfErrorMark m;
-    TF_AXIOM(not TfMakeDirs("./testTfMakeDirs-5/bar/a/b/c/d"));
+    TF_AXIOM(!TfMakeDirs("./testTfMakeDirs-5/bar/a/b/c/d"));
     m.Clear();
     cerr << "=== END EXPECTED ERROR ===" << endl;
 
@@ -383,12 +443,12 @@ struct Tf_WalkLogger
         std::sort(dirnames->begin(), dirnames->end());
         std::sort(filenames.begin(), filenames.end());
 
-        if (not dirnames->empty())
+        if (!dirnames->empty())
             *_ostr << "['" << TfStringJoin(*dirnames, "', '") << "'], ";
         else
             *_ostr << "[], ";
 
-        if (not filenames.empty())
+        if (!filenames.empty())
             *_ostr << "['" << TfStringJoin(filenames, "', '") << "'])" << endl;
         else
             *_ostr << "[])" << endl;
@@ -424,7 +484,7 @@ TestTfWalkDirs()
     TF_AXIOM(TfIsDir("a"));
 
     std::ofstream logstr("TestTfWalkDirs-log.txt");
-    if (not logstr) {
+    if (!logstr) {
         cerr << "Failed to open TestTfWalkDirs-log.txt" << endl;
         return false;
     }
@@ -438,11 +498,13 @@ TestTfWalkDirs()
         Tf_WalkErrorHandler(&errorCount));
     TF_AXIOM(errorCount == 0);
 
-    logstr << "+ top down walk from symlink root" << endl;
-    TfWalkDirs("link_to_a", logger,
-        /* topDown */ true,
-        Tf_WalkErrorHandler(&errorCount));
-    TF_AXIOM(errorCount == 0);
+    if (testSymlinks) {
+        logstr << "+ top down walk from symlink root" << endl;
+        TfWalkDirs("link_to_a", logger,
+            /* topDown */ true,
+            Tf_WalkErrorHandler(&errorCount));
+        TF_AXIOM(errorCount == 0);
+    }
 
     logstr << "+ top down walk from root with followLinks=true" << endl;
     TfWalkDirs("a", logger,
@@ -482,7 +544,7 @@ TestTfListDir()
     TF_AXIOM("listing a non-existent path" &&
              TfListDir("nosuchpath").empty());
     TF_AXIOM("listing a file" &&
-             TfListDir("/etc/passwd").empty());
+             TfListDir(knownFilePath).empty());
 
     // The success of the following result size checks depend on how many
     // files/directories/etc. are created by the sample hierarchy script.
@@ -491,7 +553,7 @@ TestTfListDir()
     {
         vector<string> result = TfListDir("a");
         TF_AXIOM("listing the sample directory works" &&
-                 not result.empty());
+                 !result.empty());
 
         cout << "entries = " << result.size() << endl;
         for (vector<string>::const_iterator it = result.begin();
@@ -506,15 +568,16 @@ TestTfListDir()
     {
         vector<string> result = TfListDir("a", true);
         TF_AXIOM("listing the sample directory recursively works" &&
-                 not result.empty());
+                 !result.empty());
 
         cout << "entries = " << result.size() << endl;
         for (vector<string>::const_iterator it = result.begin();
              it != result.end(); ++it)
             cout << *it << endl;
 
+        // No cycle_to_b symlink if not testing symlinks.
         TF_AXIOM("check the number of entries returned" &&
-                 result.size() == 39);
+                 result.size() == (testSymlinks ? 39u : 38u));
     }
 
     return true;
@@ -546,7 +609,7 @@ TestTfRmTree()
     cerr << "=== BEGIN EXPECTED ERROR ===" << endl;
     TfRmTree("nosuchdirectory");
     cerr << "=== END EXPECTED ERROR ===" << endl;
-    TF_AXIOM(not m.IsClean());
+    TF_AXIOM(!m.IsClean());
     m.Clear();
 
     cout << "+ no such directory, handle errors" << endl;
@@ -560,7 +623,7 @@ TestTfRmTree()
 
     cout << "+ removing a typical directory structure" << endl;
     TfRmTree("a");
-    TF_AXIOM(not TfIsDir("a"));
+    TF_AXIOM(!TfIsDir("a"));
 
     return true;
 }
@@ -571,11 +634,11 @@ TestTfTouchFile()
     cout << "Testing TfTouchFile" << endl;
 
     string fileName("test-touchfile");
-    (void) unlink(fileName.c_str());
+    (void) ArchUnlinkFile(fileName.c_str());
 
     // Touch non-existent file, create = false -> fail...
-    TF_AXIOM(not TfTouchFile(fileName, false));
-    TF_AXIOM(not TfIsFile(fileName));
+    TF_AXIOM(!TfTouchFile(fileName, false));
+    TF_AXIOM(!TfIsFile(fileName));
 
     // Touch non-existent file, create = true -> succeed
     TF_AXIOM(TfTouchFile(fileName, true));
@@ -587,7 +650,7 @@ TestTfTouchFile()
     time_t oldmTime = st.st_mtime;
 
     // Wait a moment, so that mod time differs...
-    sleep(1);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     // Touch again
     TF_AXIOM(TfTouchFile(fileName, false));
@@ -602,7 +665,7 @@ TestTfTouchFile()
 
     TF_AXIOM(newmTime > oldmTime);
 
-    (void) unlink(fileName.c_str());
+    (void) ArchUnlinkFile(fileName.c_str());
 
     return true;
 }
