@@ -24,12 +24,16 @@
 #ifndef PLUG_INFO_H
 #define PLUG_INFO_H
 
+#include "pxr/pxr.h"
 #include "pxr/base/arch/attributes.h"
 #include "pxr/base/js/value.h"
-#include <boost/function.hpp>
-#include <boost/scoped_ptr.hpp>
+
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 class JsValue;
 
@@ -38,7 +42,9 @@ struct Plug_RegistrationMetadata {
     enum Type {
         UnknownType,
         LibraryType,
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
         PythonType,
+#endif // PXR_PYTHON_SUPPORT_ENABLED
         ResourceType
     };
 
@@ -64,14 +70,15 @@ public:
     ~Plug_TaskArena();
 
     /// Schedule \p fn to run.
-    void Run(const boost::function<void()>& fn);
+    template <class Fn>
+    void Run(Fn const &fn);
 
     /// Wait for all scheduled tasks to complete.
     void Wait();
 
 private:
     class _Impl;
-    boost::scoped_ptr<_Impl> _impl;
+    std::unique_ptr<_Impl> _impl;
 };
 
 /// Reads several plugInfo files, recursively loading any included files.
@@ -86,11 +93,13 @@ private:
 void
 Plug_ReadPlugInfo(
     const std::vector<std::string>& pathnames,
-    const boost::function<bool (const std::string&)>& addVisitedPath,
-    const boost::function<void (const Plug_RegistrationMetadata&)>& addPlugin,
+    const std::function<bool (const std::string&)>& addVisitedPath,
+    const std::function<void (const Plug_RegistrationMetadata&)>& addPlugin,
     Plug_TaskArena* taskArena);
 
 /// Sets the paths to the bootstrap plug-path JSON files.
 void Plug_SetPaths(const std::vector<std::string>&);
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // PLUG_INFO_H

@@ -24,10 +24,16 @@
 #ifndef USDGEOM_GENERATED_MESH_H
 #define USDGEOM_GENERATED_MESH_H
 
+/// \file usdGeom/mesh.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdGeom/api.h"
 #include "pxr/usd/usdGeom/pointBased.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
 #include "pxr/usd/usdGeom/tokens.h"
+
+#include "pxr/usd/usd/timeCode.h" 
 
 #include "pxr/base/vt/value.h"
 
@@ -38,12 +44,16 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // MESH                                                                       //
 // -------------------------------------------------------------------------- //
 
+/// \class UsdGeomMesh
+///
 /// Encodes a mesh surface whose definition and feature-set
 /// will converge with that of OpenSubdiv, http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html. Current exceptions/divergences include:
 /// 
@@ -77,6 +87,11 @@ public:
     /// a non-empty typeName.
     static const bool IsConcrete = true;
 
+    /// Compile-time constant indicating whether or not this class inherits from
+    /// UsdTyped. Types which inherit from UsdTyped can impart a typename on a
+    /// UsdPrim.
+    static const bool IsTyped = true;
+
     /// Construct a UsdGeomMesh on UsdPrim \p prim .
     /// Equivalent to UsdGeomMesh::Get(prim.GetStage(), prim.GetPath())
     /// for a \em valid \p prim, but will not immediately throw an error for
@@ -95,15 +110,17 @@ public:
     }
 
     /// Destructor.
+    USDGEOM_API
     virtual ~UsdGeomMesh();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDGEOM_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdGeomMesh holding the prim adhering to this
+    /// Return a UsdGeomMesh holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -112,10 +129,11 @@ public:
     /// UsdGeomMesh(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDGEOM_API
     static UsdGeomMesh
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
-    /// \brief Attempt to ensure a \a UsdPrim adhering to this schema at \p path
+    /// Attempt to ensure a \a UsdPrim adhering to this schema at \p path
     /// is defined (according to UsdPrim::IsDefined()) on this stage.
     ///
     /// If a prim adhering to this schema at \p path is already defined on this
@@ -137,17 +155,20 @@ public:
     /// specify this schema class, in case a stronger typeName opinion overrides
     /// the opinion at the current EditTarget.
     ///
+    USDGEOM_API
     static UsdGeomMesh
     Define(const UsdStagePtr &stage, const SdfPath &path);
 
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDGEOM_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDGEOM_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -162,6 +183,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->IntArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetFaceVertexIndicesAttr() const;
 
     /// See GetFaceVertexIndicesAttr(), and also 
@@ -169,6 +191,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateFaceVertexIndicesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -185,6 +208,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->IntArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetFaceVertexCountsAttr() const;
 
     /// See GetFaceVertexCountsAttr(), and also 
@@ -192,6 +216,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateFaceVertexCountsAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -213,6 +238,7 @@ public:
     /// \n  Variability: SdfVariabilityUniform
     /// \n  Fallback Value: catmullClark
     /// \n  \ref UsdGeomTokens "Allowed Values": [catmullClark, loop, bilinear, none]
+    USDGEOM_API
     UsdAttribute GetSubdivisionSchemeAttr() const;
 
     /// See GetSubdivisionSchemeAttr(), and also 
@@ -220,6 +246,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateSubdivisionSchemeAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -235,6 +262,7 @@ public:
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: edgeAndCorner
     /// \n  \ref UsdGeomTokens "Allowed Values": [none, edgeAndCorner, edgeOnly]
+    USDGEOM_API
     UsdAttribute GetInterpolateBoundaryAttr() const;
 
     /// See GetInterpolateBoundaryAttr(), and also 
@@ -242,6 +270,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateInterpolateBoundaryAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -262,6 +291,7 @@ public:
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: cornersPlus1
     /// \n  \ref UsdGeomTokens "Allowed Values": [all, none, boundaries, cornersOnly, cornersPlus1, cornersPlus2]
+    USDGEOM_API
     UsdAttribute GetFaceVaryingLinearInterpolationAttr() const;
 
     /// See GetFaceVaryingLinearInterpolationAttr(), and also 
@@ -269,7 +299,34 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateFaceVaryingLinearInterpolationAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
+
+public:
+    // --------------------------------------------------------------------- //
+    // TRIANGLESUBDIVISIONRULE 
+    // --------------------------------------------------------------------- //
+    /// Specifies what weights are used during triangle subdivision for
+    /// the Catmull-Clark scheme. Valid values are "catmullClark" (the default) 
+    /// and "smooth".
+    /// 
+    /// See http://graphics.pixar.com/opensubdiv/docs/subdivision_surfaces.html#triangle-subdivision-rule
+    ///
+    /// \n  C++ Type: TfToken
+    /// \n  Usd Type: SdfValueTypeNames->Token
+    /// \n  Variability: SdfVariabilityVarying
+    /// \n  Fallback Value: catmullClark
+    /// \n  \ref UsdGeomTokens "Allowed Values": [catmullClark, smooth]
+    USDGEOM_API
+    UsdAttribute GetTriangleSubdivisionRuleAttr() const;
+
+    /// See GetTriangleSubdivisionRuleAttr(), and also 
+    /// \ref Usd_Create_Or_Get_Property for when to use Get vs Create.
+    /// If specified, author \p defaultValue as the attribute's default,
+    /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
+    /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
+    UsdAttribute CreateTriangleSubdivisionRuleAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
     // --------------------------------------------------------------------- //
@@ -282,6 +339,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->IntArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: []
+    USDGEOM_API
     UsdAttribute GetHoleIndicesAttr() const;
 
     /// See GetHoleIndicesAttr(), and also 
@@ -289,6 +347,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateHoleIndicesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -301,6 +360,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->IntArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: []
+    USDGEOM_API
     UsdAttribute GetCornerIndicesAttr() const;
 
     /// See GetCornerIndicesAttr(), and also 
@@ -308,6 +368,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateCornerIndicesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -323,6 +384,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->FloatArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: []
+    USDGEOM_API
     UsdAttribute GetCornerSharpnessesAttr() const;
 
     /// See GetCornerSharpnessesAttr(), and also 
@@ -330,6 +392,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateCornerSharpnessesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -344,6 +407,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->IntArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: []
+    USDGEOM_API
     UsdAttribute GetCreaseIndicesAttr() const;
 
     /// See GetCreaseIndicesAttr(), and also 
@@ -351,6 +415,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateCreaseIndicesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -367,6 +432,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->IntArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: []
+    USDGEOM_API
     UsdAttribute GetCreaseLengthsAttr() const;
 
     /// See GetCreaseLengthsAttr(), and also 
@@ -374,6 +440,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateCreaseLengthsAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -394,6 +461,7 @@ public:
     /// \n  Usd Type: SdfValueTypeNames->FloatArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: []
+    USDGEOM_API
     UsdAttribute GetCreaseSharpnessesAttr() const;
 
     /// See GetCreaseSharpnessesAttr(), and also 
@@ -401,6 +469,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateCreaseSharpnessesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -408,25 +477,21 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 
-#include "pxr/usd/usd/timeCode.h"
-
 public:
     /// \var const float SHARPNESS_INFINITE
-    /// \brief As an element of a 'creaseSharpness' or 'cornerSharpness' array,
+    /// As an element of a 'creaseSharpness' or 'cornerSharpness' array,
     /// indicates that the crease or corner is perfectly sharp.
+    USDGEOM_API
     static const float SHARPNESS_INFINITE;
-
-    // A transition API which can read both the new (faceVaryingLinearInterpolation)
-    // and old(faceVaryingInterpolateBoundary) attributes, but only returns values
-    // in the new form. This aims to limit the number of consumers which need to 
-    // handle both sets of values.
-    TfToken GetFaceVaryingLinearInterpolation(
-        UsdTimeCode time=UsdTimeCode::Default()) const; 
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -24,21 +24,33 @@
 #ifndef HD_COPY_COMPUTATION_H
 #define HD_COPY_COMPUTATION_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/computation.h"
 
-/// HdCopyComputationGPU is a gpu computation which transfers
-/// a vbo range specified by src and name to the given range.
-class HdCopyComputationGPU : public HdComputation
-{
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class HdCopyComputationGPU
+///
+/// A GPU computation which transfers a vbo range specified by src and name to
+/// the given range.
+///
+class HdCopyComputationGPU : public HdComputation {
 public:
+    HD_API
     HdCopyComputationGPU(HdBufferArrayRangeSharedPtr const &src,
                           TfToken const &name);
 
-    virtual void Execute(HdBufferArrayRangeSharedPtr const &range);
+    HD_API
+    virtual void Execute(HdBufferArrayRangeSharedPtr const &range,
+                         HdResourceRegistry *resourceRegistry);
 
+    HD_API
     virtual int GetNumOutputElements() const;
 
+    HD_API
     virtual void AddBufferSpecs(HdBufferSpecVector *specs) const;
 
 private:
@@ -46,5 +58,7 @@ private:
     TfToken _name;
 };
 
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_COMPUTATION_H

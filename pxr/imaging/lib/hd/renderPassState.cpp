@@ -25,22 +25,25 @@
 
 #include "pxr/imaging/hd/renderPassState.h"
 
+#include "pxr/imaging/hd/bufferArrayRangeGL.h"
 #include "pxr/imaging/hd/changeTracker.h"
-#include "pxr/imaging/hd/defaultLightingShader.h"
+#include "pxr/imaging/hd/fallbackLightingShader.h"
 #include "pxr/imaging/hd/drawItem.h"
 #include "pxr/imaging/hd/glslProgram.h"
 #include "pxr/imaging/hd/renderPassShader.h"
 #include "pxr/imaging/hd/resourceRegistry.h"
-#include "pxr/imaging/hd/shader.h"
+#include "pxr/imaging/hd/shaderCode.h"
 #include "pxr/imaging/hd/tokens.h"
 #include "pxr/imaging/hd/vtBufferSource.h"
-
 
 #include "pxr/base/gf/frustum.h"
 #include "pxr/base/tf/staticTokens.h"
 #include "pxr/base/tf/stringUtils.h"
 
 #include <boost/functional/hash.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
@@ -49,7 +52,7 @@ TF_DEFINE_PRIVATE_TOKENS(
 
 HdRenderPassState::HdRenderPassState()
     : _renderPassShader(new HdRenderPassShader())
-    , _defaultLightingShader(new Hd_DefaultLightingShader())
+    , _fallbackLightingShader(new Hd_FallbackLightingShader())
     , _worldToViewMatrix(1)
     , _projectionMatrix(1)
     , _viewport(0, 0, 1, 1)
@@ -67,14 +70,16 @@ HdRenderPassState::HdRenderPassState()
     , _depthFunc(HdCmpFuncLEqual)
     , _alphaToCoverageUseDefault(true)
     , _alphaToCoverageEnabled(true)
+    , _colorMaskUseDefault(true)
+    , _colorMask(HdRenderPassState::ColorMaskRGBA)
 {
-    _lightingShader = _defaultLightingShader;
+    _lightingShader = _fallbackLightingShader;
 }
 
 HdRenderPassState::HdRenderPassState(
     HdRenderPassShaderSharedPtr const &renderPassShader)
     : _renderPassShader(renderPassShader)
-    , _defaultLightingShader(new Hd_DefaultLightingShader())
+    , _fallbackLightingShader(new Hd_FallbackLightingShader())
     , _worldToViewMatrix(1)
     , _projectionMatrix(1)
     , _viewport(0, 0, 1, 1)
@@ -92,8 +97,11 @@ HdRenderPassState::HdRenderPassState(
     , _depthFunc(HdCmpFuncLEqual)
     , _alphaToCoverageUseDefault(true)
     , _alphaToCoverageEnabled(true)
+    , _colorMaskUseDefault(true)
+    , _colorMask(HdRenderPassState::ColorMaskRGBA)
+
 {
-    _lightingShader = _defaultLightingShader;
+    _lightingShader = _fallbackLightingShader;
 }
 
 HdRenderPassState::~HdRenderPassState()
@@ -102,12 +110,10 @@ HdRenderPassState::~HdRenderPassState()
 }
 
 void
-HdRenderPassState::Sync()
+HdRenderPassState::Sync(HdResourceRegistrySharedPtr const &resourceRegistry)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-
-    HdResourceRegistry *resourceRegistry = &HdResourceRegistry::GetInstance();
+    HF_MALLOC_TAG_FUNCTION();
 
     VtVec4fArray clipPlanes;
     TF_FOR_ALL(it, _clipPlanes) {
@@ -115,7 +121,7 @@ HdRenderPassState::Sync()
     }
 
     // allocate bar if not exists
-    if (not _renderPassStateBar) {
+    if (!_renderPassStateBar) {
         HdBufferSpecVector bufferSpecs;
 
         // note: InterleavedMemoryManager computes the offsets in the packed
@@ -142,10 +148,13 @@ HdRenderPassState::Sync()
         _renderPassStateBar = resourceRegistry->AllocateUniformBufferArrayRange(
             HdTokens->drawingShader, bufferSpecs);
 
+        HdBufferArrayRangeGLSharedPtr _renderPassStateBar_ =
+            boost::static_pointer_cast<HdBufferArrayRangeGL> (_renderPassStateBar);
+
         // add buffer binding request
         _renderPassShader->AddBufferBinding(
             HdBindingRequest(HdBinding::UBO, _tokens->renderPassState,
-                             _renderPassStateBar, /*interleaved=*/true));
+                             _renderPassStateBar_, /*interleaved=*/true));
     }
 
     // Lighting hack supports different blending amounts, but we are currently
@@ -206,7 +215,7 @@ HdRenderPassState::SetCamera(GfMatrix4d const &worldToViewMatrix,
     _viewport = GfVec4f((float)viewport[0], (float)viewport[1],
                         (float)viewport[2], (float)viewport[3]);
 
-    if(not TfDebug::IsEnabled(HD_FREEZE_CULL_FRUSTUM)) {
+    if(!TfDebug::IsEnabled(HD_FREEZE_CULL_FRUSTUM)) {
         _cullMatrix = _worldToViewMatrix * _projectionMatrix;
     }
 }
@@ -261,7 +270,7 @@ HdRenderPassState::SetClipPlanes(ClipPlanesVector const & clipPlanes)
 {
     if (_clipPlanes != clipPlanes) {
         _clipPlanes = clipPlanes;
-        if (not TF_VERIFY(_clipPlanes.size() < GL_MAX_CLIP_PLANES)) {
+        if (!TF_VERIFY(_clipPlanes.size() < GL_MAX_CLIP_PLANES)) {
             _clipPlanes.resize(GL_MAX_CLIP_PLANES);
         }
         _renderPassStateBar.reset();
@@ -280,7 +289,7 @@ HdRenderPassState::SetLightingShader(HdLightingShaderSharedPtr const &lightingSh
     if (lightingShader) {
         _lightingShader = lightingShader;
     } else {
-        _lightingShader = _defaultLightingShader;
+        _lightingShader = _fallbackLightingShader;
     }
 }
 
@@ -294,31 +303,29 @@ HdRenderPassState::SetRenderPassShader(HdRenderPassShaderSharedPtr const &render
 
     _renderPassShader = renderPassShader;
     if (_renderPassStateBar) {
+
+        HdBufferArrayRangeGLSharedPtr _renderPassStateBar_ =
+            boost::static_pointer_cast<HdBufferArrayRangeGL> (_renderPassStateBar);
+
         _renderPassShader->AddBufferBinding(
             HdBindingRequest(HdBinding::UBO, _tokens->renderPassState,
-                             _renderPassStateBar, /*interleaved=*/true));
+                             _renderPassStateBar_, /*interleaved=*/true));
     }
 }
 
 void 
-HdRenderPassState::SetOverrideShader(HdShaderSharedPtr const &overrideShader)
+HdRenderPassState::SetOverrideShader(HdShaderCodeSharedPtr const &overrideShader)
 {
     _overrideShader = overrideShader;
 }
 
-HdShaderSharedPtrVector
-HdRenderPassState::GetShaders(HdShaderSharedPtr const &surfaceShader) const
+HdShaderCodeSharedPtrVector
+HdRenderPassState::GetShaders() const
 {
-    HdShaderSharedPtrVector shaders;
-    shaders.reserve(3);
+    HdShaderCodeSharedPtrVector shaders;
+    shaders.reserve(2);
     shaders.push_back(_lightingShader);
     shaders.push_back(_renderPassShader);
-    if (_overrideShader) {
-        shaders.push_back(_overrideShader);
-    } else if (surfaceShader) {
-        shaders.push_back(surfaceShader);
-    }
-
     return shaders;
 }
 
@@ -360,15 +367,30 @@ HdRenderPassState::SetAlphaToCoverageEnabled(bool enabled)
 }
 
 void
+HdRenderPassState::SetColorMaskUseDefault(bool useDefault)
+{
+    _colorMaskUseDefault = useDefault;
+}
+
+void
+HdRenderPassState::SetColorMask(HdRenderPassState::ColorMask const& mask)
+{
+    _colorMask = mask;
+}
+
+void
 HdRenderPassState::Bind()
 {
-    // XXX: in future, RenderPassState::Bind() and Unbind() can be a part of
-    // command buffer. At that point we should not rely on GL attribute stack.
+    // XXX: this states set will be refactored as hdstream PSO.
 
-    glPushAttrib(GL_POLYGON_BIT | GL_DEPTH_BUFFER_BIT | GL_ENABLE_BIT);
+    // XXX: viewport should be set.
+    // glViewport((GLint)_viewport[0], (GLint)_viewport[1],
+    //            (GLsizei)_viewport[2], (GLsizei)_viewport[3]);
+
+    // when adding another GL state change here, please document
+    // which states to be altered at the comment in the header file
 
     // Apply polygon offset to whole pass.
-    // Restored by GL_POLYGON_BIT|GL_ENABLE_BIT
     if (!_depthBiasUseDefault) {
         if (_depthBiasEnabled) {
             glEnable(GL_POLYGON_OFFSET_FILL);
@@ -378,10 +400,8 @@ HdRenderPassState::Bind()
         }
     }
 
-    // Restored by GL_DEPTH_BUFFER_BIT
     glDepthFunc(HdConversions::GetGlDepthFunc(_depthFunc));
 
-    // Restored by GL_ENABLE_BIT pop attrib
     if (!_alphaToCoverageUseDefault) {
         if (_alphaToCoverageEnabled) {
             glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -393,12 +413,38 @@ HdRenderPassState::Bind()
     for (size_t i = 0; i < _clipPlanes.size(); ++i) {
         glEnable(GL_CLIP_DISTANCE0 + i);
     }
+
+    if (!_colorMaskUseDefault) {
+        switch(_colorMask) {
+            case HdRenderPassState::ColorMaskNone:
+                glColorMask(false, false, false, false);
+                break;
+            case HdRenderPassState::ColorMaskRGB:
+                glColorMask(true, true, true, false);
+                break;
+            case HdRenderPassState::ColorMaskRGBA:
+                glColorMask(true, true, true, true);
+                break;
+        }
+    }
 }
 
 void
 HdRenderPassState::Unbind()
 {
-    glPopAttrib();
+    // restore back to the GL defaults
+
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    glDisable(GL_PROGRAM_POINT_SIZE);
+    glDepthFunc(GL_LESS);
+    glPolygonOffset(0, 0);
+
+    for (size_t i = 0; i < _clipPlanes.size(); ++i) {
+        glDisable(GL_CLIP_DISTANCE0 + i);
+    }
+
+    glColorMask(true, true, true, true);
 }
 
 size_t
@@ -407,9 +453,9 @@ HdRenderPassState::GetShaderHash() const
     size_t hash = _lightingShader->ComputeHash();
     boost::hash_combine(hash, _renderPassShader->ComputeHash());
     boost::hash_combine(hash, _clipPlanes.size());
-    if (_overrideShader) {
-        boost::hash_combine(hash, _overrideShader->ComputeHash());
-    }
     return hash;
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

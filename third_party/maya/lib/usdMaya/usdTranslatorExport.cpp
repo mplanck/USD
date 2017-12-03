@@ -26,6 +26,7 @@
  * \brief file translator for USD files
  */
 
+#include "pxr/pxr.h"
 #include "usdMaya/usdTranslatorExport.h"
 
 #include "usdMaya/JobArgs.h"
@@ -38,6 +39,9 @@
 #include <maya/MString.h>
 
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 
 void* usdTranslatorExport::creator() {
@@ -59,6 +63,7 @@ usdTranslatorExport::writer(const MFileObject &file,
     std::string fileName(file.fullName().asChar());
     JobExportArgs jobArgs;
     double startTime=1, endTime=1;
+    std::set<double> frameSamples;
     bool append=false;
     
     // Get the options 
@@ -77,20 +82,35 @@ usdTranslatorExport::writer(const MFileObject &file,
                 jobArgs.exportDisplayColor = true;
                 jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->none;
                 
-                if (theOption[1]=="None") {
+                if (theOption[1] == MString("None")) {
                     jobArgs.exportDisplayColor = false;
-                }else if (theOption[1]=="Look Colors") {
+                } else if (theOption[1] == MString("Material Colors")) {
                     jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->displayColor;
-                } else if (theOption[1]=="RfM Shaders") {
+                } else if (theOption[1] == MString("RfM Shaders")) {
                     TfToken shadingMode("pxrRis");
                     if (PxrUsdMayaShadingModeRegistry::GetInstance().GetExporter(shadingMode)) {
                         jobArgs.shadingMode = shadingMode;
                     }
-                }
+                } else if (theOption[1] != MString("GPrim Colors")) { 
+                    TfToken modeToken(theOption[1].asChar());
+                    if (PxrUsdMayaShadingModeRegistry::GetInstance().GetExporter(modeToken)) { 
+                        jobArgs.shadingMode = modeToken; 
+                    } else { 
+                        MGlobal::displayError( 
+                            TfStringPrintf("No shadingMode '%s' found. Setting shadingMode='none'", modeToken.GetText()).c_str()); 
+                        jobArgs.shadingMode = PxrUsdMayaShadingModeTokens->none; 
+                    }
+                } 
             }
             if (theOption[0] == MString("exportUVs")) {
                 jobArgs.exportMeshUVs = theOption[1].asInt();
                 jobArgs.exportNurbsExplicitUV = theOption[1].asInt();
+            }
+            if (theOption[0] == MString("exportMaterialCollections")) {
+                jobArgs.exportMaterialCollections = theOption[1].asInt();
+            }
+            if (theOption[0] == MString("materialCollectionsPath")) {
+                jobArgs.materialCollectionsPath = theOption[1].asChar();
             }
             if (theOption[0] == MString("normalizeUVs")) {
                 jobArgs.normalizeMeshUVs = theOption[1].asInt();
@@ -117,6 +137,9 @@ usdTranslatorExport::writer(const MFileObject &file,
             if (theOption[0] == MString("mergeXForm")) {
                 jobArgs.mergeTransformAndShape = theOption[1].asInt();
             }
+            if (theOption[0] == MString("exportInstances")) {
+                jobArgs.exportInstances = theOption[1].asInt();
+            }
             if (theOption[0] == MString("defaultMeshScheme")) {            
                 if (theOption[1]=="Polygonal Mesh") {
                     jobArgs.defaultMeshScheme = UsdGeomTokens->none;
@@ -140,6 +163,9 @@ usdTranslatorExport::writer(const MFileObject &file,
             if (theOption[0] == MString("endTime")) {
                 endTime = theOption[1].asDouble();
             }
+            if (theOption[0] == MString("frameSample")) {
+                frameSamples.insert(theOption[1].asDouble());
+            }
         }
         // Now resync start and end frame based on animation mode
         if (jobArgs.exportAnimation) {
@@ -148,6 +174,10 @@ usdTranslatorExport::writer(const MFileObject &file,
             startTime=MAnimControl::currentTime().value();
             endTime=startTime;
         }
+    }
+
+    if (frameSamples.empty()) {
+        frameSamples.insert(0.0);
     }
 
     MSelectionList objSelList;
@@ -172,11 +202,16 @@ usdTranslatorExport::writer(const MFileObject &file,
         usdWriteJob writeJob(jobArgs);
         if (writeJob.beginJob(fileName, append, startTime, endTime)) {
             for (double i=startTime;i<(endTime+1);i++) {
-                MGlobal::viewFrame(i);
-                writeJob.evalJob(i);
+                for (double sampleTime : frameSamples) {
+                    double actualTime = i + sampleTime;
+                    MGlobal::viewFrame(actualTime);
+                    writeJob.evalJob(actualTime);
+                }
             }
             writeJob.endJob();
             MGlobal::viewFrame(oldCurTime);
+        } else {
+            return MS::kFailure;
         }
     } else {
         MGlobal::displayWarning("No DAG nodes to export. Skipping");
@@ -185,21 +220,31 @@ usdTranslatorExport::writer(const MFileObject &file,
     return MS::kSuccess;
 }
 
-MPxFileTranslator::MFileKind usdTranslatorExport::identifyFile(
-    const MFileObject &fileName,
-    const char*,
-    short) const {
-
+MPxFileTranslator::MFileKind
+usdTranslatorExport::identifyFile(
+        const MFileObject& file,
+        const char* buffer,
+        short size) const
+{
     MFileKind retValue = kNotMyFileType;
-    MString fName = fileName.fullName();
-    int sLen=fName.length();
-    if (sLen>5) {
-        if (fName.substring(sLen-4, sLen-1)==".usd" || 
-            fName.substring(sLen-5, sLen-1)==".usda" ||
-            fName.substring(sLen-5, sLen-1)==".usdb" ||
-            fName.substring(sLen-5, sLen-1)==".usdc") {
-            retValue = kIsMyFileType;
-        }
+    const MString fileName = file.fullName();
+    const int lastIndex = fileName.length() - 1;
+
+    const int periodIndex = fileName.rindex('.');
+    if (periodIndex < 0 || periodIndex >= lastIndex) {
+        return retValue;
     }
+
+    const MString fileExtension = fileName.substring(periodIndex + 1, lastIndex);
+
+    if (fileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionDefault.GetText() || 
+        fileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionASCII.GetText()   || 
+        fileExtension == PxrUsdMayaTranslatorTokens->UsdFileExtensionCrate.GetText()) {
+        retValue = kIsMyFileType;
+    }
+
     return retValue;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

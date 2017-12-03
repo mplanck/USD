@@ -21,15 +21,20 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/valueTypeRegistry.h"
 #include "pxr/usd/sdf/valueTypeName.h"
 #include "pxr/usd/sdf/valueTypePrivate.h"
 #include "pxr/usd/sdf/types.h" // For SdfDimensionlessUnitDefault
 #include "pxr/base/tf/diagnostic.h"
+#include "pxr/base/tf/hashmap.h"
 #include "pxr/base/tf/type.h"
 #include <boost/functional/hash.hpp>
 
 #include <tbb/spin_rw_mutex.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 namespace {
 
@@ -217,11 +222,11 @@ Registry::AddType(
     const TfType type      = defaultValue.GetType();
     const TfType arrayType = defaultArrayValue.GetType();
     Sdf_ValueTypeImpl* scalar, *array;
-    if (not _AddType(&scalar, &array, name,
-                     type != TfType::Find<void>() ? type : TfType(),
-                     arrayType != TfType::Find<void>() ? arrayType : TfType(),
-                     role, dimensions,
-                     defaultValue, defaultArrayValue, defaultUnit)) {
+    if (!_AddType(&scalar, &array, name,
+                  type != TfType::Find<void>() ? type : TfType(),
+                  arrayType != TfType::Find<void>() ? arrayType : TfType(),
+                  role, dimensions,
+                  defaultValue, defaultArrayValue, defaultUnit)) {
         // Error already reported.
     }
 }
@@ -238,9 +243,9 @@ Registry::AddType(
     tbb::spin_rw_mutex::scoped_lock lock(_mutex);
 
     Sdf_ValueTypeImpl* scalar, *array;
-    if (not _AddType(&scalar, &array, name,
-                     type, arrayType, role, dimensions,
-                     VtValue(), VtValue(), defaultUnit)) {
+    if (!_AddType(&scalar, &array, name,
+                  type, arrayType, role, dimensions,
+                  VtValue(), VtValue(), defaultUnit)) {
         // Error already reported.
     }
 }
@@ -262,21 +267,21 @@ Registry::_AddType(
     const std::string arrayName = name + "[]";
 
     // Preconditions.
-    if (not TF_VERIFY(not name.empty(), "Types must have names")) {
+    if (!TF_VERIFY(!name.empty(), "Types must have names")) {
         return false;
     }
-    if (not TF_VERIFY(not type.IsUnknown() or not arrayType.IsUnknown(),
-                      "Type '%s' must have a C++ type", name.c_str())) {
+    if (!TF_VERIFY(!type.IsUnknown() || !arrayType.IsUnknown(),
+                   "Type '%s' must have a C++ type", name.c_str())) {
         return false;
     }
     const Sdf_ValueTypeImpl* existing = _FindType(name);
-    if (not TF_VERIFY(existing == Sdf_ValueTypePrivate::GetEmptyTypeName(),
-                      "Type '%s' already exists", name.c_str())) {
+    if (!TF_VERIFY(existing == Sdf_ValueTypePrivate::GetEmptyTypeName(),
+                   "Type '%s' already exists", name.c_str())) {
         return false;
     }
     existing = _FindType(arrayName);
-    if (not TF_VERIFY(existing == Sdf_ValueTypePrivate::GetEmptyTypeName(),
-                      "Type '%s' already exists", arrayName.c_str())) {
+    if (!TF_VERIFY(existing == Sdf_ValueTypePrivate::GetEmptyTypeName(),
+                   "Type '%s' already exists", arrayName.c_str())) {
         return false;
     }
 
@@ -288,20 +293,20 @@ Registry::_AddType(
 
     // Get the core types.
     const CoreType* coreType = NULL, *coreArrayType = NULL;
-    if (not type.IsUnknown()) {
+    if (!type.IsUnknown()) {
         coreType =
             _AddCoreType(name, type, role, dimensions,
                          defaultValue, defaultUnit);
-        if (not coreType) {
+        if (!coreType) {
             // Error already reported.
             return false;
         }
     }
-    if (not arrayType.IsUnknown()) {
+    if (!arrayType.IsUnknown()) {
         coreArrayType =
             _AddCoreType(arrayName, arrayType, role, dimensions,
                          defaultArrayValue, defaultUnit);
-        if (not coreArrayType) {
+        if (!coreArrayType) {
             // Error already reported.
             return false;
         }
@@ -421,14 +426,14 @@ Registry::_AddCoreType(
     const VtValue& value,
     TfEnum unit)
 {
-    if (not TF_VERIFY(not tfType.IsUnknown(),
-                      "Internal error: unknown TfType for '%s'",
-                      name.c_str())) {
+    if (!TF_VERIFY(!tfType.IsUnknown(),
+                   "Internal error: unknown TfType for '%s'",
+                   name.c_str())) {
         return NULL;
     }
-    if (not TF_VERIFY(tfType != TfType::Find<void>(),
-                      "Internal error: TfType<void> for '%s'",
-                      name.c_str())) {
+    if (!TF_VERIFY(tfType != TfType::Find<void>(),
+                   "Internal error: TfType<void> for '%s'",
+                   name.c_str())) {
         return NULL;
     }
 
@@ -445,31 +450,31 @@ Registry::_AddCoreType(
     }
     else {
         // Found.  Preconditions.
-        if (not TF_VERIFY(coreType.type == tfType,
-                          "Internal error: unexpected core type for '%s'",
-                          name.c_str())) {
+        if (!TF_VERIFY(coreType.type == tfType,
+                       "Internal error: unexpected core type for '%s'",
+                       name.c_str())) {
             return NULL;
         }
-        if (not TF_VERIFY(coreType.role == role,
-                          "Mismatched roles '%s' and '%s' for core type '%s'",
-                          coreType.role.GetText(),
-                          role.GetText(),
-                          tfType.GetTypeName().c_str())) {
+        if (!TF_VERIFY(coreType.role == role,
+                       "Mismatched roles '%s' and '%s' for core type '%s'",
+                       coreType.role.GetText(),
+                       role.GetText(),
+                       tfType.GetTypeName().c_str())) {
             return NULL;
         }
-        if (not TF_VERIFY(coreType.dim == dimensions,
-                          "Mismatched dimensions for core type '%s'",
-                          tfType.GetTypeName().c_str())) {
+        if (!TF_VERIFY(coreType.dim == dimensions,
+                       "Mismatched dimensions for core type '%s'",
+                       tfType.GetTypeName().c_str())) {
             return NULL;
         }
-        if (not TF_VERIFY(coreType.value == value,
-                          "Mismatched default value for core type '%s'",
-                          tfType.GetTypeName().c_str())) {
+        if (!TF_VERIFY(coreType.value == value,
+                       "Mismatched default value for core type '%s'",
+                       tfType.GetTypeName().c_str())) {
             return NULL;
         }
-        if (not TF_VERIFY(coreType.unit == unit,
-                          "Mismatched unit for core type '%s'",
-                          tfType.GetTypeName().c_str())) {
+        if (!TF_VERIFY(coreType.unit == unit,
+                       "Mismatched unit for core type '%s'",
+                       tfType.GetTypeName().c_str())) {
             return NULL;
         }
     }
@@ -558,3 +563,5 @@ Sdf_ValueTypeRegistry::Clear()
 {
     _impl->Clear();
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

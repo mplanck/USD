@@ -21,19 +21,24 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/util.h"
 #include "usdMaya/writeUtil.h"
 
+#include "usdMaya/roundTripUtil.h"
 #include "usdMaya/shadingModeRegistry.h"
 #include "usdMaya/shadingModeExporter.h"
+#include "usdMaya/shadingModeExporterContext.h"
 
 #include "pxr/usd/usd/prim.h"
 
-#include "pxr/usd/usdShade/look.h"
+#include "pxr/usd/usdShade/connectableAPI.h"
+#include "pxr/usd/usdShade/material.h"
 
-#include "pxr/usd/usdRi/lookAPI.h"
+#include "pxr/usd/usdRi/materialAPI.h"
 #include "pxr/usd/usdRi/risBxdf.h"
 #include "pxr/usd/usdRi/risObject.h"
+#include "pxr/usd/usdRi/risPattern.h"
 
 #include "pxr/usd/usdGeom/gprim.h"
 
@@ -42,158 +47,211 @@
 #include <maya/MGlobal.h>
 #include <maya/MPlug.h>
 
-#include <boost/foreach.hpp>
 #include <boost/assign/list_of.hpp>
 
 // Defines the RenderMan for Maya mapping between Pxr objects and Maya internal nodes
 #include "usdMaya/shadingModePxrRis_rfm_map.h"
 
-namespace _exporter {
+PXR_NAMESPACE_OPEN_SCOPE
 
-static std::string
-_GetShaderTypeName(const MFnDependencyNode& depNode)
-{
-    std::string risShaderType(depNode.typeName().asChar());
-    // Now look into the RIS TABLE if the typeName doesn't starts with Pxr
-    if (not TfStringStartsWith(risShaderType, "Pxr")) {
-        for (size_t i=0;i<_RFM_RISNODE_TABLE.size();i++) {
-            if (_RFM_RISNODE_TABLE[i].first==risShaderType) {
-                risShaderType=_RFM_RISNODE_TABLE[i].second;
-                break;
-            }
-        }
-    }
-    return risShaderType;
-}
-
-static UsdPrim
-_ExportShadingNode(const UsdPrim& lookPrim,
-                   const MFnDependencyNode& depNode,
-                   const PxrUsdMayaShadingModeExportContext* context,
-                   SdfPathSet *processedPaths,
-                   bool isFirstNode
-)
-{
-    UsdStagePtr stage = lookPrim.GetStage();
-
-    // XXX: would be nice to write out the current display color as
-    // well.  currently, when we re-import, we don't get the display color so
-    // it shows up as black.
-
-    TfToken shaderPrimName(PxrUsdMayaUtil::SanitizeName(depNode.name().asChar()));
-    SdfPath shaderPath = lookPrim.GetPath().AppendChild(shaderPrimName);
-    if (processedPaths->count(shaderPath) == 1){
-        return stage->GetPrimAtPath(shaderPath);
-    }
-
-    processedPaths->insert(shaderPath);
-    
-    // Determie the risShaderType that will correspont to the USD FilePath
-    std::string risShaderType(_GetShaderTypeName(depNode));
-    
-    if (not TfStringStartsWith(risShaderType, "Pxr")) {
-        MGlobal::displayError(TfStringPrintf(
-                "_ExportShadingNode: skipping '%s' because it's type '%s' is not Pxr.\n",
-                depNode.name().asChar(),
-                risShaderType.c_str()).c_str());
-        return UsdPrim();        
-    }
-    
-    // The first node is the Bxdf, subsequent ones are Pattern objects
-    UsdRiRisObject risObj;
-    if (isFirstNode)
-        risObj = UsdRiRisBxdf::Define(stage, shaderPath);
-    else
-        risObj = UsdRiRisPattern::Define(stage, shaderPath);
-
-    risObj.CreateFilePathAttr(VtValue(SdfAssetPath(risShaderType)));
-
-    MStatus status = MS::kFailure;
-    
-    for (unsigned int i = 0; i < depNode.attributeCount(); i++) {
-        MPlug attrPlug = depNode.findPlug(depNode.attribute(i), true);
-        if (attrPlug.isProcedural()) {
-            // maya docs says these should not be saved off.  we skip them
-            // here.
-            continue;
-        }
-
-        if (attrPlug.isChild()) {
-            continue;
-        }
-
-        // this is writing out things that live on the MFnDependencyNode.
-        // maybe that's OK?  nothing downstream cares about it.
-
-        TfToken attrName = TfToken(context->GetStandardAttrName(attrPlug));
-        SdfValueTypeName attrTypeName = PxrUsdMayaWriteUtil::GetUsdTypeName(attrPlug);
-        if (not attrTypeName) {
-            // unsupported type
-            continue;
-        }
-
-        UsdShadeParameter param = risObj.CreateParameter(attrName, attrTypeName);
-        if (not param) {
-            continue;
-        }
-
-        PxrUsdMayaWriteUtil::SetUsdAttr(
-                attrPlug,
-                param.GetAttr(),
-                UsdTimeCode::Default());
-
-        if (attrPlug.isConnected() and attrPlug.isDestination()) {
-            MPlug connected(PxrUsdMayaUtil::GetConnected(attrPlug));
-            MFnDependencyNode c(connected.node(), &status);
-            if (status) {
-                if (UsdPrim cPrim = _ExportShadingNode(lookPrim, 
-                                                       c, 
-                                                       context,
-                                                       processedPaths,
-                                                       false)) {
-                    param.ConnectToSource(
-                            UsdShadeShader(cPrim), 
-                            TfToken(context->GetStandardAttrName(connected)));
+namespace {
+class PxrRisShadingModeExporter : public PxrUsdMayaShadingModeExporter {
+public:
+    PxrRisShadingModeExporter() {}
+private:
+    std::string
+    _GetShaderTypeName(const MFnDependencyNode& depNode)
+    {
+        std::string risShaderType(depNode.typeName().asChar());
+        // Now look into the RIS TABLE if the typeName doesn't starts with Pxr
+        if (!TfStringStartsWith(risShaderType, "Pxr")) {
+            for (size_t i=0;i<_RFM_RISNODE_TABLE.size();i++) {
+                if (_RFM_RISNODE_TABLE[i].first==risShaderType) {
+                    risShaderType=_RFM_RISNODE_TABLE[i].second;
+                    break;
                 }
             }
         }
+        return risShaderType;
     }
 
-    return risObj.GetPrim();
-}
+    UsdPrim
+    _ExportShadingNodeHelper(const UsdPrim& materialPrim,
+                       const MFnDependencyNode& depNode,
+                       const PxrUsdMayaShadingModeExportContext& context,
+                       SdfPathSet *processedPaths,
+                       bool isFirstNode
+    )
+    {
+        UsdStagePtr stage = materialPrim.GetStage();
 
-}; // namespace _exporter
+        // XXX: would be nice to write out the current display color as
+        // well.  currently, when we re-import, we don't get the display color so
+        // it shows up as black.
 
-DEFINE_SHADING_MODE_EXPORTER(pxrRis, context)
-{
-    MStatus status;
-    const PxrUsdMayaShadingModeExportContext::AssignmentVector &assignments = 
-        context->GetAssignments();
-    if (assignments.empty()) {
-        return;
-    }
+        TfToken shaderPrimName(PxrUsdMayaUtil::SanitizeName(depNode.name().asChar()));
+        SdfPath shaderPath = materialPrim.GetPath().AppendChild(shaderPrimName);
+        if (processedPaths->count(shaderPath) == 1) {
+            return stage->GetPrimAtPath(shaderPath);
+        }
 
-    UsdPrim lookPrim = context->MakeStandardLookPrim(assignments);
-    if (not lookPrim) {
-        return;
-    }
+        processedPaths->insert(shaderPath);
 
-    MFnDependencyNode ssDepNode(context->GetSurfaceShader(), &status);
-    if (not status) {
-        return;
-    }
-    SdfPathSet  processedShaders;
-    if (UsdPrim shaderPrim = _exporter::_ExportShadingNode(lookPrim,
-                                                           ssDepNode,
+        // Determie the risShaderType that will correspont to the USD FilePath
+        std::string risShaderType(_GetShaderTypeName(depNode));
+
+        if (!TfStringStartsWith(risShaderType, "Pxr")) {
+            MGlobal::displayError(TfStringPrintf(
+                "_ExportShadingNodeHelper: skipping '%s' because it's type '%s' is not Pxr.\n",
+                depNode.name().asChar(),
+                risShaderType.c_str()).c_str());
+            return UsdPrim();
+        }
+
+        // The first node is the Bxdf, subsequent ones are Pattern objects
+        UsdRiRisObject risObj;
+        if (isFirstNode)
+            risObj = UsdRiRisBxdf::Define(stage, shaderPath);
+        else
+            risObj = UsdRiRisPattern::Define(stage, shaderPath);
+
+        risObj.CreateFilePathAttr(VtValue(SdfAssetPath(risShaderType)));
+
+        MStatus status = MS::kFailure;
+
+        std::vector<MPlug> attrPlugs;
+        
+        // gather all the attrPlugs we want to process. 
+        for (unsigned int i = 0; i < depNode.attributeCount(); i++) {
+            MPlug attrPlug = depNode.findPlug(depNode.attribute(i), true);
+            if (attrPlug.isProcedural()) {
+                // maya docs says these should not be saved off.  we skip them
+                // here.
+                continue;
+            }
+
+            if (attrPlug.isChild()) {
+                continue;
+            }
+
+            // For now, we only support arrays of length 1.  if we encounter
+            // such an array, we emit it's 0-th element.
+            if (attrPlug.isArray()) {
+                unsigned int numElements = attrPlug.evaluateNumElements();
+                if (numElements) {
+                    attrPlugs.push_back(attrPlug[0]);
+                    if (numElements > 1) {
+                        MGlobal::displayWarning(TfStringPrintf(
+                                "Array with multiple elements encountered at '%s'"
+                                "Currently, only arrays with a single element are supported.",
+                                attrPlug.name().asChar()).c_str());
+                    }
+                }
+            }
+            else {
+                attrPlugs.push_back(attrPlug);
+            }
+        }
+
+        for (const auto& attrPlug: attrPlugs) {
+            // this is writing out things that live on the MFnDependencyNode.
+            // maybe that's OK?  nothing downstream cares about it.
+
+            bool isArrayElement = attrPlug.isElement();
+
+            TfToken attrName = TfToken(context.GetStandardAttrName(attrPlug, false));
+            if (attrName.IsEmpty()) {
+                continue;
+            }
+
+            SdfValueTypeName attrTypeName = PxrUsdMayaWriteUtil::GetUsdTypeName(attrPlug);
+            if (!attrTypeName) {
+                continue;
+            }
+
+            UsdShadeInput input = risObj.CreateInput(attrName, attrTypeName);
+            if (!input) {
+                continue;
+            }
+
+            if (isArrayElement) {
+                PxrUsdMayaRoundTripUtil::MarkAttributeAsArray(input.GetAttr(), 0);
+            }
+
+            PxrUsdMayaWriteUtil::SetUsdAttr(
+                attrPlug,
+                input.GetAttr(),
+                UsdTimeCode::Default());
+
+            if (attrPlug.isConnected() && attrPlug.isDestination()) {
+                MPlug connected(PxrUsdMayaUtil::GetConnected(attrPlug));
+                MFnDependencyNode c(connected.node(), &status);
+                if (status) {
+                    if (UsdPrim cPrim = _ExportShadingNodeHelper(materialPrim,
+                                                           c,
                                                            context,
-                                                           &processedShaders, true)) {
-        UsdRiLookAPI riLook = UsdRiLookAPI(lookPrim);
-        std::vector<SdfPath> bxdfTargets;
-        bxdfTargets.push_back(shaderPrim.GetPath());
-        riLook.CreateBxdfRel().SetTargets(bxdfTargets);
+                                                           processedPaths,
+                                                           false)) {
+                        UsdShadeConnectableAPI::ConnectToSource(input,
+                            UsdShadeShader(cPrim),
+                            TfToken(context.GetStandardAttrName(connected, false)));
+                    }
+                }
+            }
+        }
+
+        return risObj.GetPrim();
     }
+
+    UsdPrim
+    _ExportShadingNode(const UsdPrim& materialPrim,
+                       const MFnDependencyNode& depNode,
+                       const PxrUsdMayaShadingModeExportContext& context)
+    {
+        SdfPathSet processedNodes;
+        return _ExportShadingNodeHelper(materialPrim, depNode, context, &processedNodes, true);
+    }
+
+    void Export(const PxrUsdMayaShadingModeExportContext& context,
+                UsdShadeMaterial * const mat, 
+                SdfPathSet * const boundPrimPaths) override 
+    {
+        MStatus status;
+        const PxrUsdMayaShadingModeExportContext::AssignmentVector &assignments =
+            context.GetAssignments();
+        if (assignments.empty()) {
+            return;
+        }
+
+        UsdPrim materialPrim = context.MakeStandardMaterialPrim(assignments,
+            std::string(), boundPrimPaths);
+        UsdShadeMaterial material(materialPrim); 
+        if (!material) {
+            return;
+        } else {
+            *mat = material;
+        }
+
+        MFnDependencyNode ssDepNode(context.GetSurfaceShader(), &status);
+        if (!status) {
+            return;
+        }
+        if (UsdPrim shaderPrim = _ExportShadingNode(materialPrim,
+                                                    ssDepNode,
+                                                    context)) {
+            UsdRiMaterialAPI(materialPrim).SetBxdfSource(shaderPrim.GetPath());
+        }
+    }
+};
 }
 
+TF_REGISTRY_FUNCTION_WITH_TAG(PxrUsdMayaShadingModeExportContext, pxrRis)
+{
+    PxrUsdMayaShadingModeRegistry::GetInstance().RegisterExporter("pxrRis", []() -> PxrUsdMayaShadingModeExporterPtr {
+        return PxrUsdMayaShadingModeExporterPtr(
+            static_cast<PxrUsdMayaShadingModeExporter*>(new PxrRisShadingModeExporter()));
+    });
+}
 
 namespace _importer {
 
@@ -226,31 +284,20 @@ _ImportAttr(
     MStatus status;
 
     MPlug mayaAttrPlug = fnDep.findPlug(mayaAttrName.c_str(), &status);
-    if (not status) {
+    if (!status) {
         return MPlug();
+    }
+
+    unsigned int index = 0;
+    if (PxrUsdMayaRoundTripUtil::GetAttributeArray(usdAttr, &index)) {
+        mayaAttrPlug = mayaAttrPlug.elementByLogicalIndex(index, &status);
+        if (!status) {
+            return MPlug();
+        }
     }
 
     PxrUsdMayaUtil::setPlugValue(usdAttr, mayaAttrPlug);
     return mayaAttrPlug;
-}
-
-static void
-_GetParameterConnections(
-        const UsdShadeParameter& param,
-        std::vector<UsdShadeShader>* sources,
-        std::vector<TfToken>* sourceOutputNames)
-{
-    if (not param.IsArray()) {
-        UsdShadeShader source;
-        TfToken sourceOutputName;
-        if (param.GetConnectedSource(&source, &sourceOutputName)) {
-            sources->push_back(source);
-            sourceOutputNames->push_back(sourceOutputName);
-        }
-    }
-    else {
-        param.GetConnectedSources(sources, sourceOutputNames);
-    }
 }
 
 // Should only be called by _GetOrCreateShaderObject, no one else.
@@ -279,7 +326,7 @@ _CreateShaderObject(
             MString(risShader.GetPrim().GetName().GetText()),
             &status);
 
-    if (not status) {
+    if (!status) {
         // we need to make sure assumes those types are loaded..
         MGlobal::displayError(TfStringPrintf(
                 "Could not create node of type '%s' for shader '%s'. "
@@ -290,27 +337,22 @@ _CreateShaderObject(
     }
 
     // The rest of this is not really RIS specific at all.
-    BOOST_FOREACH(
-            const UsdShadeParameter &param, 
-            risShader.GetParameters()) {
-        MPlug mayaAttr = _ImportAttr(param.GetAttr(), fnDep);
+    for (const UsdShadeInput &input : risShader.GetInputs()) {
+        MPlug mayaAttr = _ImportAttr(input.GetAttr(), fnDep);
         if (mayaAttr.isNull()) {
             continue;
         }
 
-        std::vector<UsdShadeShader> sources;
-        std::vector<TfToken> sourceOutputNames;
-        _GetParameterConnections(param, &sources, &sourceOutputNames);
-
+        UsdShadeConnectableAPI source;
+        TfToken sourceOutputName;
+        UsdShadeAttributeType sourceType;
         // follow shader connections and recurse.
-        for (size_t i = 0; i < sources.size(); ++i) {
-            const UsdShadeShader& source = sources[i];
-            const TfToken& sourceOutputName = sourceOutputNames[i];
-
+        if (UsdShadeConnectableAPI::GetConnectedSource(input, &source, 
+                &sourceOutputName, &sourceType)) {
             if (UsdRiRisObject sourceRisObj = UsdRiRisObject(source.GetPrim())) {
                 MObject sourceObj = _GetOrCreateShaderObject(sourceRisObj, context);
                 MFnDependencyNode sourceDep(sourceObj, &status);
-                if (not status) {
+                if (!status) {
                     continue;
                 }
 
@@ -329,11 +371,10 @@ DEFINE_SHADING_MODE_IMPORTER(pxrRis, context)
 {
     // This expects the renderman for maya plugin is loaded.
     // How do we ensure that it is?
-    const UsdShadeLook& shadeLook = context->GetShadeLook();
+    const UsdShadeMaterial& shadeMaterial = context->GetShadeMaterial();
 
     MStatus status;
-    UsdRiLookAPI riLookAPI(shadeLook);
-    if (UsdRiRisBxdf bxdf = riLookAPI.GetBxdf()) {
+    if (UsdRiRisBxdf bxdf = UsdRiMaterialAPI(shadeMaterial).GetBxdf()) {
         MObject bxdfObj = _importer::_GetOrCreateShaderObject(bxdf, context);
         MFnDependencyNode bxdfDep(bxdfObj, &status);
         MPlug ret = bxdfDep.findPlug("outColor", &status);
@@ -345,3 +386,4 @@ DEFINE_SHADING_MODE_IMPORTER(pxrRis, context)
     return MPlug();
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

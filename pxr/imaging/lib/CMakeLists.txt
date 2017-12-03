@@ -1,10 +1,11 @@
 set(DIRS
     garch
+    hf
     cameraUtil
-    glf
     pxOsd
+    glf
     hd
-    glfq
+    hdSt
     hdx
 )
 

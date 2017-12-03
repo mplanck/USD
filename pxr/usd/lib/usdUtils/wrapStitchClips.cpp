@@ -23,6 +23,7 @@
 //
 /// \file wrapStitchClips.cpp
 
+#include "pxr/pxr.h"
 #include <boost/python/def.hpp>
 #include <boost/python/extract.hpp>
 
@@ -33,50 +34,98 @@
 
 using namespace boost::python;
 
-// A wrapper to clean up the python API, allowing users to pass in None
-// and have it default to the no-stage-frame-supplied case
-double
-_ConvertStartFrame(const boost::python::object pyStartFrame)
-{
-    double startFrame;
-    if (not TfPyIsNone(pyStartFrame)) {
-        startFrame = extract<double>(pyStartFrame);        
-    } else {
-        startFrame = std::numeric_limits<double>::max();
-    }
+PXR_NAMESPACE_USING_DIRECTIVE
 
-    return startFrame;
+namespace {
+
+template <typename T>
+T
+_ConvertWithDefault(const object obj, const T& def)
+{
+    if (!TfPyIsNone(obj)) {
+        return extract<T>(obj);
+    } 
+        
+    return def;
 }
 
 bool
-_ConvertReuseTopology(const boost::python::object pyReuseTopology) 
-{
-    if (not TfPyIsNone(pyReuseTopology)) {
-        return extract<bool>(pyReuseTopology);
-    } else {
-        return true;
-    }
-}
-
-void
 _ConvertStitchClips(const SdfLayerHandle& resultLayer,
                     const std::vector<std::string>& clipLayerFiles,
                     const SdfPath& clipPath,
-                    const boost::python::object reuseExistingTopology,
-                    const boost::python::object pyStartFrame)
+                    const object pyStartFrame,
+                    const object pyEndFrame,
+                    const object pyClipSet)
 {
-    UsdUtilsStitchClips(resultLayer, clipLayerFiles, clipPath,
-                        _ConvertReuseTopology(reuseExistingTopology),
-                        _ConvertStartFrame(pyStartFrame));
+    const auto clipSet 
+        = _ConvertWithDefault(pyClipSet, UsdClipsAPISetNames->default_);
+    constexpr double dmax = std::numeric_limits<double>::max();
+    return UsdUtilsStitchClips(resultLayer, clipLayerFiles, clipPath,
+                               _ConvertWithDefault(pyStartFrame, dmax),
+                               _ConvertWithDefault(pyEndFrame, dmax),
+                               clipSet);
 }
 
-void 
-wrapStitchClips()
+bool
+_ConvertStitchClipsTopology(const SdfLayerHandle& topologyLayer,
+                           const std::vector<std::string>& clipLayerFiles)
+{
+    return UsdUtilsStitchClipsTopology(topologyLayer, clipLayerFiles);
+}
+
+std::string
+_ConvertGenerateClipTopologyName(const std::string& resultLayerName) 
+{
+    return UsdUtilsGenerateClipTopologyName(resultLayerName);
+}
+
+bool
+_ConvertStitchClipTemplate(const SdfLayerHandle& resultLayer,
+                           const SdfLayerHandle& topologyLayer,
+                           const SdfPath& clipPath,
+                           const std::string& templatePath,
+                           const double startFrame,
+                           const double endFrame,
+                           const double stride,
+                           const object pyClipSet)
+{
+    const auto clipSet 
+        = _ConvertWithDefault(pyClipSet, UsdClipsAPISetNames->default_);
+    return UsdUtilsStitchClipsTemplate(resultLayer, topologyLayer,
+                                       clipPath, templatePath, startFrame,
+                                       endFrame, stride, clipSet);
+}
+
+} // anonymous namespace 
+
+void wrapStitchClips()
 {
     def("StitchClips",
         _ConvertStitchClips, 
         (arg("resultLayer"), 
-         arg("clipLayerFiles"), arg("clipPath"), 
-         arg("reuseExistingTopology")=boost::python::object(),
-         arg("startFrame")=boost::python::object()));
+         arg("clipLayerFiles"), 
+         arg("clipPath"), 
+         arg("startFrame")=object(),
+         arg("endFrame")=object(),
+         arg("clipSet")=object()));
+
+    def("StitchClipsTopology",
+        _ConvertStitchClipsTopology,
+        (arg("topologyLayer"),
+         arg("clipLayerFiles")));
+
+    def("StitchClipsTemplate",
+        _ConvertStitchClipTemplate,
+        (arg("resultLayer"),
+         arg("topologyLayer"),
+         arg("clipPath"),
+         arg("templatePath"),
+         arg("startTimeCode"),
+         arg("endTimeCode"),
+         arg("stride"),
+         arg("clipSet")=object()));
+
+    def("GenerateClipTopologyName",
+        _ConvertGenerateClipTopologyName,
+        (arg("rootLayerName")));
 }

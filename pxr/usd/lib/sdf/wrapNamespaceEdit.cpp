@@ -22,11 +22,13 @@
 // language governing permissions and limitations under the Apache License.
 //
 /// \file wrapNamespaceEdit.cpp
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/namespaceEdit.h"
 #include "pxr/base/tf/pyCall.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyEnum.h"
-#include <boost/foreach.hpp>
+
 #include <boost/python/class.hpp>
 #include <boost/python/extract.hpp>
 #include <boost/python/init.hpp>
@@ -34,7 +36,13 @@
 #include <boost/python/str.hpp>
 #include <boost/python/tuple.hpp>
 
+#include <functional>
+
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static
 std::string
@@ -89,7 +97,7 @@ std::string
 _StringifyBatchEdit(const SdfBatchNamespaceEdit& x)
 {
     std::vector<std::string> edits;
-    BOOST_FOREACH(const SdfNamespaceEdit& edit, x.GetEdits()) {
+    for (const auto& edit : x.GetEdits()) {
         edits.push_back(_StringifyEdit(edit));
     }
     if (edits.empty()) {
@@ -188,7 +196,7 @@ _TranslateCanEdit(
             return false;
         }
     }
-    if (not extract<bool>(result)) {
+    if (!extract<bool>(result)) {
         // Need a string on failure.
         TfPyThrowValueError("expected a 2-tuple");
     }
@@ -203,6 +211,7 @@ _Process(
     const object& canEdit,
     bool fixBackpointers)
 {
+    namespace ph = std::placeholders;
     // Return a pair (true,Edits) on success or (false,vector<string>) on
     // failure.
     SdfNamespaceEditVector edits;
@@ -210,12 +219,14 @@ _Process(
     bool result;
     if (TfPyIsNone(hasObjectAtPath)) {
         result = x.Process(&edits, SdfBatchNamespaceEdit::HasObjectAtPath(),
-                           boost::bind(&_TranslateCanEdit, canEdit, _1, _2),
+                           std::bind(&_TranslateCanEdit, canEdit,
+                                     ph::_1, ph::_2),
                            &details, fixBackpointers);
     }
     else {
         result = x.Process(&edits, TfPyCall<bool>(hasObjectAtPath),
-                           boost::bind(&_TranslateCanEdit, canEdit, _1, _2),
+                           std::bind(&_TranslateCanEdit, canEdit,
+                                     ph::_1, ph::_2),
                            &details, fixBackpointers);
     }
     if (result) {
@@ -282,6 +293,8 @@ wrapBatchNamespaceEdit()
 
 static SdfNamespaceEdit::Index _atEnd = SdfNamespaceEdit::AtEnd;
 static SdfNamespaceEdit::Index _same  = SdfNamespaceEdit::Same;
+
+} // anonymous namespace 
 
 void
 wrapNamespaceEdit()

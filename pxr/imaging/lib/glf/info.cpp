@@ -29,13 +29,15 @@
 #include "pxr/imaging/glf/info.h"
 #include "pxr/imaging/glf/glContext.h"
 
-#include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/stringUtils.h"
 
 #include <cstdlib>
 #include <set>
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 using std::set;
 using std::string;
@@ -52,8 +54,8 @@ Glf_BuildAvailableExtensions()
     const char *extensions = (const char*) glGetString(GL_EXTENSIONS);
     if ( extensions ) {
         vector<string> extensionsList = TfStringTokenize(extensions);
-        TF_FOR_ALL(i, extensionsList) {
-            availableExtensions.insert(*i);
+        for (std::string const& extension : extensionsList) {
+            availableExtensions.insert(extension);
         }
     }
     return &availableExtensions;
@@ -68,8 +70,8 @@ GlfHasExtensions(string const & queryExtensions)
     vector<string> extensionsList = TfStringTokenize(queryExtensions);
 
     // Return false if any queried extension is not available.
-    TF_FOR_ALL(i, extensionsList) {
-        if (not availableExtensions->count(*i)) {
+    for (std::string const& extension : extensionsList) {
+        if (!availableExtensions->count(extension)) {
             return false;
         }
     }
@@ -88,5 +90,8 @@ GlfHasLegacyGraphics()
     // then we must have very limited graphics.  In
     // common usage, this should only be true for NX
     // clients.
-    return not GLEW_VERSION_2_0;
+    return !GLEW_VERSION_2_0;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

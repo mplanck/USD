@@ -21,12 +21,11 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "stream.h"
 
 #include "pxr/base/tf/enum.h"
 #include "pxr/base/tf/registryManager.h"
-
-#include <boost/foreach.hpp>
 
 #include <map>
 #include <cstdio>
@@ -34,6 +33,8 @@
 using std::string;
 using std::vector;
 using std::map;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_REGISTRY_FUNCTION(TfEnum) {
     TF_ADD_ENUM_NAME(UsdObjStream::SequenceElem::Verts);
@@ -52,13 +53,13 @@ UsdObjStream::Face::Face()
 
 bool operator==(UsdObjStream::Face const &lhs, UsdObjStream::Face const &rhs)
 {
-    return lhs.pointsBegin == rhs.pointsBegin and
+    return lhs.pointsBegin == rhs.pointsBegin && 
         lhs.pointsEnd == rhs.pointsEnd;
 }
 
 bool operator!=(UsdObjStream::Face const &lhs, UsdObjStream::Face const &rhs)
 {
-    return not (lhs == rhs);
+    return !(lhs == rhs);
 }
 
 
@@ -152,7 +153,7 @@ UsdObjStream::GetPoints() const
 bool
 UsdObjStream::AddGroup(string const &name)
 {
-    if (not FindGroup(name)) {
+    if (!FindGroup(name)) {
         Group g;
         g.name = name;
         _groups.push_back(g);
@@ -205,7 +206,7 @@ void
 UsdObjStream::AppendComments(std::string const &text)
 {
     vector<string> lines = TfStringSplit(text, "\n");
-    BOOST_FOREACH(string const &line, lines) {
+    for (const auto& line : lines) {
         _comments.push_back(_MakeComment(line));
     }
     _AddSequence(SequenceElem::Comments, lines.size());
@@ -216,7 +217,7 @@ UsdObjStream::PrependComments(string const &text)
 {
     vector<string> lines = TfStringSplit(text, "\n");
     // Mutate all the lines into comments.
-    BOOST_FOREACH(string &line, lines) {
+    for (auto& line : lines) {
         line = _MakeComment(line);
     }
     // Insert them at the beginning.
@@ -234,7 +235,7 @@ void
 UsdObjStream::AppendArbitraryText(std::string const &text)
 {
     vector<string> lines = TfStringSplit(text, "\n");
-    BOOST_FOREACH(string const &line, lines) {
+    for (const auto& line : lines) {
         if (_IsComment(line)) {
             AppendComments(line);
         } else {
@@ -248,7 +249,8 @@ void
 UsdObjStream::PrependArbitraryText(string const &text)
 {
     vector<string> lines = TfStringSplit(text, "\n");
-    BOOST_REVERSE_FOREACH(string const &line, lines) {
+    for (auto lineIter = lines.rbegin(); lineIter != lines.rend(); ++lineIter){
+        const auto& line = *lineIter;
         if (_IsComment(line)) {
             PrependComments(line);
         } else {
@@ -275,7 +277,7 @@ UsdObjStream::_AddSequence(SequenceElem::ElemType type, int repeat)
 {
     // Check to see if we can add to an existing sequence, otherwise add a new
     // sequence element.
-    if (not _sequence.empty() and _sequence.back().type == type) {
+    if (!_sequence.empty() && _sequence.back().type == type) {
         _sequence.back().repeat += repeat;
     } else {
         _sequence.push_back(SequenceElem(type, repeat));
@@ -287,7 +289,7 @@ UsdObjStream::_PrependSequence(SequenceElem::ElemType type, int repeat)
 {
     // Check to see if we can add to an existing sequence, otherwise add a new
     // sequence element.
-    if (not _sequence.empty() and _sequence.front().type == type) {
+    if (!_sequence.empty() && _sequence.front().type == type) {
         _sequence.front().repeat += repeat;
     } else {
         _sequence.insert(_sequence.begin(), SequenceElem(type, repeat));
@@ -352,7 +354,7 @@ UsdObjStream::AddData(UsdObjStream const &other)
     vector<Point> const &points = other.GetPoints();
 
     // Add elements from the other data in sequence.
-    BOOST_FOREACH(SequenceElem const &elem, other.GetSequence()) {
+    for (const auto& elem : other.GetSequence()) {
         switch (elem.type) {
         default:
             TF_CODING_ERROR("Unknown sequence element '%s', aborting",
@@ -373,7 +375,7 @@ UsdObjStream::AddData(UsdObjStream const &other)
         case SequenceElem::Groups:
             for (int i = 0; i != elem.repeat; ++i, ++groupIter) {
                 AddGroup(_GetUniqueGroupName(groupIter->name));
-                BOOST_FOREACH(Face const &face, groupIter->faces) {
+                for (const auto& face : groupIter->faces) {
                     for (int j = face.pointsBegin; j != face.pointsEnd; ++j)
                         AddPoint(OffsetPoint(points[j], offset));
 
@@ -394,3 +396,6 @@ UsdObjStream::AddData(UsdObjStream const &other)
 
     }
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

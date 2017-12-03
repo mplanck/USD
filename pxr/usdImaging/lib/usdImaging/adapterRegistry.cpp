@@ -24,6 +24,7 @@
 #include "pxr/usdImaging/usdImaging/adapterRegistry.h"
 
 #include "pxr/usdImaging/usdImaging/debugCodes.h"
+#include "pxr/usdImaging/usdImaging/drawModeAdapter.h"
 #include "pxr/usdImaging/usdImaging/instanceAdapter.h"
 #include "pxr/usdImaging/usdImaging/primAdapter.h"
 
@@ -37,6 +38,9 @@
 
 #include <set>
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_INSTANTIATE_SINGLETON(UsdImagingAdapterRegistry);
 
@@ -66,7 +70,7 @@ UsdImagingAdapterRegistry::UsdImagingAdapterRegistry() {
     TF_FOR_ALL(typeIt, types) {
 
         PlugPluginPtr plugin = plugReg.GetPluginForType(*typeIt);
-        if (not plugin) {
+        if (!plugin) {
             TF_DEBUG(USDIMAGING_PLUGINS).Msg("[PluginDiscover] Plugin could "
                     "not be loaded for TfType '%s'\n",
                     typeIt->GetTypeName().c_str());
@@ -84,7 +88,7 @@ UsdImagingAdapterRegistry::UsdImagingAdapterRegistry() {
         } else {
             JsObject::const_iterator it = metadata.find("isInternal");
             if (it != metadata.end()) {
-                if (not it->second.Is<bool>()) {
+                if (!it->second.Is<bool>()) {
                     TF_RUNTIME_ERROR("[PluginDiscover] isInternal metadata was "
                             "corrupted for plugin '%s'; not holding bool\n", 
                             typeIt->GetTypeName().c_str());
@@ -95,7 +99,7 @@ UsdImagingAdapterRegistry::UsdImagingAdapterRegistry() {
             }
         }
 
-        if (not isEnabled) {
+        if (!isEnabled) {
             TF_DEBUG(USDIMAGING_PLUGINS).Msg("[PluginDiscover] Plugin disabled "
                         "because external plugins were disabled '%s'\n", 
                         typeIt->GetTypeName().c_str());
@@ -110,7 +114,7 @@ UsdImagingAdapterRegistry::UsdImagingAdapterRegistry() {
                     typeIt->GetTypeName().c_str());
             continue;
         }
-        if (not it->second.Is<std::string>()) {
+        if (!it->second.Is<std::string>()) {
             TF_RUNTIME_ERROR("[PluginDiscover] primTypeName metadata was "
                     "corrupted for plugin '%s'\n", 
                     typeIt->GetTypeName().c_str());
@@ -134,6 +138,9 @@ UsdImagingAdapterRegistry::ConstructAdapter(TfToken const& adapterKey)
     if (adapterKey == UsdImagingAdapterKeyTokens->instanceAdapterKey) {
         return UsdImagingPrimAdapterSharedPtr(
             new UsdImagingInstanceAdapter);
+    } else if (adapterKey == UsdImagingAdapterKeyTokens->drawModeAdapterKey) {
+        return UsdImagingPrimAdapterSharedPtr(
+            new UsdImagingDrawModeAdapter);
     }
 
     // Lookup the plug-in type name based on the prim type.
@@ -149,7 +156,7 @@ UsdImagingAdapterRegistry::ConstructAdapter(TfToken const& adapterKey)
 
     PlugRegistry& plugReg = PlugRegistry::GetInstance();
     PlugPluginPtr plugin = plugReg.GetPluginForType(typeIt->second);
-    if (not plugin or not plugin->Load()) {
+    if (!plugin || !plugin->Load()) {
         TF_CODING_ERROR("[PluginLoad] PlugPlugin could not be loaded for "
                 "TfType '%s'\n",
                 typeIt->second.GetTypeName().c_str());
@@ -158,7 +165,7 @@ UsdImagingAdapterRegistry::ConstructAdapter(TfToken const& adapterKey)
 
     UsdImagingPrimAdapterFactoryBase* factory =
         typeIt->second.GetFactory<UsdImagingPrimAdapterFactoryBase>();
-    if (not factory) {
+    if (!factory) {
         TF_CODING_ERROR("[PluginLoad] Cannot manufacture type '%s' "
                 "for Usd prim type '%s'\n",
                 typeIt->second.GetTypeName().c_str(),
@@ -168,7 +175,7 @@ UsdImagingAdapterRegistry::ConstructAdapter(TfToken const& adapterKey)
     }
 
     UsdImagingPrimAdapterSharedPtr instance = factory->New();
-    if (not instance) {
+    if (!instance) {
         TF_CODING_ERROR("[PluginLoad] Failed to instantiate type '%s' "
                 "for Usd prim type '%s'\n",
                 typeIt->second.GetTypeName().c_str(),
@@ -182,3 +189,6 @@ UsdImagingAdapterRegistry::ConstructAdapter(TfToken const& adapterKey)
 
     return instance;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

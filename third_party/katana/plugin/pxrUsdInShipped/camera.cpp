@@ -23,12 +23,15 @@
 //
 #include "pxrUsdInShipped/declareCoreOps.h"
 
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readCamera.h"
 
 #include "pxr/usd/usdGeom/camera.h"
 
-PXRUSDKATANA_USDIN_PLUGIN_DEFINE(PxrUsdInCore_CameraOp, privateData, interface)
+PXR_NAMESPACE_USING_DIRECTIVE
+
+PXRUSDKATANA_USDIN_PLUGIN_DEFINE(PxrUsdInCore_CameraOp, privateData, opArgs, interface)
 {
     PxrUsdKatanaAttrMap attrs;
 

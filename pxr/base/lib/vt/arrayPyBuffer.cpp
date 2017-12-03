@@ -21,6 +21,9 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+#include "pxr/base/vt/api.h"
 #include "pxr/base/vt/arrayPyBuffer.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/types.h"
@@ -30,6 +33,7 @@
 #include "pxr/base/gf/traits.h"
 
 #include "pxr/base/tf/pyLock.h"
+#include "pxr/base/tf/pyUtils.h"
 
 #include <boost/preprocessor.hpp>
 #include <boost/python.hpp>
@@ -42,6 +46,7 @@
 using std::string;
 using std::vector;
 
+PXR_NAMESPACE_OPEN_SCOPE
 
 ////////////////////////////////////////////////////////////////////////
 // Producer side: Implement the buffer protocol on VtArrays.
@@ -56,9 +61,9 @@ struct Vt_GetSubElementType { typedef T Type; };
 
 template <class T>
 struct Vt_GetSubElementType<
-    T, typename std::enable_if<GfIsGfVec<T>::value or
-                               GfIsGfMatrix<T>::value or
-                               GfIsGfQuat<T>::value or
+    T, typename std::enable_if<GfIsGfVec<T>::value ||
+                               GfIsGfMatrix<T>::value ||
+                               GfIsGfQuat<T>::value ||
                                GfIsGfRange<T>::value>::type> {
     typedef typename T::ScalarType Type;
 };
@@ -80,7 +85,7 @@ template <> constexpr char Vt_FmtFor<long>() { return 'l'; }
 template <> constexpr char Vt_FmtFor<unsigned long>() { return 'L'; }
 template <> constexpr char Vt_FmtFor<long long>() { return 'q'; }
 template <> constexpr char Vt_FmtFor<unsigned long long>() { return 'Q'; }
-template <> constexpr char Vt_FmtFor<half>() { return 'e'; }
+template <> constexpr char Vt_FmtFor<GfHalf>() { return 'e'; }
 template <> constexpr char Vt_FmtFor<float>() { return 'f'; }
 template <> constexpr char Vt_FmtFor<double>() { return 'd'; }
 
@@ -109,7 +114,7 @@ Vt_GetConvertFn(char srcFmt)
     case 'L': return Vt_ConvertSingle<unsigned long, Dst>;
     case 'q': return Vt_ConvertSingle<long long, Dst>;
     case 'Q': return Vt_ConvertSingle<unsigned long long, Dst>;
-    case 'e': return Vt_ConvertSingle<half, Dst>;
+    case 'e': return Vt_ConvertSingle<GfHalf, Dst>;
     case 'f': return Vt_ConvertSingle<float, Dst>;
     case 'd': return Vt_ConvertSingle<double, Dst>;
     }
@@ -147,12 +152,12 @@ Vt_GetElementShapeImpl(T *) { return { 4 }; }
 
 template <class T>
 constexpr typename std::enable_if<
-    GfIsGfRange<T>::value and T::dimension == 1, Vt_PyShape<1> >::type
+    GfIsGfRange<T>::value && T::dimension == 1, Vt_PyShape<1> >::type
 Vt_GetElementShapeImpl(T *) { return { 2 }; }
 
 template <class T>
 constexpr typename std::enable_if<
-    GfIsGfRange<T>::value and T::dimension != 1, Vt_PyShape<2> >::type
+    GfIsGfRange<T>::value && T::dimension != 1, Vt_PyShape<2> >::type
 Vt_GetElementShapeImpl(T *) { return { 2, T::dimension }; }
 
 constexpr Vt_PyShape<2>
@@ -291,7 +296,7 @@ Vt_getbuffer(PyObject *self, Py_buffer *view, int flags)
     view->obj = self;
     view->buf = static_cast<void *>(wrapper->array.data());
     view->len = wrapper->array.size() * sizeof(value_type);
-    view->readonly = static_cast<int>(not writable);
+    view->readonly = static_cast<int>(!writable);
     view->itemsize = sizeof(typename Vt_GetSubElementType<value_type>::Type);
     if ((flags & PyBUF_FORMAT) == PyBUF_FORMAT) {
         view->format = Vt_FormatStr<value_type>::Get();
@@ -374,7 +379,7 @@ Vt_ArrayFromBuffer(TfPyObjWrapper const &obj,
 
     TfPyLock lock;
 
-    if (not PyObject_CheckBuffer(obj.ptr())) {
+    if (!PyObject_CheckBuffer(obj.ptr())) {
         err = "Python object does not support the buffer protocol";
         return false;
     }
@@ -389,10 +394,10 @@ Vt_ArrayFromBuffer(TfPyObjWrapper const &obj,
     }
 
     // We have a buffer.  Check that the type matches.
-    if (not view.format or
-        view.format[0] == '>' or
-        view.format[0] == '!' or
-        view.format[0] == '=' or
+    if (!view.format ||
+        view.format[0] == '>' ||  
+        view.format[0] == '!' || 
+        view.format[0] == '=' || 
         view.format[0] == '^') {
         err = TfStringPrintf("Unsupported format '%s'",
                              view.format ? view.format : "<null>");
@@ -428,7 +433,7 @@ Vt_ArrayFromBuffer(TfPyObjWrapper const &obj,
 
     char typeChar = '\0';
     char const *p = view.format;
-    if (*p == '<' or *p == '@')
+    if (*p == '<' || *p == '@')
         ++p;
     typeChar = *p;
 
@@ -586,7 +591,7 @@ VtArrayFromPyBuffer<VT_TYPE(elem)>(TfPyObjWrapper const &obj, string *err);
 BOOST_PP_SEQ_FOR_EACH(INSTANTIATE, ~, VT_ARRAY_PYBUFFER_TYPES)
 #undef INSTANTIATE
 
-void Vt_AddBufferProtocolSupportToVtArrays()
+VT_API void Vt_AddBufferProtocolSupportToVtArrays()
 {
 
 // Add the buffer protocol support to every array type that we support it for.
@@ -596,10 +601,13 @@ void Vt_AddBufferProtocolSupportToVtArrays()
         Vt_CastBufferToArray<VT_TYPE(elem)>);                           \
     VtValue::RegisterCast<vector<VtValue>, VtArray<VT_TYPE(elem)> >(    \
         Vt_CastVectorToArray<VT_TYPE(elem)>);                           \
-    def(BOOST_PP_STRINGIZE(VT_TYPE_NAME(elem)) "ArrayFromBuffer",       \
-        Vt_WrapArrayFromBuffer<VT_TYPE(elem)>);
+    boost::python::def(BOOST_PP_STRINGIZE(VT_TYPE_NAME(elem))           \
+                        "ArrayFromBuffer",                              \
+                        Vt_WrapArrayFromBuffer<VT_TYPE(elem)>);
 
 BOOST_PP_SEQ_FOR_EACH(VT_ADD_BUFFER_PROTOCOL, ~, VT_ARRAY_PYBUFFER_TYPES)
 
 #undef VT_ADD_BUFFER_PROTOCOL
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

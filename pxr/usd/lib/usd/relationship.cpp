@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/relationship.h"
 #include "pxr/usd/usd/instanceCache.h"
 #include "pxr/usd/usd/prim.h"
@@ -35,36 +37,56 @@
 #include "pxr/usd/sdf/schema.h"
 #include "pxr/base/tracelite/trace.h"
 
-#include <boost/foreach.hpp>
-
 #include <algorithm>
 #include <set>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // ------------------------------------------------------------------------- //
 // UsdRelationship
 // ------------------------------------------------------------------------- //
 
 static SdfPath
-_MapTargetPath(const UsdStage *stage, const SdfPath &path)
+_MapTargetPath(const UsdStage *stage, const SdfPath &anchor,
+               const SdfPath &target)
 {
-    return stage->GetEditTarget().
-        MapToSpecPath(path).StripAllVariantSelections();
+    // If this is a relative target path, we have to map both the anchor
+    // and target path and then re-relativize them.
+    const UsdEditTarget &editTarget = stage->GetEditTarget();
+    if (target.IsAbsolutePath()) {
+        return editTarget.MapToSpecPath(target).StripAllVariantSelections();
+    } else {
+        const SdfPath anchorPrim = anchor.GetPrimPath();
+        const SdfPath translatedAnchorPrim =
+            editTarget.MapToSpecPath(anchorPrim)
+            .StripAllVariantSelections();
+        const SdfPath translatedTarget =
+            editTarget.MapToSpecPath(target.MakeAbsolutePath(anchorPrim))
+            .StripAllVariantSelections();
+        return translatedTarget.MakeRelativePath(translatedAnchorPrim);
+    }
 }
 
 SdfPath
 UsdRelationship::_GetTargetForAuthoring(const SdfPath &target,
                                         std::string* whyNot) const
 {
-    if (Usd_InstanceCache::IsPathMasterOrInMaster(target)) {
-        if (whyNot) { 
-            *whyNot = "Cannot target a master or an object within a master.";
+    if (!target.IsEmpty()) {
+        SdfPath absTarget =
+            target.MakeAbsolutePath(GetPath().GetAbsoluteRootOrPrimPath());
+        if (Usd_InstanceCache::IsPathMasterOrInMaster(absTarget)) {
+            if (whyNot) { 
+                *whyNot = "Cannot target a master or an object within a "
+                    "master.";
+            }
+            return SdfPath();
         }
-        return SdfPath();
     }
 
     UsdStage *stage = _GetStage();
-    SdfPath mappedPath = _MapTargetPath(stage, target);
+    SdfPath mappedPath = _MapTargetPath(stage, GetPath(), target);
     if (mappedPath.IsEmpty()) {
         if (whyNot) {
             *whyNot = TfStringPrintf("Cannot map <%s> to layer @%s@ via stage's "
@@ -78,7 +100,8 @@ UsdRelationship::_GetTargetForAuthoring(const SdfPath &target,
 }
 
 bool
-UsdRelationship::AddTarget(const SdfPath& target) const
+UsdRelationship::AddTarget(const SdfPath& target,
+                           UsdListPosition position) const
 {
     std::string errMsg;
     const SdfPath targetToAuthor = _GetTargetForAuthoring(target, &errMsg);
@@ -97,10 +120,25 @@ UsdRelationship::AddTarget(const SdfPath& target) const
     SdfChangeBlock block;
     SdfRelationshipSpecHandle relSpec = _CreateSpec();
 
-    if (not relSpec)
+    if (!relSpec)
         return false;
 
-    relSpec->GetTargetPathList().Add(targetToAuthor);
+    switch (position) {
+    case UsdListPositionFront:
+        relSpec->GetTargetPathList().Prepend(targetToAuthor);
+        break;
+    case UsdListPositionBack:
+        relSpec->GetTargetPathList().Append(targetToAuthor);
+        break;
+    case UsdListPositionTempDefault:
+        if (UsdAuthorOldStyleAdd()) {
+            relSpec->GetTargetPathList().Add(targetToAuthor);
+        } else {
+            relSpec->GetTargetPathList().Prepend(targetToAuthor);
+        }
+        break;
+    }
+
     return true;
 }
 
@@ -124,7 +162,7 @@ UsdRelationship::RemoveTarget(const SdfPath& target) const
     SdfChangeBlock block;
     SdfRelationshipSpecHandle relSpec = _CreateSpec();
 
-    if (not relSpec)
+    if (!relSpec)
         return false;
 
     relSpec->GetTargetPathList().Remove(targetToAuthor);
@@ -143,7 +181,7 @@ UsdRelationship::BlockTargets() const
     SdfChangeBlock block;
     SdfRelationshipSpecHandle relSpec = _CreateSpec();
 
-    if (not relSpec)
+    if (!relSpec)
         return false;
 
     relSpec->GetTargetPathList().ClearEditsAndMakeExplicit();
@@ -155,7 +193,7 @@ UsdRelationship::SetTargets(const SdfPathVector& targets) const
 {
     SdfPathVector mappedPaths;
     mappedPaths.reserve(targets.size());
-    BOOST_FOREACH(const SdfPath &target, targets) {
+    for (const SdfPath &target: targets) {
         std::string errMsg;
         mappedPaths.push_back(_GetTargetForAuthoring(target, &errMsg));
         if (mappedPaths.back().IsEmpty()) {
@@ -175,13 +213,11 @@ UsdRelationship::SetTargets(const SdfPathVector& targets) const
     SdfChangeBlock block;
     SdfRelationshipSpecHandle relSpec = _CreateSpec();
 
-    if (not relSpec)
+    if (!relSpec)
         return false;
 
     relSpec->GetTargetPathList().ClearEditsAndMakeExplicit();
-    BOOST_FOREACH(const SdfPath &path, mappedPaths) {
-        relSpec->GetTargetPathList().Add(path);
-    }
+    relSpec->GetTargetPathList().GetExplicitItems() = mappedPaths;
 
     return true;
 }
@@ -198,7 +234,7 @@ UsdRelationship::ClearTargets(bool removeSpec) const
     SdfChangeBlock block;
     SdfRelationshipSpecHandle relSpec = _CreateSpec();
 
-    if (not relSpec)
+    if (!relSpec)
         return false;
 
     if (removeSpec){
@@ -213,13 +249,13 @@ UsdRelationship::ClearTargets(bool removeSpec) const
 }
 
 bool
-UsdRelationship::GetTargets(SdfPathVector* targets,
-                            bool forwardToObjectsInMasters) const
+UsdRelationship::GetTargets(SdfPathVector* targets) const
 {
     TRACE_FUNCTION();
 
     UsdStage *stage = _GetStage();
     PcpErrorVector pcpErrors;
+    std::vector<std::string> otherErrors;
     PcpTargetIndex targetIndex;
     {
         // Our intention is that the following code requires read-only
@@ -241,65 +277,43 @@ UsdRelationship::GetTargets(SdfPathVector* targets,
     }
 
     targets->swap(targetIndex.paths);
+    if (!targets->empty() && _Prim()->IsInMaster()) {
+        Usd_PrimDataConstPtr master = get_pointer(_Prim());
+        while (!master->IsMaster()) { 
+            master = master->GetParent();  
+        }
+        
+        // Paths that point to an object under the master's source prim index
+        // are internal to the master and need to be translated to either
+        // the master or instance we're currently looking at.
+        const SdfPath& masterSourcePrimIndexPath = 
+            master->GetSourcePrimIndex().GetPath();
 
-    // Translate any target paths that point to descendents of instance prims
-    // to the corresponding prim in the instance's master if desired.
-    std::vector<std::string> otherErrors;
-    if (forwardToObjectsInMasters) {
-        const bool relationshipInMaster = _Prim()->IsInMaster();
-        SdfPath masterPath;
-        if (relationshipInMaster) {
-            masterPath = _Prim()->GetPath();
-            while (not masterPath.IsRootPrimPath()) { 
-                masterPath = masterPath.GetParentPath();
+        if (GetPrim().IsInMaster()) {
+            // Translate any paths that point to an object at or under the
+            // source prim index to our master.
+            for (SdfPath& target : *targets) {
+                target = target.ReplacePrefix(
+                    masterSourcePrimIndexPath, master->GetPath());
             }
         }
-
-        const Usd_InstanceCache* instanceCache = stage->_instanceCache.get();
-        for (SdfPath& path : *targets) {
-            const SdfPath& primPath = path.GetPrimPath();
-            const SdfPath& primInMasterPath = 
-                instanceCache->GetPrimInMasterForPrimIndexAtPath(primPath);
-            const bool pathIsObjectInMaster = not primInMasterPath.IsEmpty();
-
-            if (pathIsObjectInMaster) {
-                path = path.ReplacePrefix(primPath, primInMasterPath);
+        else if (GetPrim().IsInstanceProxy()) {
+            // Translate any paths that point to an object at or under the
+            // source prim index to our instance.
+            UsdPrim instance = GetPrim();
+            while (!instance.IsInstance()) { 
+                instance = instance.GetParent(); 
             }
-            else if (relationshipInMaster) {
-                // Relationships authored within an instance cannot target
-                // the instance itself or any its properties, since doing so
-                // would break the encapsulation of the instanced scene
-                // description and the ability to share that data across 
-                // multiple instances.
-                // 
-                // We can detect this situation by checking whether this
-                // target has a corresponding master prim. If so, issue
-                // an error and elide this target.
-                if (stage->_instanceCache->GetMasterForPrimIndexAtPath(primPath) 
-                    == masterPath) {
-                    // XXX: 
-                    // The path in this error message is potentially
-                    // confusing because it is the composed target path and
-                    // not necessarily what's authored in a layer. In order
-                    // to be more useful, we'd need to return more info
-                    // from the relationship target composition.
-                    otherErrors.push_back(TfStringPrintf(
-                        "Target path <%s> is not allowed because it is "
-                        "authored in instanced scene description but targets "
-                        "its owning instance.",
-                        path.GetText()));
-                    path = SdfPath();
-                }
+
+            for (SdfPath& target : *targets) {
+                target = target.ReplacePrefix(
+                    masterSourcePrimIndexPath, instance.GetPath());
             }
         }
-
-        targets->erase(
-            std::remove(targets->begin(), targets->end(), SdfPath()),
-            targets->end());
     }
 
     // TODO: handle errors
-    const bool hasErrors = not (pcpErrors.empty() and otherErrors.empty());
+    const bool hasErrors = !(pcpErrors.empty() && otherErrors.empty());
     if (hasErrors) {
         stage->_ReportErrors(
             pcpErrors, otherErrors,
@@ -307,68 +321,66 @@ UsdRelationship::GetTargets(SdfPathVector* targets,
                            GetPath().GetText()));
     }
 
-    return not hasErrors;
+    return !hasErrors;
 }
 
 bool
 UsdRelationship::_GetForwardedTargets(SdfPathSet* visited,
                                       SdfPathSet* uniqueTargets,
                                       SdfPathVector* targets,
-                                      bool forwardToObjectsInMasters) const
+                                      bool includeForwardingRels) const
 {
-    if (not visited->insert(GetPath()).second) {
-        // Cycle or dag fan-in detected.
-        // We're not sure if it's a cycle or a closed-loop in the dag, so
-        // silently continue.
-        return true;
-    }
-
-    SdfPathVector curTargets;
     // Track recursive composition errors, starting with the first batch of
     // targets.
-    bool success = GetTargets(&curTargets, forwardToObjectsInMasters);
+    SdfPathVector curTargets;
+    bool success = GetTargets(&curTargets);
 
     // Process all targets at this relationship.
-    TF_FOR_ALL(trgIt, curTargets) {
-        UsdPrim nextPrim = GetStage()->GetPrimAtPath(trgIt->GetPrimPath());
-
-        if (nextPrim) {
-            if (UsdRelationship rel =
-                        nextPrim.GetRelationship(trgIt->GetNameToken())) {
-                // It doesn't matter if we fail here, just track the error
-                // state and continue attempting to gather targets.
-                success = success and 
-                      rel._GetForwardedTargets(visited, uniqueTargets, targets,
-                                               forwardToObjectsInMasters);
-                // Never append paths that target a relationship.
-                continue;
-            } 
-        }
-        
-        if (uniqueTargets->insert(*trgIt).second)
-            targets->push_back(*trgIt);
+    for (SdfPath const &target: curTargets) {
+        if (target.IsPrimPropertyPath()) {
+            // Resolve forwarding if this target points at a relationship.
+            if (UsdPrim prim = GetStage()->GetPrimAtPath(target.GetPrimPath())) {
+                if (UsdRelationship rel =
+                    prim.GetRelationship(target.GetNameToken())) {
+                    if (visited->insert(rel.GetPath()).second) {
+                        // Only do this rel if we've not yet seen it.
+                        success &= rel._GetForwardedTargets(
+                            visited, uniqueTargets, targets,
+                            includeForwardingRels);
+                    }
+                    if (!includeForwardingRels)
+                        continue;
+                }
+            }
+        }            
+        if (uniqueTargets->insert(target).second)
+            targets->push_back(target);
     }
 
     return success;
 }
 
 bool
-UsdRelationship::GetForwardedTargets(SdfPathVector* targets,
-                                     bool forwardToObjectsInMasters) const
+UsdRelationship::_GetForwardedTargets(
+    SdfPathVector *targets,
+    bool includeForwardingRels) const
 {
-    if (not targets) {
-        TF_CODING_ERROR("Received null target pointer while processing <%s>\n",
-                GetPath().GetText());
-        return false;
-    } else if (not targets->empty()) {
-        TF_CODING_ERROR("Received non-empty targets while processing <%s>\n",
-                GetPath().GetText());
-        targets->clear();
-    }
-
     SdfPathSet visited, uniqueTargets;
     return _GetForwardedTargets(&visited, &uniqueTargets, targets,
-                                forwardToObjectsInMasters);
+                                includeForwardingRels);
+}
+
+bool
+UsdRelationship::GetForwardedTargets(SdfPathVector* targets) const
+{
+    if (!targets) {
+        TF_CODING_ERROR("Passed null pointer for targets on <%s>",
+                        GetPath().GetText());
+        return false;
+    }
+    targets->clear();
+    return _GetForwardedTargets(targets,
+                                /*includeForwardingRels=*/false);
 }
 
 bool
@@ -396,7 +408,7 @@ UsdRelationship::_CreateSpec(bool fallbackCustom) const
     if (m.IsClean()) {
         SdfChangeBlock block;
         return SdfRelationshipSpec::New(
-            stage->_CreatePrimSpecForEditing(GetPrimPath()),
+            stage->_CreatePrimSpecForEditing(GetPrim()),
             _PropName().GetString(),
             /* custom = */ fallbackCustom, SdfVariabilityUniform);
     }
@@ -408,3 +420,6 @@ UsdRelationship::_Create(bool fallbackCustom) const
 {
     return bool(_CreateSpec(fallbackCustom));
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

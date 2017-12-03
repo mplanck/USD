@@ -29,9 +29,10 @@
 #include "pxr/imaging/pxOsd/tokens.h"
 #include "pxr/base/tf/diagnostic.h"
 
-#include <opensubdiv3/far/topologyRefinerFactory.h>
+#include <opensubdiv/far/topologyRefinerFactory.h>
 
-#include <boost/bind.hpp>
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 namespace {
 
@@ -59,7 +60,7 @@ Converter::GetType() const {
 
     SchemeType type = SCHEME_CATMARK;
     if (scheme==PxOsdOpenSubdivTokens->catmark
-                              or scheme==PxOsdOpenSubdivTokens->catmullClark) {
+                              || scheme==PxOsdOpenSubdivTokens->catmullClark) {
         type = SCHEME_CATMARK;
     } else if (scheme==PxOsdOpenSubdivTokens->loop) {
         type = SCHEME_LOOP;
@@ -67,7 +68,7 @@ Converter::GetType() const {
         int numFaces = topology.GetFaceVertexCounts().size();
         int const * numVertsPtr = topology.GetFaceVertexCounts().cdata();
         if (std::find_if(numVertsPtr, numVertsPtr + numFaces,
-                         boost::bind(std::not_equal_to<int>(), _1, 3))
+                         [](int x) { return x != 3; })
             == numVertsPtr + numFaces) {
         } else {
             TF_WARN("Can't apply loop subdivision on prim %s, since "
@@ -102,7 +103,7 @@ Converter::GetOptions() const {
         PxOsdOpenSubdivTokens->edgeAndCorner :
         topology.GetSubdivTags().GetVertexInterpolationRule();
 
-    if (not interpolateBoundary.IsEmpty()) {
+    if (!interpolateBoundary.IsEmpty()) {
                if (interpolateBoundary==PxOsdOpenSubdivTokens->none) {
             options.SetVtxBoundaryInterpolation(Options::VTX_BOUNDARY_NONE);
         } else if (interpolateBoundary==PxOsdOpenSubdivTokens->edgeOnly) {
@@ -127,7 +128,7 @@ Converter::GetOptions() const {
     TfToken const faceVaryingLinearInterpolation =
         topology.GetSubdivTags().GetFaceVaryingInterpolationRule();
 
-    if (not faceVaryingLinearInterpolation.IsEmpty()) {
+    if (!faceVaryingLinearInterpolation.IsEmpty()) {
         if (faceVaryingLinearInterpolation==PxOsdOpenSubdivTokens->all) {
             options.SetFVarLinearInterpolation(Options::FVAR_LINEAR_ALL);
         } else if (faceVaryingLinearInterpolation==PxOsdOpenSubdivTokens->cornersPlus1) {
@@ -154,7 +155,7 @@ Converter::GetOptions() const {
     TfToken const creaseMethod =
         topology.GetSubdivTags().GetCreaseMethod();
 
-    if (not creaseMethod.IsEmpty()) {
+    if (!creaseMethod.IsEmpty()) {
                if (creaseMethod==PxOsdOpenSubdivTokens->uniform) {
             options.SetCreasingMethod(Options::CREASE_UNIFORM);
         } else if (creaseMethod==PxOsdOpenSubdivTokens->chaikin) {
@@ -169,18 +170,18 @@ Converter::GetOptions() const {
     // triangle subdivision
     //
 
-    TfToken const trianglesSubdivision =
+    TfToken const triangleSubdivision =
         topology.GetSubdivTags().GetTriangleSubdivision();
 
-    if (not trianglesSubdivision.IsEmpty()) {
-        if (trianglesSubdivision==PxOsdOpenSubdivTokens->catmark or
-                trianglesSubdivision==PxOsdOpenSubdivTokens->catmullClark) {
+    if (!triangleSubdivision.IsEmpty()) {
+        if (triangleSubdivision==PxOsdOpenSubdivTokens->catmark || 
+                triangleSubdivision==PxOsdOpenSubdivTokens->catmullClark) {
             options.SetTriangleSubdivision(Options::TRI_SUB_CATMARK);
-        } else if (trianglesSubdivision==PxOsdOpenSubdivTokens->smooth) {
+        } else if (triangleSubdivision==PxOsdOpenSubdivTokens->smooth) {
             options.SetTriangleSubdivision(Options::TRI_SUB_SMOOTH);
         } else {
             TF_WARN("Unknown triangle subdivision rule (%s) (%s)",
-                trianglesSubdivision.GetText(), name.GetText());
+                triangleSubdivision.GetText(), name.GetText());
         }
     }
 
@@ -188,6 +189,8 @@ Converter::GetOptions() const {
 }
 
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 // OpenSubdiv 3.x API requires that the client code provides
 // template specialization for topology annotations.
@@ -199,8 +202,10 @@ namespace Far {
 
 //----------------------------------------------------------
 template <> inline bool
-TopologyRefinerFactory<Converter>::resizeComponentTopology(
-    Far::TopologyRefiner & refiner, Converter const & converter) {
+TopologyRefinerFactory<PXR_NS::Converter>::resizeComponentTopology(
+    Far::TopologyRefiner & refiner, PXR_NS::Converter const & converter) {
+
+    PXR_NAMESPACE_USING_DIRECTIVE
 
     PxOsdMeshTopology const topology = converter.topology;
 
@@ -230,13 +235,13 @@ TopologyRefinerFactory<Converter>::resizeComponentTopology(
 //----------------------------------------------------------
 template <>
 inline bool
-TopologyRefinerFactory<Converter>::assignComponentTopology(
-    Far::TopologyRefiner & refiner, Converter const & converter) {
+TopologyRefinerFactory<PXR_NS::Converter>::assignComponentTopology(
+    Far::TopologyRefiner & refiner, PXR_NS::Converter const & converter) {
+
+    PXR_NAMESPACE_USING_DIRECTIVE
 
     PxOsdMeshTopology const topology = converter.topology;
-
     int const * vertIndices = topology.GetFaceVertexIndices().cdata();
-
     bool flip = (topology.GetOrientation() != PxOsdOpenSubdivTokens->rightHanded);
 
     for (int face=0, idx=0; face<refiner.GetLevel(0).GetNumFaces(); ++face) {
@@ -263,8 +268,10 @@ TopologyRefinerFactory<Converter>::assignComponentTopology(
 
 template <>
 inline bool
-TopologyRefinerFactory<Converter>::assignComponentTags(
-    Far::TopologyRefiner & refiner, Converter const & converter) {
+TopologyRefinerFactory<PXR_NS::Converter>::assignComponentTags(
+    Far::TopologyRefiner & refiner, PXR_NS::Converter const & converter) {
+
+    PXR_NAMESPACE_USING_DIRECTIVE
 
     PxOsdMeshTopology const & topology = converter.topology;
 
@@ -313,7 +320,7 @@ TopologyRefinerFactory<Converter>::assignComponentTags(
 
             if (perEdgeCrease) ++sindex;
         }
-        if (not perEdgeCrease) ++sindex;
+        if (!perEdgeCrease) ++sindex;
         cindex += creaseLengths[i];
     }
 
@@ -333,7 +340,7 @@ TopologyRefinerFactory<Converter>::assignComponentTags(
     }
     for (size_t i=0; i < numCorners; ++i) {
         int vert = cornerIndices[i];
-        if (vert >= 0 and vert < refiner.GetLevel(0).GetNumVertices()) {
+        if (vert >= 0 && vert < refiner.GetLevel(0).GetNumVertices()) {
             setBaseVertexSharpness(refiner,
                 vert, std::max(0.0f, cornerWeights[i]));
         } else {
@@ -352,7 +359,7 @@ TopologyRefinerFactory<Converter>::assignComponentTags(
 
     for (int i=0; i < numHoles; ++i) {
         int face = holeIndices[i];
-        if (face >= 0 and face < refiner.GetLevel(0).GetNumFaces()) {
+        if (face >= 0 && face < refiner.GetLevel(0).GetNumFaces()) {
             setBaseFaceHole(refiner, face, true);
         } else {
             TF_WARN("Set hole cannot find face (%d) (%s)",
@@ -367,18 +374,20 @@ TopologyRefinerFactory<Converter>::assignComponentTags(
 
 template <>
 bool
-TopologyRefinerFactory<Converter>::assignFaceVaryingTopology(
-    TopologyRefiner & refiner, Converter const & converter) {
+TopologyRefinerFactory<PXR_NS::Converter>::assignFaceVaryingTopology(
+    TopologyRefiner & refiner, PXR_NS::Converter const & converter) {
+
+    PXR_NAMESPACE_USING_DIRECTIVE
 
     if (converter.fvarTopologies.empty()) return true;
 
-    TF_FOR_ALL (it, converter.fvarTopologies) {
-        VtIntArray const &fvIndices = *it;
+    for (size_t i = 0; i < converter.fvarTopologies.size(); ++i) {
+        VtIntArray const &fvIndices = converter.fvarTopologies[i];
 
         // find fvardata size
         int maxIndex = -1;
-        for (size_t i = 0; i < fvIndices.size(); ++i) {
-            maxIndex = std::max(maxIndex, fvIndices[i]);
+        for (size_t j = 0; j < fvIndices.size(); ++j) {
+            maxIndex = std::max(maxIndex, fvIndices[j]);
         }
 
         size_t nfaces = getNumBaseFaces(refiner);
@@ -387,22 +396,22 @@ TopologyRefinerFactory<Converter>::assignFaceVaryingTopology(
         bool flip = (converter.topology.GetOrientation() !=
                      PxOsdOpenSubdivTokens->rightHanded);
 
-        for (size_t i=0, ofs=0; i < nfaces; ++i) {
-            Far::IndexArray faceIndices = getBaseFaceFVarValues(refiner, i, channel);
+        for (size_t j=0, ofs=0; j < nfaces; ++j) {
+            Far::IndexArray faceIndices = getBaseFaceFVarValues(refiner, j, channel);
             size_t numVerts = faceIndices.size();
 
-            if (not TF_VERIFY(ofs + numVerts <= fvIndices.size())) {
+            if (!TF_VERIFY(ofs + numVerts <= fvIndices.size())) {
                 return false;
             }
 
             if (flip) {
                 faceIndices[0] = fvIndices[ofs++];
-                for (int j = numVerts-1; j > 0; --j) {
-                    faceIndices[j] = fvIndices[ofs++];
+                for (int k = numVerts-1; k > 0; --k) {
+                    faceIndices[k] = fvIndices[ofs++];
                 }
             } else {
-                for (size_t j = 0; j < numVerts; ++j) {
-                    faceIndices[j] = fvIndices[ofs++];
+                for (size_t k = 0; k < numVerts; ++k) {
+                    faceIndices[k] = fvIndices[ofs++];
                 }
             }
         }
@@ -414,9 +423,10 @@ TopologyRefinerFactory<Converter>::assignFaceVaryingTopology(
 //----------------------------------------------------------
 template <>
 inline void
-TopologyRefinerFactory<Converter>::reportInvalidTopology(
+TopologyRefinerFactory<PXR_NS::Converter>::reportInvalidTopology(
     TopologyRefinerFactory::TopologyError /* errCode */,
-        char const * msg, Converter const & converter) {
+        char const * msg, PXR_NS::Converter const & converter) {
+    PXR_NAMESPACE_USING_DIRECTIVE
     TF_WARN("%s (%s)", msg, converter.name.GetText());
 }
 
@@ -426,6 +436,8 @@ TopologyRefinerFactory<Converter>::reportInvalidTopology(
 
 } // namespace OPENSUBDIV_VERSION
 } // namespace OpenSubdiv
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // ---------------------------------------------------------------------------
 PxOsdTopologyRefinerSharedPtr
@@ -464,4 +476,7 @@ PxOsdRefinerFactory::Create(
     return PxOsdTopologyRefinerSharedPtr(refiner);
 }
 
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

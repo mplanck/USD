@@ -26,17 +26,23 @@
 #include <maya/MGlobal.h>
 #include <maya/MStatus.h>
 
+#include "pxr/pxr.h"
+#include "pxrUsd/api.h"
+#include "pxrUsdMayaGL/proxyDrawOverride.h"
+#include "pxrUsdMayaGL/proxyShapeUI.h"
+
+#include "usdMaya/pluginStaticData.h"
 #include "usdMaya/usdImport.h"
 #include "usdMaya/usdExport.h"
+#include "usdMaya/usdListShadingModes.h"
 #include "usdMaya/usdTranslatorImport.h"
 #include "usdMaya/usdTranslatorExport.h"
 
-#include "usdMaya/pluginStaticData.h"
-#include "usdMaya/proxyDrawOverride.h"
-#include "usdMaya/proxyShapeUI.h"
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static PxrUsdMayaPluginStaticData& _data(PxrUsdMayaPluginStaticData::pxrUsd);
 
+PXRUSD_API
 MStatus initializePlugin(
     MObject obj) {
 
@@ -96,6 +102,17 @@ MStatus initializePlugin(
     status = MGlobal::sourceFile("usdMaya.mel");
     CHECK_MSTATUS(status);
 
+    // Set the label for the assembly node type so that it appears correctly
+    // in the 'Create -> Scene Assembly' menu.
+    const MString assemblyTypeLabel("UsdReferenceAssembly");
+    MString setLabelCmd;
+    status = setLabelCmd.format("assembly -e -type ^1s -label ^2s",
+                                _data.referenceAssembly.typeName,
+                                assemblyTypeLabel);
+    CHECK_MSTATUS(status);
+    status = MGlobal::executeCommand(setLabelCmd);
+    CHECK_MSTATUS(status);
+
     // Procs stored in usdMaya.mel
     // Add assembly callbacks for accessing data without creating an MPxAssembly instance
     status = MGlobal::executeCommand("assembly -e -repTypeLabelProc usdMaya_UsdMayaReferenceAssembly_repTypeLabel -type " + _data.referenceAssembly.typeName);
@@ -133,6 +150,14 @@ MStatus initializePlugin(
         status.perror("registerCommand usdImport");
     }
 
+    status = plugin.registerCommand("usdListShadingModes",
+                                    usdListShadingModes::creator,
+                                    usdListShadingModes::createSyntax);
+
+    if (!status) {
+        status.perror("registerCommand usdListShadingModes");
+    }
+    
     status = plugin.registerFileTranslator("pxrUsdImport", 
                                     "", 
                                     []() { 
@@ -162,6 +187,7 @@ MStatus initializePlugin(
     return status;
 }
 
+PXRUSD_API
 MStatus uninitializePlugin(
     MObject obj) {
 
@@ -176,6 +202,11 @@ MStatus uninitializePlugin(
     status = plugin.deregisterCommand("usdExport");
     if (!status) {
         status.perror("deregisterCommand usdExport");
+    }
+
+    status = plugin.deregisterCommand("usdListShadingModes");
+    if (!status) {
+        status.perror("deregisterCommand usdListShadingModes");
     }
 
     status = plugin.deregisterFileTranslator("pxrUsdImport");
@@ -209,4 +240,3 @@ MStatus uninitializePlugin(
 
     return status;
 }
-

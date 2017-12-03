@@ -21,13 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/pyTracing.h"
 
 #include "pxr/base/tf/pyInterpreter.h"
 #include "pxr/base/tf/pyUtils.h"
 #include "pxr/base/tf/staticData.h"
 
-#include <boost/weak_ptr.hpp>
+#include <memory>
 
 #include <tbb/spin_mutex.h>
 
@@ -39,7 +42,9 @@
 
 using std::list;
 
-typedef list<boost::weak_ptr<TfPyTraceFn> > TraceFnList;
+PXR_NAMESPACE_OPEN_SCOPE
+
+typedef list<std::weak_ptr<TfPyTraceFn> > TraceFnList;
 
 static TfStaticData<TraceFnList> _traceFns;
 static bool _traceFnInstalled;
@@ -89,10 +94,10 @@ static int _TracePythonFn(PyObject *, PyFrameObject *frame,
 
 static void _SetTraceFnEnabled(bool enable) {
     // NOTE! mutex must be locked by caller!
-    if (enable and not _traceFnInstalled and Py_IsInitialized()) {
+    if (enable && !_traceFnInstalled && Py_IsInitialized()) {
         _traceFnInstalled = true;
         PyEval_SetTrace(_TracePythonFn, NULL);
-    } else if (not enable and _traceFnInstalled) {
+    } else if (!enable && _traceFnInstalled) {
         _traceFnInstalled = false;
         PyEval_SetTrace(NULL, NULL);
     }
@@ -126,7 +131,6 @@ void Tf_PyFabricateTraceEvent(TfPyTraceInfo const &info)
         _InvokeTraceFns(info);
 }
 
-
 TfPyTraceFnId TfPyRegisterTraceFn(TfPyTraceFn const &f)
 {
     tbb::spin_mutex::scoped_lock lock(_traceFnMutex);
@@ -143,8 +147,9 @@ void Tf_PyTracingPythonInitialized()
     std::call_once(once, [](){
             TF_AXIOM(Py_IsInitialized());
             tbb::spin_mutex::scoped_lock lock(_traceFnMutex);
-            if (not _traceFns->empty())
+            if (!_traceFns->empty())
                 _SetTraceFnEnabled(true);
         });
 }
             
+PXR_NAMESPACE_CLOSE_SCOPE

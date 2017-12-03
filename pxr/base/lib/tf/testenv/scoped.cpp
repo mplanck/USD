@@ -21,12 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/tf/regTest.h"
 #include "pxr/base/tf/scoped.h"
 #include <iostream>
-#include <boost/lambda/lambda.hpp>
 
 using namespace std;
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static bool x = false;
 
@@ -73,7 +74,7 @@ Test_TfScoped()
     {
         x = true;
         TfScoped<> scope(&Func);
-        if (not x) {
+        if (!x) {
             cout << "Function: unexpected state in scope" << endl;
             ++errors;
         }
@@ -84,36 +85,19 @@ Test_TfScoped()
     }
 
     if (x) {
-        cout << "boost::bind: unexpected state before scope" << endl;
+        cout << "std::bind: unexpected state before scope" << endl;
         ++errors;
     }
     {
         x = true;
-        TfScoped<> scope(boost::bind(&BoundFunc, &x, false));
-        if (not x) {
-            cout << "boost::bind: unexpected state in scope" << endl;
+        TfScoped<> scope(std::bind(&BoundFunc, &x, false));
+        if (!x) {
+            cout << "std::bind: unexpected state in scope" << endl;
             ++errors;
         }
     }
     if (x) {
-        cout << "boost::bind: unexpected state after scope" << endl;
-        ++errors;
-    }
-
-    if (x) {
-        cout << "boost lambda: unexpected state before scope" << endl;
-        ++errors;
-    }
-    {
-        x = true;
-        TfScoped<> scope(boost::lambda::var(x) = false);
-        if (not x) {
-            cout << "boost lambda: unexpected state in scope" << endl;
-            ++errors;
-        }
-    }
-    if (x) {
-        cout << "boost lambda: unexpected state after scope" << endl;
+        cout << "std::bind: unexpected state after scope" << endl;
         ++errors;
     }
 
@@ -124,7 +108,7 @@ Test_TfScoped()
     {
         x = true;
         TfScoped<void (*)(bool*)> scope(&ResetFunc, &x);
-        if (not x) {
+        if (!x) {
             cout << "Function with arg: unexpected state in scope" << endl;
             ++errors;
         }
@@ -142,7 +126,7 @@ Test_TfScoped()
         Resetter r(&x);
         x = true;
         TfScoped<void (Resetter::*)()> scope(&r, &Resetter::Reset);
-        if (not x) {
+        if (!x) {
             cout << "Method: unexpected state in scope" << endl;
             ++errors;
         }
@@ -152,7 +136,7 @@ Test_TfScoped()
         ++errors;
     }
 
-    return not errors;
+    return !errors;
 }
 
 static bool
@@ -163,7 +147,7 @@ Test_TfScopedVar()
     bool x = false;
     {
         TfScopedVar<bool> scope(x, true);
-        if (not x) {
+        if (!x) {
             cout << "bool: unexpected state in scope" << endl;
             ++errors;
         }
@@ -186,7 +170,7 @@ Test_TfScopedVar()
         ++errors;
     }
 
-    return not errors;
+    return !errors;
 }
 
 TF_ADD_REGTEST(TfScoped);

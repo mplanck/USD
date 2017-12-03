@@ -24,18 +24,24 @@
 #ifndef HD_DIRTY_LIST_H
 #define HD_DIRTY_LIST_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
-
-#include "pxr/imaging/hd/changeTracker.h"
 #include "pxr/imaging/hd/rprimCollection.h"
+#include "pxr/imaging/hd/types.h"
+
+#include <boost/shared_ptr.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 class HdRenderIndex;
 
 typedef boost::shared_ptr<class HdDirtyList> HdDirtyListSharedPtr;
 typedef boost::weak_ptr<class HdDirtyList> HdDirtyListPtr;
 
-/// HdDirtyList is used for faster iteration of dirty rprims,
-/// filtered by mask.
+/// \class HdDirtyList
+///
+/// Used for faster iteration of dirty rprims, filtered by mask.
 ///
 /// GetDirtyRprims/GetSize implicitly refresh and cache the list if needed.
 /// The returning prims list will be used for sync.
@@ -94,14 +100,15 @@ typedef boost::weak_ptr<class HdDirtyList> HdDirtyListPtr;
 ///   this traversal has already been optimized to some extent in
 ///   _FilterByRootPaths and we can still leverage that code.
 ///
-
 class HdDirtyList {
 public:
+    HD_API
     HdDirtyList(HdRprimCollection const& collection,
                  HdRenderIndex &index);
+    HD_API
     ~HdDirtyList();
 
-    /// Return the collection associated to this dirty list
+    /// Return the collection associated to this dirty list.
     HdRprimCollection const &GetCollection() const {
         return _collection;
     }
@@ -110,6 +117,7 @@ public:
     /// If the change tracker hasn't changed any state since the last time
     /// GetDirtyRprims gets called, it simply returns; Otherwise, refreshes
     /// the dirty ID list and returns it.
+    HD_API
     SdfPathVector const& GetDirtyRprims();
 
     /// Return the number of dirty prims in the list.
@@ -119,13 +127,15 @@ public:
 
     /// Update the tracking state for this HdDirtyList with the new collection,
     /// if the update cannot be applied, return false.
+    HD_API
     bool ApplyEdit(HdRprimCollection const& newCollection);
 
     /// Clears the dirty list, while preserving stable dirty state.
+    HD_API
     void Clear();
 
 private:
-    void _UpdateIDs(SdfPathVector* ids, HdChangeTracker::DirtyBits mask);
+    void _UpdateIDs(SdfPathVector* ids, HdDirtyBits mask);
 
     HdRprimCollection _collection;
     SdfPathVector _dirtyIds;
@@ -135,8 +145,9 @@ private:
     unsigned int _varyingStateVersion;
     unsigned int _changeCount;
     bool _isEmpty;
-    bool _reprDirty;
 };
 
-#endif  // HD_DIRTY_LIST_H
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif  // HD_DIRTY_LIST_H

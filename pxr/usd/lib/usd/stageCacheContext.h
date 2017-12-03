@@ -24,12 +24,14 @@
 #ifndef USD_STAGECACHECONTEXT_H
 #define USD_STAGECACHECONTEXT_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/base/tf/stacked.h"
 
-#include <boost/utility/enable_if.hpp>
-#include <boost/type_traits/is_const.hpp>
-
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class UsdStageCache;
 
@@ -70,7 +72,7 @@ enum UsdStageCacheContextBlockType
 
 /// \class UsdStageCacheContext
 ///
-/// \brief A context object that lets the UsdStage::Open() API read from or read
+/// A context object that lets the UsdStage::Open() API read from or read
 /// from and write to a UsdStageCache instance during a scope of execution.
 ///
 /// Code examples illustrate typical use:
@@ -116,23 +118,23 @@ enum UsdStageCacheContextBlockType
 /// UsdStageCacheContext objects that exist in one thread's stack do not
 /// influence calls to UsdStage::Open() from a different thread.
 ///
-struct UsdStageCacheContext : public TfStacked<UsdStageCacheContext>
+TF_DEFINE_STACKED(UsdStageCacheContext, true, USD_API)
 {
-    /// \brief Bind a cache for calls to UsdStage::Open() to read from and write
-    /// to.
+public:
+    /// Bind a cache for calls to UsdStage::Open() to read from and write to.
     explicit UsdStageCacheContext(UsdStageCache &cache)
         : _rwCache(&cache)
         , _isReadOnlyCache(false)
         , _blockType(Usd_NoBlock) {}
 
-    /// \brief Bind a cache for calls to UsdStage::Open() to read from.  See
-    /// UsdUseButDoNotPopulateCache().
+    /// Bind a cache for calls to UsdStage::Open() to read from.
+    /// \see UsdUseButDoNotPopulateCache()
     explicit UsdStageCacheContext(Usd_NonPopulatingStageCacheWrapper holder)
         : _roCache(&holder.cache)
         , _isReadOnlyCache(true)
         , _blockType(Usd_NoBlock) {}
 
-    /// \brief Disable cache use completely (with UsdBlockStageCaches) or only
+    /// Disable cache use completely (with UsdBlockStageCaches) or only
     /// for writing (with UsdBlockStageCacheWrites).
     explicit UsdStageCacheContext(UsdStageCacheContextBlockType blockType)
         : _blockType(blockType) {}
@@ -140,6 +142,7 @@ struct UsdStageCacheContext : public TfStacked<UsdStageCacheContext>
 private:
     friend class UsdStage;
 
+    static std::vector<const UsdStageCache *> _GetReadOnlyCaches();
     static std::vector<const UsdStageCache *> _GetReadableCaches();
     static std::vector<UsdStageCache *> _GetWritableCaches();
 
@@ -151,5 +154,8 @@ private:
     bool _isReadOnlyCache;
     UsdStageCacheContextBlockType _blockType;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_STAGECACHECONTEXT_H

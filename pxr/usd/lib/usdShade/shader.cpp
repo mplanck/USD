@@ -28,15 +28,19 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
     TfType::Define<UsdShadeShader,
         TfType::Bases< UsdTyped > >();
     
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("Shader") to find
-    // TfType<UsdShadeShader>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("Shader")
+    // to find TfType<UsdShadeShader>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, UsdShadeShader>("Shader");
 }
 
@@ -49,7 +53,7 @@ UsdShadeShader::~UsdShadeShader()
 UsdShadeShader
 UsdShadeShader::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdShadeShader();
     }
@@ -62,7 +66,7 @@ UsdShadeShader::Define(
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("Shader");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdShadeShader();
     }
@@ -140,40 +144,73 @@ UsdShadeShader::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
-UsdShadeParameter
-UsdShadeShader::CreateParameter(const TfToken& name,
-    const SdfValueTypeName& typeName)
+#include "pxr/usd/usdShade/connectableAPI.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+TF_DEFINE_PRIVATE_TOKENS(
+    _tokens,
+    (outputs)
+);
+
+UsdShadeShader::operator UsdShadeConnectableAPI () const 
 {
-    return UsdShadeParameter(
-            GetPrim(), 
-            name, 
-            typeName);
+    return UsdShadeConnectableAPI(GetPrim());
 }
 
-UsdShadeParameter
-UsdShadeShader::GetParameter(const TfToken &name) const
+UsdShadeConnectableAPI 
+UsdShadeShader::ConnectableAPI() const
 {
-    return UsdShadeParameter(GetPrim().GetAttribute(name));
+    return UsdShadeConnectableAPI(GetPrim());
 }
 
-std::vector<UsdShadeParameter>
-UsdShadeShader::GetParameters() const
+UsdShadeOutput
+UsdShadeShader::CreateOutput(const TfToken& name,
+                             const SdfValueTypeName& typeName)
 {
-    std::vector<UsdShadeParameter> ret;
-
-    std::vector<UsdAttribute> attrs = GetPrim().GetAttributes();
-    TF_FOR_ALL(attrIter, attrs) { 
-        const UsdAttribute& attr = *attrIter;
-        if (attr.GetNamespace().IsEmpty()) {
-            ret.push_back(UsdShadeParameter(attr));
-        }
-    }
-    return ret;
+    return UsdShadeConnectableAPI(GetPrim()).CreateOutput(name, typeName);
 }
 
+UsdShadeOutput
+UsdShadeShader::GetOutput(const TfToken &name) const
+{
+    return UsdShadeConnectableAPI(GetPrim()).GetOutput(name);
+}
+
+std::vector<UsdShadeOutput>
+UsdShadeShader::GetOutputs() const
+{
+    return UsdShadeConnectableAPI(GetPrim()).GetOutputs();
+}
+
+UsdShadeInput
+UsdShadeShader::CreateInput(const TfToken& name,
+                            const SdfValueTypeName& typeName)
+{
+    return UsdShadeConnectableAPI(GetPrim()).CreateInput(name, typeName);
+}
+
+UsdShadeInput
+UsdShadeShader::GetInput(const TfToken &name) const
+{
+    return UsdShadeConnectableAPI(GetPrim()).GetInput(name);
+}
+
+std::vector<UsdShadeInput>
+UsdShadeShader::GetInputs() const
+{
+    return UsdShadeConnectableAPI(GetPrim()).GetInputs();
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE

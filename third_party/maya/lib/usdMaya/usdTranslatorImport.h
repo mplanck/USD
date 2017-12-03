@@ -21,62 +21,81 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/**
- * \class usdTranslatorImport
- * \brief file translator for USD files
- */
 
 #ifndef PXRUSDMAYA_TRANSLATOR_IMPORT_H
 #define PXRUSDMAYA_TRANSLATOR_IMPORT_H
 
+/// \file usdTranslatorImport.h
+
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
+#include "usdMaya/JobArgs.h"
+
+#include <maya/MFileObject.h>
 #include <maya/MPxFileTranslator.h>
+#include <maya/MStatus.h>
+#include <maya/MString.h>
 
 #include <string>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+
 const char* const usdTranslatorImportDefaults =
         "shadingMode=GPrim Colors;"
-        "readAnimData=0;"
+        "readAnimData=1;"
+        "useCustomFrameRange=0;"
         "assemblyRep=Collapsed";
 
-class usdTranslatorImport : public MPxFileTranslator {
 
+class usdTranslatorImport : public MPxFileTranslator
+{
     public:
 
         /**
          * method to create usdTranslatorImport file translator
          */
-        static void * creator(const std::string& assemblyTypeName,
-                              const std::string& proxyShapeTypeName);
+        PXRUSDMAYA_API
+        static void* creator(const std::string& assemblyTypeName,
+                             const std::string& proxyShapeTypeName);
 
+        PXRUSDMAYA_API
         MStatus reader(
-            const MFileObject& file,
-            const MString& optionsString,
-            FileAccessMode mode);
+                const MFileObject& file,
+                const MString& optionsString,
+                MPxFileTranslator::FileAccessMode mode);
 
         bool haveReadMethod() const { return true; }
         bool haveWriteMethod() const { return false; }
 
+        PXRUSDMAYA_API
         MFileKind identifyFile(
-            const MFileObject&,
-            const char*,
-            short) const;
+                const MFileObject& file,
+                const char* buffer,
+                short size) const;
 
-        MString defaultExtension() const { return "usda"; }
-        MString filter() const { return "*.usd*"; }
-
-    protected:
+        MString defaultExtension() const {
+            return PxrUsdMayaTranslatorTokens->UsdFileExtensionDefault.GetText();
+        }
+        MString filter() const {
+            return PxrUsdMayaTranslatorTokens->UsdFileFilter.GetText();
+        }
 
     private:
 
-        usdTranslatorImport(const std::string& assemblyTypeName,
-                            const std::string& proxyShapeTypeName);
         usdTranslatorImport(
-            const usdTranslatorImport&);
+                const std::string& assemblyTypeName,
+                const std::string& proxyShapeTypeName);
+        usdTranslatorImport(const usdTranslatorImport&);
         ~usdTranslatorImport();
         usdTranslatorImport& operator=(const usdTranslatorImport&);
 
         const std::string _assemblyTypeName;
         const std::string _proxyShapeTypeName;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDMAYA_TRANSLATOR_IMPORT_H

@@ -24,6 +24,10 @@
 #ifndef USD_GENERATED_MODELAPI_H
 #define USD_GENERATED_MODELAPI_H
 
+/// \file usd/modelAPI.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/usd/schemaBase.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -37,12 +41,16 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // MODELAPI                                                                   //
 // -------------------------------------------------------------------------- //
 
+/// \class UsdModelAPI
+///
 /// UsdModelAPI is an API schema that provides an interface to a prim's
 /// model qualities, if it does, in fact, represent the root prim of a model.
 /// 
@@ -70,6 +78,11 @@ public:
     /// a non-empty typeName.
     static const bool IsConcrete = false;
 
+    /// Compile-time constant indicating whether or not this class inherits from
+    /// UsdTyped. Types which inherit from UsdTyped can impart a typename on a
+    /// UsdPrim.
+    static const bool IsTyped = false;
+
     /// Construct a UsdModelAPI on UsdPrim \p prim .
     /// Equivalent to UsdModelAPI::Get(prim.GetStage(), prim.GetPath())
     /// for a \em valid \p prim, but will not immediately throw an error for
@@ -88,15 +101,17 @@ public:
     }
 
     /// Destructor.
+    USD_API
     virtual ~UsdModelAPI();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USD_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdModelAPI holding the prim adhering to this
+    /// Return a UsdModelAPI holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -105,6 +120,7 @@ public:
     /// UsdModelAPI(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USD_API
     static UsdModelAPI
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
@@ -112,11 +128,13 @@ public:
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USD_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USD_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -124,8 +142,10 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 
@@ -149,18 +169,22 @@ public:
     ///
     /// \sa \ref mainpage_kind "The Kind module" for further details on
     /// how to use Kind for classification, and how to extend the taxonomy.
+    USD_API
     bool GetKind(TfToken* kind) const;
     
     /// Author a \p kind for this prim, at the current UsdEditTarget.
     /// \return true if \p kind was successully authored, otherwise false.
+    USD_API
     bool SetKind(const TfToken& kind);
 
     /// Return true if this prim represents a model, based on its kind
     /// metadata.
+    USD_API
     bool IsModel() const;
 
     /// Return true if this prim represents a model group, based on its kind
     /// metadata.
+    USD_API
     bool IsGroup() const;
 
     /// @}
@@ -175,12 +199,14 @@ public:
     /// The asset identifier can be used to resolve the model's root layer via 
     /// the asset resolver plugin.
     /// 
+    USD_API
     bool GetAssetIdentifier(SdfAssetPath *identifier) const;
 
     /// Sets the model's asset identifier to the given asset path, \p identifier.
     /// 
     /// \sa GetAssetIdentifier()
     ///
+    USD_API
     void SetAssetIdentifier(const SdfAssetPath &identifier) const;
     
     /// Returns the model's asset name from the composed assetInfo dictionary.
@@ -188,12 +214,14 @@ public:
     /// The asset name is the name of the asset, as would be used in a database 
     /// query.
     ///
+    USD_API
     bool GetAssetName(std::string *assetName) const;
 
     /// Sets the model's asset name to \p assetName.
     /// 
     /// \sa GetAssetName()
     ///
+    USD_API
     void SetAssetName(const std::string &assetName) const;
     
     /// Returns the model's resolved asset version.  
@@ -207,12 +235,14 @@ public:
     /// that newer version may be the one that is resolved when the UsdStage is 
     /// opened.
     /// 
+    USD_API
     bool GetAssetVersion(std::string *version) const;
 
     /// Sets the model's asset version string. 
     /// 
     /// \sa GetAssetVersion()
     ///
+    USD_API
     void SetAssetVersion(const std::string &version) const;
 
     /// Returns the list of asset dependencies referenced inside the 
@@ -224,6 +254,7 @@ public:
     /// efficient dependency analysis without the need to include the model's 
     /// payload.
     /// 
+    USD_API
     bool GetPayloadAssetDependencies(VtArray<SdfAssetPath> *assetDeps) 
         const;
     
@@ -232,6 +263,7 @@ public:
     /// 
     /// \sa GetPayloadAssetDependencies()
     ///
+    USD_API
     void SetPayloadAssetDependencies(const VtArray<SdfAssetPath> &assetDeps) 
         const;
 
@@ -244,11 +276,13 @@ public:
     /// The elements of this dictionary are composed element-wise, and are 
     /// nestable.
     ///
+    USD_API
     bool GetAssetInfo(VtDictionary *info) const;
 
     /// Sets the model's assetInfo dictionary to \p info in the current edit 
     /// target.
     /// 
+    USD_API
     void SetAssetInfo(const VtDictionary &info) const;
 
     /// @}
@@ -258,7 +292,7 @@ protected:
     template<typename T>
     bool _GetAssetInfoByKey(const TfToken &key, T *val) const {
         VtValue vtVal = GetPrim().GetAssetInfoByKey(key);
-        if (not vtVal.IsEmpty() and vtVal.IsHolding<T>()) {
+        if (!vtVal.IsEmpty() && vtVal.IsHolding<T>()) {
             *val = vtVal.UncheckedGet<T>();
             return true;
         }
@@ -267,7 +301,8 @@ protected:
 };
 
 /// \anchor UsdModelAPIAssetInfoKeys
-/// \brief <b>UsdModelAPIAssetInfoKeys</b> provides tokens for the various core
+///
+/// <b>UsdModelAPIAssetInfoKeys</b> provides tokens for the various core
 /// entries into the assetInfo dictionary.
 ///
 /// The keys provided here are:
@@ -285,6 +320,8 @@ protected:
     (version)                   \
     (payloadAssetDependencies)
 
-TF_DECLARE_PUBLIC_TOKENS(UsdModelAPIAssetInfoKeys, USDMODEL_ASSET_INFO_KEYS);
+TF_DECLARE_PUBLIC_TOKENS(UsdModelAPIAssetInfoKeys, USD_API, USDMODEL_ASSET_INFO_KEYS);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -24,14 +24,22 @@
 #ifndef AR_ASSET_INFO_H
 #define AR_ASSET_INFO_H
 
+/// \file ar/assetInfo.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/ar/api.h"
 #include "pxr/base/vt/value.h"
 #include <string>
 
-/// \struct ArAssetInfo
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// \class ArAssetInfo
+///
 /// Contains information about a resolved asset.
-struct AR_API ArAssetInfo 
+///
+class ArAssetInfo 
 {
+public:
     /// Version of the resolved asset, if any.
     std::string version;
 
@@ -47,12 +55,16 @@ struct AR_API ArAssetInfo
     VtValue resolverInfo;
 };
 
+/// \relates ArAssetInfo
 AR_API
 bool 
 operator==(const ArAssetInfo& lhs, const ArAssetInfo& rhs);
 
+/// \relates ArAssetInfo
 AR_API
 bool 
 operator!=(const ArAssetInfo& lhs, const ArAssetInfo& rhs);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // AR_ASSET_INFO_H

@@ -24,32 +24,37 @@
 #ifndef SDF_CONNECTION_LIST_EDITOR_H
 #define SDF_CONNECTION_LIST_EDITOR_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/listOpListEditor.h"
-
 #include "pxr/usd/sdf/childrenPolicies.h"
 #include "pxr/usd/sdf/declareHandles.h"
 #include "pxr/usd/sdf/proxyPolicies.h"
 #include "pxr/usd/sdf/types.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 SDF_DECLARE_HANDLES(SdfSpec);
 class TfToken;
 
 /// \class Sdf_ConnectionListEditor
+///
 /// List editor implementation that ensures that the appropriate target
 /// specs are created or destroyed when connection/relationship targets are 
 /// added to the underlying list operation.
+///
 template <class ConnectionChildPolicy>
 class Sdf_ConnectionListEditor 
     : public Sdf_ListOpListEditor<SdfPathKeyPolicy>
 {
 protected:
+    virtual ~Sdf_ConnectionListEditor();
+
     Sdf_ConnectionListEditor(
         const SdfSpecHandle& connectionOwner,
         const TfToken& connectionListField,             
         const SdfPathKeyPolicy& typePolicy = SdfPathKeyPolicy());
     
-protected:
-    void _OnEdit(SdfListOpType op,
+    void _OnEditShared(SdfListOpType op,
         SdfSpecType specType,
         const std::vector<SdfPath>& oldItems,
         const std::vector<SdfPath>& newItems) const;
@@ -59,11 +64,15 @@ private:
 };
 
 /// \class Sdf_AttributeConnectionListEditor
+///
 /// List editor implementation for attribute connections.
+///
 class Sdf_AttributeConnectionListEditor
     : public Sdf_ConnectionListEditor<Sdf_AttributeConnectionChildPolicy>
 {
 public:
+    virtual ~Sdf_AttributeConnectionListEditor();
+
     Sdf_AttributeConnectionListEditor(
         const SdfSpecHandle& owner,
         const SdfPathKeyPolicy& typePolicy = SdfPathKeyPolicy());
@@ -76,11 +85,15 @@ private:
 };
 
 /// \class Sdf_RelationshipTargetListEditor
+///
 /// List editor implementation for attribute connections.
+///
 class Sdf_RelationshipTargetListEditor
     : public Sdf_ConnectionListEditor<Sdf_RelationshipTargetChildPolicy>
 {
 public:
+    virtual ~Sdf_RelationshipTargetListEditor();
+
     Sdf_RelationshipTargetListEditor(
         const SdfSpecHandle& owner,
         const SdfPathKeyPolicy& typePolicy = SdfPathKeyPolicy());
@@ -91,5 +104,7 @@ public:
 private:
     typedef Sdf_ConnectionListEditor<Sdf_RelationshipTargetChildPolicy> Parent;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_CONNECTION_LIST_EDITOR_H

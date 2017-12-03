@@ -33,14 +33,25 @@
 #include <iostream>
 #include <sstream>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 HdChangeTracker::HdChangeTracker() 
-    : _needsGarbageCollection(false)
+    : _rprimState()
+    , _instancerState()
+    , _taskState()
+    , _sprimState()
+    , _bprimState()
+    , _extComputationState()
+    , _generalState()
+    , _collectionState()
+    , _needsGarbageCollection(false)
+    , _instancerRprimMap()
     , _varyingStateVersion(1)
     , _indexVersion(0)
     , _changeCount(1)       // changeCount in DirtyList starts from 0.
     , _visChangeCount(1)    // Clients (commandBuffer) start from 0.
     , _shaderBindingsVersion(1)
-    , _drawTargetSetVersion(1) // Clients (draw target task) start from 0.
 {
     /*NOTHING*/
 }
@@ -48,7 +59,7 @@ HdChangeTracker::HdChangeTracker()
 HdChangeTracker::~HdChangeTracker()
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 }
 
 void 
@@ -64,7 +75,7 @@ HdChangeTracker::_LogCacheAccess(TfToken const& cacheName,
 }
 
 void
-HdChangeTracker::RprimInserted(SdfPath const& id, int initialDirtyState)
+HdChangeTracker::RprimInserted(SdfPath const& id, HdDirtyBits initialDirtyState)
 {
     TF_DEBUG(HD_RPRIM_ADDED).Msg("Rprim Added: %s\n", id.GetText());
     _rprimState[id] = initialDirtyState;
@@ -88,45 +99,27 @@ HdChangeTracker::RprimRemoved(SdfPath const& id)
     ++_varyingStateVersion;
 }
 
-/*static*/
-HdChangeTracker::DirtyBits
-HdChangeTracker::_PropagateDirtyBits(DirtyBits bits)
-{
-    // propagate point dirtiness to normal
-    bits |= (bits & DirtyPoints ? DirtyNormals : 0);
-
-    // when refine level changes, topology becomes dirty.
-    // XXX: can we remove DirtyRefineLevel then?
-    if (bits & DirtyRefineLevel) {
-        bits |=  DirtyTopology;
-    }
-
-    // if topology changes, all dependent bits become dirty.
-    if (bits & DirtyTopology) {
-        bits |= (DirtyPoints|
-                 DirtyNormals|
-                 DirtyPrimVar);
-    }
-    return bits;
-}
 
 void 
-HdChangeTracker::MarkRprimDirty(SdfPath const& id, DirtyBits bits)
+HdChangeTracker::MarkRprimDirty(SdfPath const& id, HdDirtyBits bits)
 {
-    bits = _PropagateDirtyBits(bits);
+    if (ARCH_UNLIKELY(bits == HdChangeTracker::Clean)) {
+        TF_CODING_ERROR("MarkRprimDirty called with bits == clean!");
+        return;
+    }
 
     _IDStateMap::iterator it = _rprimState.find(id);
-    if (not TF_VERIFY(it != _rprimState.end(), "%s\n", id.GetText()))
+    if (!TF_VERIFY(it != _rprimState.end(), "%s\n", id.GetText()))
         return;
 
-    // used for force-sync on new repr. don't touch changeCount
-    if (bits == HdChangeTracker::ForceSync) {
-        it->second |= HdChangeTracker::ForceSync;
+    // used ensure the repr has been created. don't touch changeCount
+    if (bits == HdChangeTracker::InitRepr) {
+        it->second |= HdChangeTracker::InitRepr;
         return;
     }
 
     // set Varying bit if it's not set
-    DirtyBits oldBits = it->second;
+    HdDirtyBits oldBits = it->second;
     if ((oldBits & HdChangeTracker::Varying) == 0) {
         // varying state changed.
         bits |= HdChangeTracker::Varying;
@@ -152,11 +145,11 @@ HdChangeTracker::ResetVaryingState()
 }
 
 void
-HdChangeTracker::MarkRprimClean(SdfPath const& id, DirtyBits newBits)
+HdChangeTracker::MarkRprimClean(SdfPath const& id, HdDirtyBits newBits)
 {
     TF_DEBUG(HD_RPRIM_CLEANED).Msg("Rprim Cleaned: %s\n", id.GetText());
     _IDStateMap::iterator it = _rprimState.find(id);
-    if (not TF_VERIFY(it != _rprimState.end()))
+    if (!TF_VERIFY(it != _rprimState.end()))
         return;
     // preserve the variability bit
     it->second = (it->second & Varying) | newBits;
@@ -176,50 +169,28 @@ HdChangeTracker::InstancerRemoved(SdfPath const& id)
     _instancerState.erase(id);
 }
 
-// -------------------------------------------------------------------------- //
-/// \name Shader Object Tracking
-// -------------------------------------------------------------------------- //
-
 void
-HdChangeTracker::ShaderInserted(SdfPath const& id)
+HdChangeTracker::InstancerRPrimInserted(SdfPath const& instancerId,
+                                        SdfPath const& rprimId)
 {
-    TF_DEBUG(HD_SHADER_ADDED).Msg("Shader Added: %s\n", id.GetText());
-    _shaderState[id] = AllDirty;
+    _instancerRprimMap[instancerId].insert(rprimId);
 }
 
 void
-HdChangeTracker::ShaderRemoved(SdfPath const& id)
+HdChangeTracker::InstancerRPrimRemoved(SdfPath const& instancerId, SdfPath const& rprimId)
 {
-    TF_DEBUG(HD_SHADER_REMOVED).Msg("Shader Removed: %s\n", id.GetText());
-    _shaderState.erase(id);
-}
-
-void
-HdChangeTracker::MarkShaderDirty(SdfPath const& id, DirtyBits bits)
-{
-    _IDStateMap::iterator it = _shaderState.find(id);
-    if (not TF_VERIFY(it != _shaderState.end()))
+    _InstancerRprimMap::iterator it = _instancerRprimMap.find(instancerId);
+    if (!TF_VERIFY(it != _instancerRprimMap.end()))
         return;
-    it->second = it->second | bits;
-}
 
-HdChangeTracker::DirtyBits
-HdChangeTracker::GetShaderDirtyBits(SdfPath const& id)
-{
-    _IDStateMap::iterator it = _shaderState.find(id);
-    if (not TF_VERIFY(it != _shaderState.end()))
-        return Clean;
-    return it->second;
-}
+    SdfPathSet &rprimSet = it->second;
 
-void
-HdChangeTracker::MarkShaderClean(SdfPath const& id, DirtyBits newBits)
-{
-    _IDStateMap::iterator it = _shaderState.find(id);
-    if (not TF_VERIFY(it != _shaderState.end()))
-        return;
-    // preserve the variability bit
-    it->second = (it->second & Varying) | newBits;
+    TF_VERIFY(rprimSet.erase(rprimId) != 0);
+
+    if (rprimSet.empty())
+    {
+        _instancerRprimMap.erase(it);
+    }
 }
 
 // -------------------------------------------------------------------------- //
@@ -241,74 +212,33 @@ HdChangeTracker::TaskRemoved(SdfPath const& id)
 }
 
 void
-HdChangeTracker::MarkTaskDirty(SdfPath const& id, DirtyBits bits)
+HdChangeTracker::MarkTaskDirty(SdfPath const& id, HdDirtyBits bits)
 {
+    if (ARCH_UNLIKELY(bits == HdChangeTracker::Clean)) {
+        TF_CODING_ERROR("MarkTaskDirty called with bits == clean!");
+        return;
+    }
+
     _IDStateMap::iterator it = _taskState.find(id);
-    if (not TF_VERIFY(it != _taskState.end()))
+    if (!TF_VERIFY(it != _taskState.end()))
         return;
     it->second = it->second | bits;
 }
 
-HdChangeTracker::DirtyBits
+HdDirtyBits
 HdChangeTracker::GetTaskDirtyBits(SdfPath const& id)
 {
     _IDStateMap::iterator it = _taskState.find(id);
-    if (not TF_VERIFY(it != _taskState.end()))
+    if (!TF_VERIFY(it != _taskState.end()))
         return Clean;
     return it->second;
 }
 
 void
-HdChangeTracker::MarkTaskClean(SdfPath const& id, DirtyBits newBits)
+HdChangeTracker::MarkTaskClean(SdfPath const& id, HdDirtyBits newBits)
 {
     _IDStateMap::iterator it = _taskState.find(id);
-    if (not TF_VERIFY(it != _taskState.end()))
-        return;
-    // preserve the variability bit
-    it->second = (it->second & Varying) | newBits;
-}
-
-// -------------------------------------------------------------------------- //
-/// \name Texture Object Tracking
-// -------------------------------------------------------------------------- //
-
-void
-HdChangeTracker::TextureInserted(SdfPath const& id)
-{
-    TF_DEBUG(HD_TEXTURE_ADDED).Msg("Texture Added: %s\n", id.GetText());
-    _textureState[id] = AllDirty;
-}
-
-void
-HdChangeTracker::TextureRemoved(SdfPath const& id)
-{
-    TF_DEBUG(HD_TEXTURE_REMOVED).Msg("Texture Removed: %s\n", id.GetText());
-    _textureState.erase(id);
-}
-
-void
-HdChangeTracker::MarkTextureDirty(SdfPath const& id, DirtyBits bits)
-{
-    _IDStateMap::iterator it = _textureState.find(id);
-    if (not TF_VERIFY(it != _textureState.end()))
-        return;
-    it->second = it->second | bits;
-}
-
-HdChangeTracker::DirtyBits
-HdChangeTracker::GetTextureDirtyBits(SdfPath const& id)
-{
-    _IDStateMap::iterator it = _textureState.find(id);
-    if (not TF_VERIFY(it != _textureState.end()))
-        return Clean;
-    return it->second;
-}
-
-void
-HdChangeTracker::MarkTextureClean(SdfPath const& id, DirtyBits newBits)
-{
-    _IDStateMap::iterator it = _textureState.find(id);
-    if (not TF_VERIFY(it != _textureState.end()))
+    if (!TF_VERIFY(it != _taskState.end()))
         return;
     // preserve the variability bit
     it->second = (it->second & Varying) | newBits;
@@ -318,187 +248,207 @@ HdChangeTracker::MarkTextureClean(SdfPath const& id, DirtyBits newBits)
 /// \name Instancer State Tracking
 // -------------------------------------------------------------------------- //
 
-HdChangeTracker::DirtyBits
+HdDirtyBits
 HdChangeTracker::GetInstancerDirtyBits(SdfPath const& id)
 {
     _IDStateMap::iterator it = _instancerState.find(id);
-    if (not TF_VERIFY(it != _instancerState.end()))
+    if (!TF_VERIFY(it != _instancerState.end()))
         return Clean;
     return it->second;
 }
 
 void
-HdChangeTracker::MarkInstancerDirty(SdfPath const& id, DirtyBits bits)
+HdChangeTracker::MarkInstancerDirty(SdfPath const& id, HdDirtyBits bits)
 {
+    if (ARCH_UNLIKELY(bits == HdChangeTracker::Clean)) {
+        TF_CODING_ERROR("MarkInstancerDirty called with bits == clean!");
+        return;
+    }
+
     _IDStateMap::iterator it = _instancerState.find(id);
-    if (not TF_VERIFY(it != _instancerState.end()))
+    if (!TF_VERIFY(it != _instancerState.end()))
         return;
 
     // not calling _PropagateDirtyBits here. Currenly instancer uses
     // scale, translate, rotate primvars and there's no dependency between them
     // unlike points and normals on rprim.
     it->second = it->second | bits;
+
+    // Now mark any associated rprims dirty.
+    _InstancerRprimMap::iterator mapIt = _instancerRprimMap.find(id);
+    if (mapIt != _instancerRprimMap.end()) {
+        SdfPathSet &rprimSet = mapIt->second;
+
+        for (SdfPathSet::iterator rprimIt =  rprimSet.begin();
+                                  rprimIt != rprimSet.end();
+                                  ++rprimIt) {
+            MarkRprimDirty(*rprimIt, DirtyInstancer);
+        }
+    }
 }
 
 void
-HdChangeTracker::MarkInstancerClean(SdfPath const& id, DirtyBits newBits)
+HdChangeTracker::MarkInstancerClean(SdfPath const& id, HdDirtyBits newBits)
 {
     TF_DEBUG(HD_INSTANCER_CLEANED).Msg("Instancer Cleaned: %s\n", id.GetText());
     _IDStateMap::iterator it = _instancerState.find(id);
-    if (not TF_VERIFY(it != _instancerState.end()))
+    if (!TF_VERIFY(it != _instancerState.end()))
         return;
     // preserve the variability bit
     it->second = (it->second & Varying) | newBits;
 }
 
 // -------------------------------------------------------------------------- //
-/// \name Camera Object Tracking
+/// \name Sprim Tracking (camera, light...)
 // -------------------------------------------------------------------------- //
 
 void
-HdChangeTracker::CameraInserted(SdfPath const& id)
+HdChangeTracker::SprimInserted(SdfPath const& id, HdDirtyBits initialDirtyState)
 {
-    TF_DEBUG(HD_CAMERA_ADDED).Msg("Camera Added: %s\n", id.GetText());
-    _cameraState[id] = AllDirty;
+    TF_DEBUG(HD_SPRIM_ADDED).Msg("Sprim Added: %s\n", id.GetText());
+    _sprimState[id] = initialDirtyState;
 }
 
 void
-HdChangeTracker::CameraRemoved(SdfPath const& id)
+HdChangeTracker::SprimRemoved(SdfPath const& id)
 {
-    TF_DEBUG(HD_CAMERA_REMOVED).Msg("Camera Removed: %s\n", id.GetText());
-    _cameraState.erase(id);
+    TF_DEBUG(HD_SPRIM_REMOVED).Msg("Sprim Removed: %s\n", id.GetText());
+    _sprimState.erase(id);
 }
 
-HdChangeTracker::DirtyBits
-HdChangeTracker::GetCameraDirtyBits(SdfPath const& id)
+HdDirtyBits
+HdChangeTracker::GetSprimDirtyBits(SdfPath const& id)
 {
-    _IDStateMap::iterator it = _cameraState.find(id);
-    if (not TF_VERIFY(it != _cameraState.end()))
+    _IDStateMap::iterator it = _sprimState.find(id);
+    if (!TF_VERIFY(it != _sprimState.end()))
         return Clean;
     return it->second;
 }
 
 void
-HdChangeTracker::MarkCameraDirty(SdfPath const& id, DirtyBits bits)
+HdChangeTracker::MarkSprimDirty(SdfPath const& id, HdDirtyBits bits)
 {
-    _IDStateMap::iterator it = _cameraState.find(id);
-    if (not TF_VERIFY(it != _cameraState.end()))
+    if (ARCH_UNLIKELY(bits == HdChangeTracker::Clean)) {
+        TF_CODING_ERROR("MarkSprimDirty called with bits == clean!");
+        return;
+    }
+
+    _IDStateMap::iterator it = _sprimState.find(id);
+    if (!TF_VERIFY(it != _sprimState.end()))
         return;
     it->second = it->second | bits;
 }
 
 void
-HdChangeTracker::MarkCameraClean(SdfPath const& id, DirtyBits newBits)
+HdChangeTracker::MarkSprimClean(SdfPath const& id, HdDirtyBits newBits)
 {
-    _IDStateMap::iterator it = _cameraState.find(id);
-    if (not TF_VERIFY(it != _cameraState.end()))
+    _IDStateMap::iterator it = _sprimState.find(id);
+    if (!TF_VERIFY(it != _sprimState.end()))
         return;
-    // preserve the variability bit
-    it->second = (it->second & Varying) | newBits;
+    it->second = newBits;
 }
 
 // -------------------------------------------------------------------------- //
-/// \name Light Object Tracking
+/// \name Bprim Tracking (texture, buffer...)
 // -------------------------------------------------------------------------- //
 
 void
-HdChangeTracker::LightInserted(SdfPath const& id)
+HdChangeTracker::BprimInserted(SdfPath const& id, HdDirtyBits initialDirtyState)
 {
-    TF_DEBUG(HD_LIGHT_ADDED).Msg("Light Added: %s\n", id.GetText());
-    _lightState[id] = AllDirty;
+    TF_DEBUG(HD_BPRIM_ADDED).Msg("Bprim Added: %s\n", id.GetText());
+    _bprimState[id] = initialDirtyState;
 }
 
 void
-HdChangeTracker::LightRemoved(SdfPath const& id)
+HdChangeTracker::BprimRemoved(SdfPath const& id)
 {
-    TF_DEBUG(HD_LIGHT_REMOVED).Msg("Light Removed: %s\n", id.GetText());
-    _lightState.erase(id);
+    TF_DEBUG(HD_BPRIM_REMOVED).Msg("Bprim Removed: %s\n", id.GetText());
+    _bprimState.erase(id);
 }
 
-HdChangeTracker::DirtyBits
-HdChangeTracker::GetLightDirtyBits(SdfPath const& id)
+HdDirtyBits
+HdChangeTracker::GetBprimDirtyBits(SdfPath const& id)
 {
-    _IDStateMap::iterator it = _lightState.find(id);
-    if (not TF_VERIFY(it != _lightState.end()))
+    _IDStateMap::iterator it = _bprimState.find(id);
+    if (!TF_VERIFY(it != _bprimState.end()))
         return Clean;
     return it->second;
 }
 
 void
-HdChangeTracker::MarkLightDirty(SdfPath const& id, DirtyBits bits)
+HdChangeTracker::MarkBprimDirty(SdfPath const& id, HdDirtyBits bits)
 {
-    _IDStateMap::iterator it = _lightState.find(id);
-    if (not TF_VERIFY(it != _lightState.end()))
+    if (ARCH_UNLIKELY(bits == HdChangeTracker::Clean)) {
+        TF_CODING_ERROR("MarkBprimDirty called with bits == clean!");
+        return;
+    }
+
+    _IDStateMap::iterator it = _bprimState.find(id);
+    if (!TF_VERIFY(it != _bprimState.end()))
         return;
     it->second = it->second | bits;
 }
 
 void
-HdChangeTracker::MarkLightClean(SdfPath const& id, DirtyBits newBits)
+HdChangeTracker::MarkBprimClean(SdfPath const& id, HdDirtyBits newBits)
 {
-    _IDStateMap::iterator it = _lightState.find(id);
-    if (not TF_VERIFY(it != _lightState.end()))
+    _IDStateMap::iterator it = _bprimState.find(id);
+    if (!TF_VERIFY(it != _bprimState.end()))
         return;
-    // preserve the variability bit
-    it->second = (it->second & Varying) | newBits;
+    it->second = newBits;
 }
 
-// -------------------------------------------------------------------------- //
-/// \name Draw Target Object Tracking
-// -------------------------------------------------------------------------- //
+// ---------------------------------------------------------------------- //
+/// \name ExtComputation Object Tracking
+// ---------------------------------------------------------------------- //
+void
+HdChangeTracker::ExtComputationInserted(SdfPath const& id,
+                                        HdDirtyBits initialDirtyState)
+{
+    TF_DEBUG(HD_EXT_COMPUTATION_ADDED).Msg("ExtComputation Added: %s\n",
+                                           id.GetText());
+    _extComputationState[id] = initialDirtyState;
+}
 
 void
-HdChangeTracker::DrawTargetInserted(SdfPath const& id)
+HdChangeTracker::ExtComputationRemoved(SdfPath const& id)
 {
-    _drawTargetState[id] = AllDirty;
-    ++_drawTargetSetVersion;
+    TF_DEBUG(HD_EXT_COMPUTATION_REMOVED).Msg("ExtComputation Removed: %s\n",
+                                             id.GetText());
+    _extComputationState.erase(id);
 }
 
 void
-HdChangeTracker::DrawTargetRemoved(SdfPath const& id)
+HdChangeTracker::MarkExtComputationDirty(SdfPath const& id, HdDirtyBits bits)
 {
-    _drawTargetState.erase(id);
-    ++_drawTargetSetVersion;
-}
-
-HdChangeTracker::DirtyBits
-HdChangeTracker::GetDrawTargetDirtyBits(SdfPath const& id)
-{
-    _IDStateMap::iterator it = _drawTargetState.find(id);
-    if (not TF_VERIFY(it != _drawTargetState.end())) {
-        return Clean;
+    if (ARCH_UNLIKELY(bits == HdChangeTracker::Clean)) {
+        TF_CODING_ERROR("MarkExtComputationDirty called with bits == clean!");
+        return;
     }
+
+    _IDStateMap::iterator it = _extComputationState.find(id);
+    if (!TF_VERIFY(it != _extComputationState.end()))
+        return;
+    it->second = it->second | bits;
+}
+
+HdDirtyBits
+HdChangeTracker::GetExtComputationDirtyBits(SdfPath const& id) const
+{
+    _IDStateMap::const_iterator it = _extComputationState.find(id);
+    if (!TF_VERIFY(it != _extComputationState.end()))
+        return Clean;
     return it->second;
 }
 
 void
-HdChangeTracker::MarkDrawTargetDirty(SdfPath const& id, DirtyBits bits)
+HdChangeTracker::MarkExtComputationClean(SdfPath const& id, HdDirtyBits newBits)
 {
-    _IDStateMap::iterator it = _drawTargetState.find(id);
-    if (not TF_VERIFY(it != _drawTargetState.end())) {
+    _IDStateMap::iterator it = _extComputationState.find(id);
+    if (!TF_VERIFY(it != _extComputationState.end()))
         return;
-    }
-    it->second = it->second | bits;
 
-    if (bits & DirtyDTEnable) {
-        ++_drawTargetSetVersion;
-    }
-}
-
-unsigned
-HdChangeTracker::GetDrawTargetSetVersion()
-{
-    return _drawTargetSetVersion;
-}
-
-void
-HdChangeTracker::MarkDrawTargetClean(SdfPath const& id, DirtyBits newBits)
-{
-    _IDStateMap::iterator it = _drawTargetState.find(id);
-    if (not TF_VERIFY(it != _drawTargetState.end()))
-        return;
-    // preserve the variability bit
-    it->second = (it->second & Varying) | newBits;
+    it->second =  newBits;
 }
 
 // -------------------------------------------------------------------------- //
@@ -580,155 +530,174 @@ HdChangeTracker::IsPrimVarDirty(SdfPath const& id, TfToken const& name)
 
 /*static*/
 bool 
-HdChangeTracker::IsTopologyDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsTopologyDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyTopology);
-    _LogCacheAccess(HdTokens->topology, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyTopology) != 0;
+    _LogCacheAccess(HdTokens->topology, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsDoubleSidedDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsDoubleSidedDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyDoubleSided);
-    _LogCacheAccess(HdTokens->doubleSided, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyDoubleSided) != 0;
+    _LogCacheAccess(HdTokens->doubleSided, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsCullStyleDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsCullStyleDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyCullStyle);
-    _LogCacheAccess(HdTokens->cullStyle, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyCullStyle) != 0;
+    _LogCacheAccess(HdTokens->cullStyle, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsRefineLevelDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsRefineLevelDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyRefineLevel);
-    _LogCacheAccess(HdTokens->refineLevel, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyRefineLevel) != 0;
+    _LogCacheAccess(HdTokens->refineLevel, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsSubdivTagsDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsSubdivTagsDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtySubdivTags);
-    _LogCacheAccess(HdTokens->subdivTags, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtySubdivTags) != 0;
+    _LogCacheAccess(HdTokens->subdivTags, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsTransformDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsTransformDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyTransform);
-    _LogCacheAccess(HdTokens->transform, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyTransform) != 0;
+    _LogCacheAccess(HdTokens->transform, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsVisibilityDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsVisibilityDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyVisibility);
-    _LogCacheAccess(HdTokens->visibility, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyVisibility) != 0;
+    _LogCacheAccess(HdTokens->visibility, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsExtentDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsExtentDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyExtent);
-    _LogCacheAccess(HdTokens->extent, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyExtent) != 0;
+    _LogCacheAccess(HdTokens->extent, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsPrimIdDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsPrimIdDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyPrimID);
-    _LogCacheAccess(HdTokens->primID, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyPrimID) != 0;
+    _LogCacheAccess(HdTokens->primID, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool 
-HdChangeTracker::IsInstancerDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsInstancerDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyInstancer);
-    _LogCacheAccess(HdTokens->instancer, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyInstancer) != 0;
+    _LogCacheAccess(HdTokens->instancer, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool
-HdChangeTracker::IsInstanceIndexDirty(DirtyBits dirtyBits, SdfPath const& id)
+HdChangeTracker::IsInstanceIndexDirty(HdDirtyBits dirtyBits, SdfPath const& id)
 {
-    bool isDirty = bool(dirtyBits & DirtyInstanceIndex);
-    _LogCacheAccess(HdTokens->instanceIndices, id, not isDirty);
+    bool isDirty = (dirtyBits & DirtyInstanceIndex) != 0;
+    _LogCacheAccess(HdTokens->instanceIndices, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool
-HdChangeTracker::IsAnyPrimVarDirty(DirtyBits dirtyBits, SdfPath const &id)
+HdChangeTracker::IsAnyPrimVarDirty(HdDirtyBits dirtyBits, SdfPath const &id)
 {
-    bool isDirty = bool(dirtyBits & (DirtyPoints|
-                                     DirtyNormals|
-                                     DirtyWidths|
-                                     DirtyPrimVar));
-    _LogCacheAccess(HdTokens->primVar, id, not isDirty);
+    bool isDirty = (dirtyBits & (DirtyPoints|
+                                 DirtyNormals|
+                                 DirtyWidths|
+                                 DirtyPrimVar)) != 0;
+    _LogCacheAccess(HdTokens->primVar, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool
-HdChangeTracker::IsPrimVarDirty(DirtyBits dirtyBits, SdfPath const& id,
+HdChangeTracker::IsPrimVarDirty(HdDirtyBits dirtyBits, SdfPath const& id,
                                 TfToken const& name)
 {
     bool isDirty = false;
     if (name == HdTokens->points) {
-        isDirty = dirtyBits & DirtyPoints;
+        isDirty = (dirtyBits & DirtyPoints) != 0;
     } else if (name == HdTokens->normals) {
-        isDirty = dirtyBits & DirtyNormals;
+        isDirty = (dirtyBits & DirtyNormals) != 0;
     } else if (name == HdTokens->widths) {
-        isDirty = dirtyBits & DirtyWidths;
+        isDirty = (dirtyBits & DirtyWidths) != 0;
     } else {
-        isDirty = dirtyBits & DirtyPrimVar;
+        isDirty = (dirtyBits & DirtyPrimVar) != 0;
     }
-    _LogCacheAccess(name, id, not isDirty);
+    _LogCacheAccess(name, id, !isDirty);
     return isDirty;
 }
 
 /*static*/
 bool
-HdChangeTracker::IsReprDirty(DirtyBits dirtyBits, SdfPath const &id)
+HdChangeTracker::IsReprDirty(HdDirtyBits dirtyBits, SdfPath const &id)
 {
-    bool isDirty = bool(dirtyBits & DirtyRepr);
+    bool isDirty = (dirtyBits & DirtyRepr) != 0;
     return isDirty;
 }
 
 void 
 HdChangeTracker::MarkPrimVarDirty(SdfPath const& id, TfToken const& name)
 {
-    DirtyBits flag = Clean;
+    HdDirtyBits flag = Clean;
     MarkPrimVarDirty(&flag, name);
     MarkRprimDirty(id, flag);
 }
 
+
+void
+HdChangeTracker::MarkAllRprimsDirty(HdDirtyBits bits)
+{
+    HD_TRACE_FUNCTION();
+
+    for (_IDStateMap::iterator it  = _rprimState.begin();
+                               it != _rprimState.end(); ++it) {
+        it->second |= bits;
+    }
+
+    ++_changeCount;
+
+    if (bits & DirtyVisibility) {
+        ++_visChangeCount;
+    }
+}
+
+
 /*static*/
 void
-HdChangeTracker::MarkPrimVarDirty(DirtyBits *dirtyBits, TfToken const &name)
+HdChangeTracker::MarkPrimVarDirty(HdDirtyBits *dirtyBits, TfToken const &name)
 {
-    DirtyBits setBits = Clean;
+    HdDirtyBits setBits = Clean;
     if (name == HdTokens->points) {
         setBits = DirtyPoints;
     } else if (name == HdTokens->normals) {
@@ -738,14 +707,14 @@ HdChangeTracker::MarkPrimVarDirty(DirtyBits *dirtyBits, TfToken const &name)
     } else {
         setBits = DirtyPrimVar;
     }
-    *dirtyBits |= _PropagateDirtyBits(setBits);
+    *dirtyBits |= setBits;
 }
 
-HdChangeTracker::DirtyBits
+HdDirtyBits
 HdChangeTracker::GetRprimDirtyBits(SdfPath const& id) const
 {
     _IDStateMap::const_iterator it = _rprimState.find(id);
-    if (not TF_VERIFY(it != _rprimState.end()))
+    if (!TF_VERIFY(it != _rprimState.end()))
         return Clean;
 
     // not masking the varying bit, since we use that bit
@@ -757,6 +726,8 @@ HdChangeTracker::GetRprimDirtyBits(SdfPath const& id) const
 void 
 HdChangeTracker::AddCollection(TfToken const& collectionName)
 {
+    HD_TRACE_FUNCTION();
+
     _CollectionStateMap::iterator it = _collectionState.find(collectionName);
     // if it already exists, just return.
     if (it != _collectionState.end()) {
@@ -768,8 +739,10 @@ HdChangeTracker::AddCollection(TfToken const& collectionName)
 void 
 HdChangeTracker::MarkCollectionDirty(TfToken const& collectionName)
 {
+    HD_TRACE_FUNCTION();
+
     _CollectionStateMap::iterator it = _collectionState.find(collectionName);
-    if (not TF_VERIFY(it != _collectionState.end(),
+    if (!TF_VERIFY(it != _collectionState.end(),
                       "Collection %s not found\n", collectionName.GetText())) {
         return;
     }
@@ -786,6 +759,8 @@ HdChangeTracker::MarkCollectionDirty(TfToken const& collectionName)
 void 
 HdChangeTracker::MarkAllCollectionsDirty()
 {
+    HD_TRACE_FUNCTION();
+
     ++_indexVersion;
     ++_varyingStateVersion;
 
@@ -797,10 +772,10 @@ HdChangeTracker::MarkAllCollectionsDirty()
 }
 
 unsigned
-HdChangeTracker::GetCollectionVersion(TfToken const& collectionName)
+HdChangeTracker::GetCollectionVersion(TfToken const& collectionName) const
 {
-    _CollectionStateMap::iterator it = _collectionState.find(collectionName);
-    if (not (it != _collectionState.end())) {
+    _CollectionStateMap::const_iterator it = _collectionState.find(collectionName);
+    if (!(it != _collectionState.end())) {
         TF_CODING_ERROR("Change Tracker unable to find collection %s",
                         collectionName.GetText());
         return _indexVersion;
@@ -809,7 +784,7 @@ HdChangeTracker::GetCollectionVersion(TfToken const& collectionName)
 }
 
 unsigned
-HdChangeTracker::GetVisibilityChangeCount()
+HdChangeTracker::GetVisibilityChangeCount() const
 {
     return _visChangeCount;
 }
@@ -826,9 +801,52 @@ HdChangeTracker::GetShaderBindingsVersion() const
     return _shaderBindingsVersion;
 }
 
+unsigned
+HdChangeTracker::GetRenderIndexVersion() const
+{
+    return _indexVersion;
+}
+
+void
+HdChangeTracker::AddState(TfToken const& name)
+{
+    _GeneralStateMap::iterator it = _generalState.find(name);
+    if (it != _generalState.end()) {
+        // mark state dirty
+        ++it->second;
+    } else {
+        _generalState[name] = 1;
+    }
+}
+
+void
+HdChangeTracker::MarkStateDirty(TfToken const& name)
+{
+    _GeneralStateMap::iterator it = _generalState.find(name);
+    if (it != _generalState.end()) {
+        ++it->second;
+    } else {
+        TF_CODING_ERROR("Change Tracker unable to find state %s",
+                        name.GetText());
+    }
+}
+
+unsigned
+HdChangeTracker::GetStateVersion(TfToken const &name) const
+{
+    _GeneralStateMap::const_iterator it = _generalState.find(name);
+    if (it != _generalState.end()) {
+        return it->second;
+    } else {
+        TF_CODING_ERROR("Change Tracker unable to find state %s",
+                        name.GetText());
+        return 0;
+    }
+}
+
 /*static*/
 std::string
-HdChangeTracker::StringifyDirtyBits(int dirtyBits)
+HdChangeTracker::StringifyDirtyBits(HdDirtyBits dirtyBits)
 {
     if (dirtyBits == HdChangeTracker::Clean) {
         return std::string("Clean");
@@ -839,8 +857,8 @@ HdChangeTracker::StringifyDirtyBits(int dirtyBits)
     if (dirtyBits & Varying) {
         ss << "<Varying> ";
     }
-    if (dirtyBits & ForceSync) {
-        ss << "<ForceSync> ";
+    if (dirtyBits & InitRepr) {
+        ss << "<InitRepr> ";
     }
     if (dirtyBits & DirtyPrimID) {
         ss << " PrimID ";
@@ -857,8 +875,8 @@ HdChangeTracker::StringifyDirtyBits(int dirtyBits)
     if (dirtyBits & DirtyPrimVar) {
         ss << "PrimVar ";
     }
-    if (dirtyBits & DirtySurfaceShader) {
-        ss << "SurfaceShader ";
+    if (dirtyBits & DirtyMaterialId) {
+        ss << "MaterialId ";
     }
     if (dirtyBits & DirtyTopology) {
         ss << "Topology ";
@@ -904,10 +922,13 @@ HdChangeTracker::StringifyDirtyBits(int dirtyBits)
 
 /*static*/
 void
-HdChangeTracker::DumpDirtyBits(int dirtyBits)
+HdChangeTracker::DumpDirtyBits(HdDirtyBits dirtyBits)
 {
     std::cerr
         << "DirtyBits:"
         << HdChangeTracker::StringifyDirtyBits(dirtyBits)
         << "\n";
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

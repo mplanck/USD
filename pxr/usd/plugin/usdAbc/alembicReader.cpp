@@ -23,18 +23,18 @@
 //
 /// \file alembicReader.cpp
 
+#include "pxr/pxr.h"
 #include "pxr/usd/usdAbc/alembicReader.h"
 #include "pxr/usd/usdAbc/alembicUtil.h"
 #include "pxr/usd/usdGeom/tokens.h"
 #include "pxr/usd/usdGeom/xformable.h"
 #include "pxr/usd/sdf/schema.h"
+#include "pxr/base/work/threadLimits.h"
 #include "pxr/base/tracelite/trace.h"
 #include "pxr/base/tf/envSetting.h"
 #include "pxr/base/tf/staticData.h"
 #include "pxr/base/tf/staticTokens.h"
 #include "pxr/base/tf/ostreamMethods.h"
-#include <boost/bind.hpp>
-#include <boost/foreach.hpp>
 #include <boost/type_traits/is_base_of.hpp>
 #include <boost/utility/enable_if.hpp>
 #include <Alembic/Abc/ArchiveInfo.h>
@@ -43,7 +43,15 @@
 #include <Alembic/Abc/ITypedArrayProperty.h>
 #include <Alembic/Abc/ITypedScalarProperty.h>
 #include <Alembic/AbcCoreAbstract/Foundation.h>
+
+#ifdef PXR_MULTIVERSE_SUPPORT_ENABLED
+#include <Alembic/AbcCoreGit/All.h>
+#endif // PXR_MULTIVERSE_SUPPORT_ENABLED
+
+#ifdef PXR_HDF5_SUPPORT_ENABLED
 #include <Alembic/AbcCoreHDF5/All.h>
+#endif // PXR_HDF5_SUPPORT_ENABLED
+
 #include <Alembic/AbcCoreOgawa/All.h>
 #include <Alembic/AbcGeom/GeometryScope.h>
 #include <Alembic/AbcGeom/ICamera.h>
@@ -54,7 +62,11 @@
 #include <Alembic/AbcGeom/IXform.h>
 #include <Alembic/AbcGeom/SchemaInfoDeclarations.h>
 #include <Alembic/AbcGeom/Visibility.h>
+#include <memory>
 #include <mutex>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // Define this to dump the namespace hierarchy as we traverse Alembic.
 //#define USDABC_ALEMBIC_DEBUG
@@ -69,15 +81,28 @@ TF_DEFINE_ENV_SETTING(
     USD_ABC_WARN_ALL_UNSUPPORTED_VALUES, false,
     "Issue warnings for all unsupported values encountered.");
 
+TF_DEFINE_ENV_SETTING(
+    USD_ABC_NUM_OGAWA_STREAMS, 4,
+    "The number of threads available for reading ogawa-backed files via UsdAbc.");
+
 namespace {
 
 using namespace ::Alembic::AbcGeom;
-using namespace ::UsdAbc_AlembicUtil;
+using namespace UsdAbc_AlembicUtil;
 
+static size_t
+_GetNumOgawaStreams()
+{
+    return std::min(TfGetEnvSetting(USD_ABC_NUM_OGAWA_STREAMS),
+                    static_cast<int>(WorkGetConcurrencyLimit()));
+}
+
+#ifdef PXR_HDF5_SUPPORT_ENABLED
 // A global mutex until our HDF5 library is thread safe.  It has to be
 // recursive to handle the case where we write an Alembic file using an
 // UsdAbc_AlembicData as the source.
 static TfStaticData<std::recursive_mutex> _hdf5;
+#endif // PXR_HDF5_SUPPORT_ENABLED
 
 // The SdfAbstractData time samples type.
 // XXX: SdfAbstractData should typedef this.
@@ -109,7 +134,7 @@ _GetAlembicPath(const IScalarProperty& p)
     const std::string propName = TfStringJoin(names.rbegin(), names.rend(),".");
 
     std::string path = p.getObject().getFullName();
-    if (not propName.empty() and propName[0] != '.') {
+    if (!propName.empty() && propName[0] != '.') {
         path += '.';
     }
     path += propName;
@@ -201,7 +226,7 @@ struct _AlembicFixName {
 struct _AlembicFixNamespacedName {
     char operator()(char x) const
     {
-        return isalnum(x) or x == ':' ? x : '_';
+        return isalnum(x) || x == ':' ? x : '_';
     }
 };
 
@@ -233,7 +258,7 @@ _CleanName(
         name = TfStringTrimLeft(name, trimLeading);
 
         // If name is not a valid identifier then substitute characters.
-        if (not test(name)) {
+        if (!test(name)) {
             std::transform(name.begin(), name.end(), name.begin(), fixer);
         }
     }
@@ -275,7 +300,7 @@ _GetBoolMetadata(
     const TfToken& field)
 {
     std::string value = alembicMetadata.get(_AmdName(field));
-    if (not value.empty()) {
+    if (!value.empty()) {
         usdMetadata[field] = VtValue(value == "true");
     }
 }
@@ -288,7 +313,7 @@ _GetStringMetadata(
     const TfToken& field)
 {
     std::string value = alembicMetadata.get(_AmdName(field));
-    if (not value.empty()) {
+    if (!value.empty()) {
         usdMetadata[field] = VtValue(value);
     }
 }
@@ -301,7 +326,7 @@ _GetTokenMetadata(
     const TfToken& field)
 {
     std::string value = alembicMetadata.get(_AmdName(field));
-    if (not value.empty()) {
+    if (!value.empty()) {
         usdMetadata[field] = VtValue(TfToken(value));
     }
 }
@@ -314,7 +339,7 @@ _GetDoubleMetadata(
     const TfToken& field)
 {
     std::string value = alembicMetadata.get(_AmdName(field));
-    if (not value.empty()) {
+    if (!value.empty()) {
         char* end;
         const double v = strtod(value.c_str(), &end);
         if (*end == '\0') {
@@ -619,6 +644,7 @@ public:
         MetadataMap metadata;
         TimeSamples sampleTimes;
         bool timeSampled;
+        bool uniform;
         Converter converter;
     };
     typedef std::map<TfToken, Property> PropertyMap;
@@ -653,10 +679,10 @@ public:
     /// Close the archive.
     void Close();
 
-    /// Sets the writer schema.
+    /// Sets the reader schema.
     void SetSchema(const _ReaderSchema* schema) { _schema = schema; }
 
-    /// Returns the writer schema.
+    /// Returns the reader schema.
     const _ReaderSchema& GetSchema() const { return *_schema; }
 
     /// Sets or resets the flag named \p flagName.
@@ -739,6 +765,8 @@ private:
     bool _OpenHDF5(const std::string& filePath, IArchive*,
                    std::string* format, std::recursive_mutex** mutex) const;
     bool _OpenOgawa(const std::string& filePath, IArchive*,
+                    std::string* format, std::recursive_mutex** mutex) const;
+    bool _OpenGit(const std::string& filePath, IArchive*,
                     std::string* format, std::recursive_mutex** mutex) const;
 
     // Walk the object hierarchy looking for instances and instance sources.
@@ -845,8 +873,9 @@ _ReaderContext::Open(const std::string& filePath, std::string* errorLog)
 
     IArchive archive;
     std::string format;
-    if (not (_OpenOgawa(filePath, &archive, &format, &_mutex) or
-             _OpenHDF5(filePath, &archive, &format, &_mutex))) {
+    if (!(_OpenOgawa(filePath, &archive, &format, &_mutex) ||
+          _OpenHDF5(filePath, &archive, &format, &_mutex) ||
+          _OpenGit(filePath, &archive, &format, &_mutex))) {
         *errorLog = "Unsupported format";
         return false;
     }
@@ -890,7 +919,7 @@ _ReaderContext::Open(const std::string& filePath, std::string* errorLog)
 
     // Collect instancing information.
     // Skipping this step makes later code expand instances.
-    if (not IsFlagSet(UsdAbc_AlembicContextFlagNames->expandInstances)) {
+    if (!IsFlagSet(UsdAbc_AlembicContextFlagNames->expandInstances)) {
         // Find the instance sources and their instances.
         _SourceToInstancesMap instances;
         _FindInstances(root, &instances);
@@ -913,9 +942,9 @@ _ReaderContext::Open(const std::string& filePath, std::string* errorLog)
     // but the order doesn't really matter.  We also note here the Alembic
     // source path for each master and whether it's instanceable or not
     // (which is chosen simply by the disableInstancing flag).
-    if (not _instanceSources.empty()) {
+    if (!_instanceSources.empty()) {
         const bool instanceable =
-            not IsFlagSet(UsdAbc_AlembicContextFlagNames->disableInstancing);
+            !IsFlagSet(UsdAbc_AlembicContextFlagNames->disableInstancing);
         std::map<SdfPath, std::string> masters;
         for (const _SourceToMasterMap::value_type& v: _instanceSources) {
             masters[v.second.path] = v.first;
@@ -929,7 +958,7 @@ _ReaderContext::Open(const std::string& filePath, std::string* errorLog)
     }
 
     // Guess the start and end timeCode using the sample times.
-    if (not _allTimeSamples.empty()) {
+    if (!_allTimeSamples.empty()) {
         _pseudoRoot->metadata[SdfFieldKeys->StartTimeCode] =
             *_allTimeSamples.begin();
         _pseudoRoot->metadata[SdfFieldKeys->EndTimeCode]   =
@@ -970,7 +999,7 @@ _ReaderContext::Open(const std::string& filePath, std::string* errorLog)
     }
 
     // If no default prim then choose one by a heuristic (first root prim).
-    if (not _pseudoRoot->children.empty()) {
+    if (!_pseudoRoot->children.empty()) {
         _pseudoRoot->metadata.insert(
             std::make_pair(SdfFieldKeys->DefaultPrim,
                            VtValue(_pseudoRoot->children.front())));
@@ -1066,14 +1095,14 @@ _ReaderContext::ConvertSampleTimes(
     // it's really big then we assume it's TidSceneObject::FRAME_UNVARYING
     // or FRAME_INVALID except possibly scaled by frame rate.  In this
     // case we just use 0.0.
-    if (alembicTimes.size() == 1 and
+    if (alembicTimes.size() == 1 && 
         GfAbs(alembicTimes[0]) > std::numeric_limits<double>::max() / 100.0) {
         result[0] = 0.0;
         return TimeSamples(result);
     }
 
     // Special case.
-    if (_timeScale == 1.0 and _timeOffset == 0.0) {
+    if (_timeScale == 1.0 && _timeOffset == 0.0) {
         std::copy(alembicTimes.begin(), alembicTimes.end(), result.begin());
     }
     else {
@@ -1175,19 +1204,18 @@ _ReaderContext::VisitSpecs(
     SdfAbstractDataSpecVisitor* visitor) const
 {
     // Visit prims in path sorted order.
-    BOOST_FOREACH(const _PrimMap::value_type& v, _prims) {
+    for (const auto& v : _prims) {
         // Visit the prim.
         const SdfPath& primPath = v.first;
-        if (not visitor->VisitSpec(owner, SdfAbstractDataSpecId(&primPath))) {
+        if (!visitor->VisitSpec(owner, SdfAbstractDataSpecId(&primPath))) {
             return;
         }
 
         // Visit the prim's properties in lexicographical sorted order.
         const Prim& prim = v.second;
         if (&prim != _pseudoRoot) {
-            BOOST_FOREACH(const PropertyMap::value_type& w,
-                          prim.propertiesCache) {
-                if (not visitor->VisitSpec(owner,
+            for (const auto& w : prim.propertiesCache) {
+                if (!visitor->VisitSpec(owner,
                             SdfAbstractDataSpecId(&primPath, &w.first))) {
                     return;
                 }
@@ -1212,24 +1240,23 @@ _ReaderContext::List(const SdfAbstractDataSpecId& id) const
                 if (property->timeSampled) {
                     result.push_back(SdfFieldKeys->TimeSamples);
                 }
-                else if (not property->sampleTimes.IsEmpty()) {
+                else if (!property->sampleTimes.IsEmpty()) {
                     result.push_back(SdfFieldKeys->Default);
                 }
 
                 // Add metadata.
-                BOOST_FOREACH(const MetadataMap::value_type& v,
-                              property->metadata) {
+                for (const auto& v : property->metadata) {
                     result.push_back(v.first);
                 }
             }
         }
         else {
             if (prim != _pseudoRoot) {
-                if (not prim->typeName.IsEmpty()) {
+                if (!prim->typeName.IsEmpty()) {
                     result.push_back(SdfFieldKeys->TypeName);
                 }
                 result.push_back(SdfFieldKeys->Specifier);
-                if (not prim->properties.empty()) {
+                if (!prim->properties.empty()) {
                     result.push_back(SdfChildrenKeys->PropertyChildren);
                 }
                 if (prim->primOrdering) {
@@ -1238,20 +1265,20 @@ _ReaderContext::List(const SdfAbstractDataSpecId& id) const
                 if (prim->propertyOrdering) {
                     result.push_back(SdfFieldKeys->PropertyOrder);
                 }
-                if (not prim->master.IsEmpty()) {
+                if (!prim->master.IsEmpty()) {
                     result.push_back(SdfFieldKeys->References);
                 }
-                if (not prim->instanceSource.empty()) {
+                if (!prim->instanceSource.empty()) {
                     result.push_back(SdfFieldKeys->CustomData);
                 }
-                if (prim->instanceable and not prim->instanceSource.empty()) {
+                if (prim->instanceable && !prim->instanceSource.empty()) {
                     result.push_back(SdfFieldKeys->Instanceable);
                 }
             }
-            if (not prim->children.empty()) {
+            if (!prim->children.empty()) {
                 result.push_back(SdfChildrenKeys->PrimChildren);
             }
-            BOOST_FOREACH(const MetadataMap::value_type& v, prim->metadata) {
+            for (const auto& v : prim->metadata) {
                 result.push_back(v.first);
             }
         }
@@ -1292,6 +1319,7 @@ _ReaderContext::_OpenHDF5(
     std::string* format,
     std::recursive_mutex** mutex) const
 {
+#ifdef PXR_HDF5_SUPPORT_ENABLED
     // HDF5 may not be thread-safe.
     std::lock_guard<std::recursive_mutex> lock(*_hdf5);
 
@@ -1304,6 +1332,9 @@ _ReaderContext::_OpenHDF5(
         return true;
     }
     return false;
+#else
+    return false;
+#endif // PXR_HDF5_SUPPORT_ENABLED
 }
 
 bool
@@ -1314,9 +1345,26 @@ _ReaderContext::_OpenOgawa(
     std::recursive_mutex** mutex) const
 {
     *format = "Ogawa";
-    *result = IArchive(Alembic::AbcCoreOgawa::ReadArchive(),
+    *result = IArchive(Alembic::AbcCoreOgawa::ReadArchive(_GetNumOgawaStreams()),
                        filePath, ErrorHandler::kQuietNoopPolicy);
     return *result;
+}
+
+bool
+_ReaderContext::_OpenGit(
+    const std::string& filePath,
+    IArchive* result,
+    std::string* format,
+    std::recursive_mutex** mutex) const
+{
+#ifdef PXR_MULTIVERSE_SUPPORT_ENABLED
+    *format = "Git";
+    *result = IArchive(Alembic::AbcCoreGit::ReadArchive(),
+                       filePath, ErrorHandler::kQuietNoopPolicy);
+    return *result;
+#else
+    return false;
+#endif // PXR_MULTIVERSE_SUPPORT_ENABLED
 }
 
 void
@@ -1361,10 +1409,10 @@ _ReaderContext::_FindPromotable(
         }
 
         // Source must be an IGeomBase and its parent must be an IXform.
-        if (not IGeomBase::matches(source->getMetaData())) {
+        if (!IGeomBase::matches(source->getMetaData())) {
             continue;
         }
-        if (not IXform::matches(source->getParent()->getMetaData())) {
+        if (!IXform::matches(source->getParent()->getMetaData())) {
             continue;
         }
 
@@ -1470,7 +1518,7 @@ _ReaderContext::_HasField(
     const UsdAbc_AlembicDataAny& value) const
 {
     if (fieldName == SdfChildrenKeys->PrimChildren) {
-        if (not prim->children.empty()) {
+        if (!prim->children.empty()) {
             return value.Set(prim->children);
         }
     }
@@ -1493,7 +1541,7 @@ _ReaderContext::_HasField(
             return value.Set(prim->specifier);
         }
         else if (fieldName == SdfChildrenKeys->PropertyChildren) {
-            if (not prim->properties.empty()) {
+            if (!prim->properties.empty()) {
                 return value.Set(prim->properties);
             }
         }
@@ -1502,7 +1550,7 @@ _ReaderContext::_HasField(
             // we copy the instance source to a new root master prim and
             // the instance source becomes just another instance of the
             // master.  This gives us a breadcrumb to follow back.
-            if (not prim->instanceSource.empty()) {
+            if (!prim->instanceSource.empty()) {
                 static const std::string key("abcInstanceSourcePath");
                 VtDictionary data;
                 data[key] = VtValue(prim->instanceSource);
@@ -1510,12 +1558,12 @@ _ReaderContext::_HasField(
             }
         }
         else if (fieldName == SdfFieldKeys->Instanceable) {
-            if (not prim->instanceSource.empty()) {
+            if (!prim->instanceSource.empty()) {
                 return value.Set(prim->instanceable);
             }
         }
         else if (fieldName == SdfFieldKeys->References) {
-            if (not prim->master.IsEmpty()) {
+            if (!prim->master.IsEmpty()) {
                 SdfReferenceListOp refs;
                 SdfReferenceVector items;
                 items.push_back(SdfReference(std::string(), prim->master));
@@ -1544,7 +1592,7 @@ _ReaderContext::_HasField(
         // No default value if we're time sampled.  Alembic does not
         // distinguish default and time samples so we either have one
         // sample (the default) or more than one sample (time sampled).
-        if (not property->timeSampled and not property->sampleTimes.IsEmpty()){
+        if (!property->timeSampled && !property->sampleTimes.IsEmpty()){
             return _HasValue(property, ISampleSelector(), value);
         }
     }
@@ -1572,7 +1620,11 @@ _ReaderContext::_HasField(
     else if (fieldName == SdfFieldKeys->TypeName) {
         return value.Set(property->typeName.GetAsToken());
     }
-
+    else if (fieldName == SdfFieldKeys->Variability) {
+        return value.Set(property->uniform ? 
+                         SdfVariabilityUniform : SdfVariabilityVarying);
+    }
+    
     TRACE_SCOPE("UsdAbc_AlembicDataReader::_HasField:OtherMetadata");
     MetadataMap::const_iterator j = property->metadata.find(fieldName);
     if (j != property->metadata.end()) {
@@ -1591,7 +1643,7 @@ _ReaderContext::_HasValue(
     TRACE_FUNCTION();
 
     // Check if no conversion available.
-    if (not property->converter) {
+    if (!property->converter) {
         return false;
     }
 
@@ -1767,6 +1819,15 @@ public:
     template <class T>
     void AddProperty(const TfToken& name, const SdfValueTypeName& typeName,
                      const T& converter);
+
+    /// Adds a uniform property named \p name of type \p typeName with the
+    /// converter \p converter.  \p converter must be a functor object that
+    /// conforms to the \c IsValid, \c Converter, \c GetSampleTimes and
+    /// \c GetMetaData types.  If \p convert is invalid then this does nothing.
+    template <class T>
+    void AddUniformProperty(const TfToken& name, 
+                            const SdfValueTypeName& typeName,
+                            const T& converter);
 
     /// Add an out-of-schema property, which uses the default conversion
     /// for whatever Alembic type the property is.  If \p property is a
@@ -1984,6 +2045,21 @@ _PrimReaderContext::AddProperty(
     }
 }
 
+template <class T>
+void
+_PrimReaderContext::AddUniformProperty(
+    const TfToken& name,
+    const SdfValueTypeName& typeName,
+    const T& converter)
+{
+    if (converter(IsValidTag())) {
+        Property &prop = _AddProperty(name, typeName, converter, converter, false);
+        prop.converter=converter;
+        prop.uniform = true;
+        prop.timeSampled = false;
+    }
+}
+
 void
 _PrimReaderContext::AddOutOfSchemaProperty(
     const std::string& name,
@@ -1991,7 +2067,7 @@ _PrimReaderContext::AddOutOfSchemaProperty(
 {
     // Get property info.
     const PropertyHeader* header = property.GetHeader();
-    if (not header) {
+    if (!header) {
         // No such property.
         return;
     }
@@ -2045,10 +2121,11 @@ _PrimReaderContext::AddOutOfSchemaProperty(
             _AddProperty(TfToken(name), usdTypeName, header->getMetaData(), 
                      sampleTimes, isOutOfSchema);
 
-        prop.converter = boost::bind(
+        prop.converter = std::bind(
             _context.GetSchema().GetConversions().GetToUsdConverter(
                 alembicType, prop.typeName),
-            property.GetParent(), property.GetName(), _2, _1);
+            property.GetParent(), property.GetName(),
+            std::placeholders::_2, std::placeholders::_1);
     }
     else {
         TF_WARN("No conversion for \"%s\" of type \"%s\" at <%s>",
@@ -2106,13 +2183,14 @@ _PrimReaderContext::_AddProperty(
 
     // Save the time sampling.
     property.sampleTimes = _context.ConvertSampleTimes(sampleTimes);
-    property.timeSampled = (property.sampleTimes.GetSize() > 1);
+    property.timeSampled = (property.sampleTimes.GetSize() > 0);
+
+    // Save metadata.  This may change the value of 'timeSampled'
+    _GetPropertyMetadata(metadata, &property, isOutOfSchemaProperty);
+
     if (property.timeSampled) {
         _context.AddSampleTimes(property.sampleTimes);
     }
-
-    // Save metadata.
-    _GetPropertyMetadata(metadata, &property, isOutOfSchemaProperty);
 
 #ifdef USDABC_ALEMBIC_DEBUG
     fprintf(stdout, "%*s%s%s %s\n",
@@ -2147,15 +2225,17 @@ _PrimReaderContext::_GetPropertyMetadata(
     }
 
     // Type name.
-    if (not property->typeName) {
+    if (!property->typeName) {
         property->typeName =
             SdfSchema::GetInstance().FindType(
                 alembicMetadata.get(_AmdName(SdfFieldKeys->TypeName)));
     }
 
-    // Note if we're time sampled (regardless of the number of samples).
-    if (alembicMetadata.get(_AmdName(SdfFieldKeys->TimeSamples)) == "true") {
-        property->timeSampled = true;
+    // If there's only one timeSample and we've indicated it should be 
+    // converted into Default, disable timeSampling.
+    if (property->sampleTimes.GetSize() == 1 && 
+        alembicMetadata.get(_AmdName(UsdAbcCustomMetadata->singleSampleAsDefault)) == "true") {
+        property->timeSampled = false;
     }
 
     // Adjust the type name by the interpretation.
@@ -2164,10 +2244,10 @@ _PrimReaderContext::_GetPropertyMetadata(
                            _GetRole(alembicMetadata.get("interpretation")));
 
     // Set the interpolation if there is one.
-    if (not alembicMetadata.get("geoScope").empty()) {
+    if (!alembicMetadata.get("geoScope").empty()) {
         const TfToken interpolation =
             _GetInterpolation(GetGeometryScope(alembicMetadata));
-        if (not interpolation.IsEmpty()) {
+        if (!interpolation.IsEmpty()) {
             usdMetadata[UsdGeomTokens->interpolation] = VtValue(interpolation);
         }
     }
@@ -2427,12 +2507,12 @@ struct _CopyXform {
     const MetaData& operator()(_MetaDataTag) const
     {
         // Extract any metadata provided by the Usd Alembic writer.
-        if (not _metadata) {
+        if (!_metadata) {
             _metadata = MetaData();
             const MetaData& srcMetadata = object.getMetaData();
             for (MetaData::const_iterator i  = srcMetadata.begin();
                                           i != srcMetadata.end(); ++i) {
-                if (not i->second.empty() and
+                if (!i->second.empty() && 
                         i->first.compare(0, 14, "Usd.transform:") == 0) {
                     _metadata->set(i->first.substr(14), i->second);
                 }
@@ -2584,6 +2664,23 @@ struct _CopyCameraVerticalApertureOffset : _CopyCameraBase {
     }
 };
 
+/// Class to copy clippingRange
+struct _CopyCameraClippingRange : _CopyCameraBase {
+    using _CopyCameraBase::operator();
+
+    _CopyCameraClippingRange(const ICamera& object_)
+        : _CopyCameraBase(object_) {};
+
+    bool operator()(const UsdAbc_AlembicDataAny& dst,
+                    const ISampleSelector& iss) const
+    {
+        const CameraSample sample = object.getSchema().getValue(iss);
+
+        return dst.Set(GfVec2f(sample.getNearClippingPlane(), 
+                               sample.getFarClippingPlane()));
+    }
+};
+
 /// Copy a subdivision scheme from an IStringProperty.
 struct _CopySubdivisionScheme : _CopyGeneric<IStringProperty> {
     _CopySubdivisionScheme(const AlembicProperty& object_) :
@@ -2595,7 +2692,7 @@ struct _CopySubdivisionScheme : _CopyGeneric<IStringProperty> {
                     const ISampleSelector& iss) const
     {
         const std::string value = object.getValue(iss);
-        if (value.empty() or value == "catmull-clark") {
+        if (value.empty() || value == "catmull-clark") {
             return dst.Set(UsdGeomTokens->catmullClark);
         }
         if (value == "loop") {
@@ -2784,7 +2881,7 @@ _ReadOther(_PrimReaderContext* context)
 {
     // Read every unextracted property to Usd using default converters.
     // This handles any property we don't have specific rules for.
-    BOOST_FOREACH(const std::string& name, context->GetUnextractedNames()) {
+    for (const auto& name : context->GetUnextractedNames()) {
         context->AddOutOfSchemaProperty(
             context->GetUsdName(name), context->Extract(name));
     }
@@ -2797,8 +2894,7 @@ _ReadOtherSchema(_PrimReaderContext* context)
 {
     // Read every unextracted property to Usd using default converters.
     // This handles any property we don't have specific rules for.
-    BOOST_FOREACH(const std::string& name,
-                  context->GetUnextractedSchemaNames()) {
+    for (const auto& name : context->GetUnextractedSchemaNames()) {
         context->AddOutOfSchemaProperty(
             context->GetUsdName(name), context->ExtractSchema(name));
     }
@@ -2820,7 +2916,7 @@ _ReadOrientation(_PrimReaderContext* context)
         // Alembic is effectively hardcoded to a left-handed orientation.
         // UsdGeomGprim's fallback is right-handed, so we need to provide
         // a value if none is authored.
-        context->AddProperty(
+        context->AddUniformProperty(
             UsdGeomTokens->orientation,
             SdfValueTypeNames->Token,
             _CopySynthetic(UsdGeomTokens->leftHanded));
@@ -2866,7 +2962,7 @@ _ReadXform(_PrimReaderContext* context)
     typedef IXform Type;
 
     // Wrap the object.
-    if (not Type::matches(context->GetObject().getHeader())) {
+    if (!Type::matches(context->GetObject().getHeader())) {
         // Not of type Type.
         return;
     }
@@ -2878,7 +2974,7 @@ _ReadXform(_PrimReaderContext* context)
 
     // Error checking.
     for (index_t i = 0, n = schema.getNumSamples(); i != n; ++i) {
-        if (not schema.getInheritsXforms(ISampleSelector(i))) {
+        if (!schema.getInheritsXforms(ISampleSelector(i))) {
             TF_WARN("Ignoring transform that doesn't inherit at "
                     "samples at time %f at <%s>",
                     schema.getTimeSampling()->getSampleTime(i),
@@ -2907,7 +3003,7 @@ _ReadXform(_PrimReaderContext* context)
 
         VtTokenArray opOrderVec(1);
         opOrderVec[0] = _tokens->xformOpTransform;
-        context->AddProperty(
+        context->AddUniformProperty(
             UsdGeomTokens->xformOpOrder,
             SdfValueTypeNames->TokenArray,
             _CopySynthetic(opOrderVec));
@@ -2924,7 +3020,7 @@ _ReadPolyMesh(_PrimReaderContext* context)
     typedef IPolyMesh Type;
 
     // Wrap the object.
-    if (not Type::matches(context->GetObject().getHeader())) {
+    if (!Type::matches(context->GetObject().getHeader())) {
         // Not of type Type.
         return;
     }
@@ -2969,7 +3065,7 @@ _ReadPolyMesh(_PrimReaderContext* context)
 
     // Custom subdivisionScheme property.  Alembic doesn't have this since
     // the Alembic schema is PolyMesh.  Usd needs "none" as the scheme.
-    context->AddProperty(
+    context->AddUniformProperty(
         UsdGeomTokens->subdivisionScheme,
         SdfValueTypeNames->Token,
         _CopySynthetic(UsdGeomTokens->none));
@@ -2982,7 +3078,7 @@ _ReadSubD(_PrimReaderContext* context)
     typedef ISubD Type;
 
     // Wrap the object.
-    if (not Type::matches(context->GetObject().getHeader())) {
+    if (!Type::matches(context->GetObject().getHeader())) {
         // Not of type Type.
         return;
     }
@@ -3014,7 +3110,7 @@ _ReadSubD(_PrimReaderContext* context)
         SdfValueTypeNames->IntArray,
         _CopyGeneric<IInt32ArrayProperty, int>(
             context->ExtractSchema(".faceCounts")));
-    context->AddProperty(
+    context->AddUniformProperty(
         UsdGeomTokens->subdivisionScheme,
         SdfValueTypeNames->Token,
         _CopySubdivisionScheme(context->ExtractSchema(".scheme")));
@@ -3072,7 +3168,7 @@ _ReadCurves(_PrimReaderContext* context)
     typedef ICurves Type;
 
     // Wrap the object.
-    if (not Type::matches(context->GetObject().getHeader())) {
+    if (!Type::matches(context->GetObject().getHeader())) {
         // Not of type Type.
         return;
     }
@@ -3085,7 +3181,7 @@ _ReadCurves(_PrimReaderContext* context)
     // them for all samples.  We also extract and ignore the basis, type
     // and periodicity property (they're all packed into one property).
     Type::schema_type::Sample sample;
-    if (not context->GetSample<Type>(sample, ISampleSelector())) {
+    if (!context->GetSample<Type>(sample, ISampleSelector())) {
         // Doesn't appear to have the right type.
         return;
     }
@@ -3159,7 +3255,7 @@ _ReadPoints(_PrimReaderContext* context)
     typedef IPoints Type;
 
     // Wrap the object.
-    if (not Type::matches(context->GetObject().getHeader())) {
+    if (!Type::matches(context->GetObject().getHeader())) {
         // Not of type Type.
         return;
     }
@@ -3200,7 +3296,7 @@ _ReadCameraParameters(_PrimReaderContext* context)
     typedef ICamera Type;
 
     // Wrap the object.
-    if (not Type::matches(context->GetObject().getHeader())) {
+    if (!Type::matches(context->GetObject().getHeader())) {
         // Not of type Type.
         return;
     }
@@ -3235,6 +3331,10 @@ _ReadCameraParameters(_PrimReaderContext* context)
         UsdGeomTokens->verticalApertureOffset,
         SdfValueTypeNames->Float,
         _CopyCameraVerticalApertureOffset(object));
+    context->AddProperty(
+        UsdGeomTokens->clippingRange,
+        SdfValueTypeNames->Float2,
+        _CopyCameraClippingRange(object));
 
     // Extract all other alembic camera properties so that they don't show up
     // in USD.
@@ -3250,9 +3350,9 @@ _GetOrderingMetadata(
     const TfToken& field)
 {
     const std::string& value = alembicMetadata.get(_AmdName(field));
-    if (not value.empty()) {
+    if (!value.empty()) {
         const std::vector<std::string> names = TfStringTokenize(value, " []");
-        if (not names.empty()) {
+        if (!names.empty()) {
             return _ReaderContext::Ordering(
                         TfTokenVector(names.begin(), names.end()));
         }
@@ -3299,7 +3399,7 @@ _ComputeSchemaName(
     // but we must be prepared for it not to actually be an Alembic Xform.
     std::string value =
         object.getMetaData().get(_AmdName(SdfFieldKeys->TypeName));
-    if (not value.empty()) {
+    if (!value.empty()) {
         return value;
     }
 
@@ -3344,7 +3444,7 @@ _ReadPrim(
 
     // Handle non-instances.
     _ReaderContext::Prim* instance = nullptr;
-    if (not context.IsInstance(object)) {
+    if (!context.IsInstance(object)) {
         // Combine geom with parent if parent is a transform.  There are
         // several cases where we want to bail out and, rather than use a
         // huge if statement or deep if nesting, we'll use do/while and
@@ -3352,12 +3452,12 @@ _ReadPrim(
         do {
             // Parent has to be a transform.
             IObject parent = object.getParent();
-            if (not IXform::matches(parent.getHeader())) {
+            if (!IXform::matches(parent.getHeader())) {
                 break;
             }
             ICompoundProperty parentProperties =
                 _GetSchemaProperty<IXform>(parent);
-            if (not parentProperties.valid()) {
+            if (!parentProperties.valid()) {
                 break;
             }
 
@@ -3376,17 +3476,17 @@ _ReadPrim(
                                      kSchemaTitleMatching)) {
                 objectProperties = _GetSchemaProperty<ICamera>(object);
             }
-            if (not objectProperties.valid()) {
+            if (!objectProperties.valid()) {
                 break;
             }
 
             // We can't merge .arbGeomParams and .userProperties so
             // bail if either are in both this object and the parent.
-            if (objectProperties.getPropertyHeader(".arbGeomParams") and
+            if (objectProperties.getPropertyHeader(".arbGeomParams") && 
                 parentProperties.getPropertyHeader(".arbGeomParams")) {
                 break;
             }
-            if (objectProperties.getPropertyHeader(".userProperties") and
+            if (objectProperties.getPropertyHeader(".userProperties") && 
                 parentProperties.getPropertyHeader(".userProperties")) {
                 break;
             }
@@ -3406,7 +3506,7 @@ _ReadPrim(
     // prim with nothing but a reference at the old path.
     else {
         instance = &context.AddInstance(path, object);
-        if (not instance->master.IsEmpty()) {
+        if (!instance->master.IsEmpty()) {
             path = instance->master;
         }
         else {
@@ -3432,7 +3532,7 @@ _ReadPrim(
     // need quite everything because the master will supply some of it.
     // For simplicity, we copy all data as usual then discard what we
     // don't want.
-    if (instance and instance->promoted) {
+    if (instance && instance->promoted) {
         // Read the metadata.
         _GetPrimMetadata(object.getMetaData(), *instance);
 
@@ -3440,8 +3540,7 @@ _ReadPrim(
         // changed path to point at the master.
         const SdfPath instancePath = parentPath.AppendChild(TfToken(name));
         _PrimReaderContext primContext(context, object, instancePath);
-        BOOST_FOREACH(const _ReaderSchema::PrimReader& reader,
-                      context.GetSchema().GetPrimReaders(schemaName)) {
+        for (const auto& reader : context.GetSchema().GetPrimReaders(schemaName)) {
             TRACE_SCOPE("UsdAbc_AlembicDataReader:_ReadPrim");
             reader(&primContext);
         }
@@ -3459,7 +3558,7 @@ _ReadPrim(
     // name then we've already found a previous instance of this master
     // and we've already traversed the master once.  Don't traverse a
     // master again.
-    if (not instance or prim.typeName.IsEmpty()) {
+    if (!instance || prim.typeName.IsEmpty()) {
         // Add prim metadata.
         _GetPrimMetadata(object.getMetaData(), prim);
 
@@ -3476,8 +3575,7 @@ _ReadPrim(
         if (path != SdfPath::AbsoluteRootPath()) {
             // Read the properties.
             _PrimReaderContext primContext(context, object, path);
-            BOOST_FOREACH(const _ReaderSchema::PrimReader& reader,
-                          context.GetSchema().GetPrimReaders(schemaName)) {
+            for (const auto& reader : context.GetSchema().GetPrimReaders(schemaName)) {
                 TRACE_SCOPE("UsdAbc_AlembicDataReader:_ReadPrim");
                 reader(&primContext);
             }
@@ -3497,7 +3595,7 @@ _ReadPrim(
         // to have most metadata for the same reason.  For the sake of
         // simplicity of the code, we already copied all of that info so
         // we'll discard it now.
-        if (instance and instance->promoted) {
+        if (instance && instance->promoted) {
             // prim is the master.
             prim.properties.clear();
             prim.propertyOrdering = boost::none;
@@ -3542,7 +3640,7 @@ _ReadPrimChildren(
         IObject child(object, object.getChildHeader(i).getName());
         const std::string childName =
             _ReadPrim(context, child, path, &usedNames);
-        if (not childName.empty()) {
+        if (!childName.empty()) {
             prim.children.push_back(TfToken(childName));
         }
     }
@@ -3627,7 +3725,6 @@ _ReaderSchemaBuilder::_ReaderSchemaBuilder()
 
     // This handles overs with no type and any unknown prim type.
     schema.AddFallbackType()
-        .AppendReader(_ReadOrientation)
         .AppendReader(_ReadGeomBase)        // Assume GeomBase.
         .AppendReader(_ReadMayaColor)
         .AppendReader(_ReadGprim)
@@ -3706,7 +3803,7 @@ UsdAbc_AlembicDataReader::TimeSamples::FindIndex(double usdTime,Index* index) co
 {
     _UsdTimeCodes::const_iterator i =
         std::lower_bound(_times.begin(), _times.end(), usdTime);
-    if (i == _times.end() or *i != usdTime) {
+    if (i == _times.end() || *i != usdTime) {
         return false;
     }
     else {
@@ -3746,7 +3843,7 @@ UsdAbc_AlembicDataReader::TimeSamples::Bracket(
         // Past last sample.
         *tLower = *tUpper = *--i;
     }
-    else if (i == samples.begin() or *i == usdTime) {
+    else if (i == samples.begin() || *i == usdTime) {
         // Before first sample or at a sample.
         *tLower = *tUpper = *i;
     }
@@ -3899,3 +3996,6 @@ UsdAbc_AlembicDataReader::ListTimeSamplesForPath(
 {
     return _impl->ListTimeSamplesForPath(id);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

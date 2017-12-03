@@ -24,26 +24,36 @@
 #ifndef HD_UNIT_TEST_HELPER
 #define HD_UNIT_TEST_HELPER
 
+#include "pxr/pxr.h"
 #include "pxr/imaging/hd/engine.h"
+#include "pxr/imaging/hd/lightingShader.h"
 #include "pxr/imaging/hd/renderPass.h"
 #include "pxr/imaging/hd/renderPassState.h"
 #include "pxr/imaging/hd/unitTestDelegate.h"
+#include "pxr/imaging/hd/unitTestNullRenderDelegate.h"
 
 #include "pxr/base/gf/vec4d.h"
 #include "pxr/base/gf/matrix4d.h"
 
 #include <vector>
+#include <boost/scoped_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class Hd_TestDriver
+///
 /// A unit test driver that exercises the core engine.
 ///
 /// \note This test driver does NOT assume OpenGL is available; in the even
 /// that is is not available, all OpenGL calls become no-ops, but all other work
 /// is performed as usual.
 ///
-class Hd_TestDriver {
+class Hd_TestDriver final {
 public:
     Hd_TestDriver();
     Hd_TestDriver(TfToken const &reprName);
+    ~Hd_TestDriver();
 
     /// Draw
     void Draw(bool withGuides=false);
@@ -68,7 +78,7 @@ public:
     }
 
     /// Returns the UnitTest delegate
-    Hd_UnitTestDelegate& GetDelegate() { return _delegate; }
+    Hd_UnitTestDelegate& GetDelegate() { return *_sceneDelegate; }
 
     /// Switch repr
     void SetRepr(TfToken const &reprName);
@@ -78,11 +88,15 @@ private:
     void _Init(TfToken const &reprName);
 
     HdEngine _engine;
-    Hd_UnitTestDelegate _delegate;
+    Hd_UnitTestNullRenderDelegate _renderDelegate;
+    HdRenderIndex       *_renderIndex;
+    Hd_UnitTestDelegate *_sceneDelegate;
     TfToken _reprName;
     HdRenderPassSharedPtr _geomPass;
     HdRenderPassSharedPtr _geomAndGuidePass;
     HdRenderPassStateSharedPtr _renderPassState;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_UNIT_TEST_HELPER

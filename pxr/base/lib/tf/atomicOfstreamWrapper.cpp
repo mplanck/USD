@@ -24,10 +24,14 @@
 ///
 /// \file Tf/AtomicOfstreamWrapper.cpp
 
+#include "pxr/pxr.h"
 #include "pxr/base/tf/atomicOfstreamWrapper.h"
 
+#include "pxr/base/arch/defines.h"
+#include "pxr/base/arch/errno.h"
 #include "pxr/base/arch/fileSystem.h"
 
+#include "pxr/base/tf/atomicRenameUtil.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/fileUtils.h"
 #include "pxr/base/tf/pathUtils.h"
@@ -36,6 +40,13 @@
 #include <iostream>
 #include <cerrno>
 #include <cstdio>
+
+#if defined(ARCH_OS_WINDOWS)
+#include <Windows.h>
+#include <io.h>
+#endif
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 using std::string;
 
@@ -62,87 +73,24 @@ TfAtomicOfstreamWrapper::Open(
         return false;
     }
 
-    if (_filePath.empty()) {
-        if (reason) {
-            *reason = "File path is empty";
-        }
+    std::string localError, *err = reason ? reason : &localError;
+    int tmpFd = Tf_CreateSiblingTempFile(
+        _filePath, &_filePath, &_tmpFilePath, err);
+    if (!tmpFd) {
         return false;
     }
-
-    // The file path could be a symbolic link. If that's the case, we need to
-    // write the temporary file into the real path. This is both so we can
-    // experience the appropriate failures while writing the temp file on the
-    // same volume as the destination file, and so we can efficiently rename,
-    // as that requires both source and destination to be on the same mount.
-    string realPathError;
-    string realFilePath = TfRealPath(_filePath,
-        /* allowInaccessibleSuffix */ true, &realPathError);
-
-    if (realFilePath.empty()) {
-        if (reason) {
-            *reason = TfStringPrintf(
-                "Unable to determine the real path for '%s': %s",
-                _filePath.c_str(), realPathError.c_str());
-        }
-        return false;
-    }
-
-    _filePath = realFilePath;
-
-    // Check destination directory permissions. The destination directory must
-    // exist and be writable so we can write the temporary file and rename the
-    // temporary to the destination name.
-    string dirPath = TfStringGetBeforeSuffix(realFilePath, '/');
-    if (access(dirPath.c_str(), W_OK) != 0) {
-        if (reason) {
-            *reason = TfStringPrintf(
-                "Insufficient permissions to write to destination "
-                "directory '%s'",
-                dirPath.c_str());
-        }
-        return false;
-    } else {
-        // Directory exists and has write permission. Check whether the
-        // destination file exists and has write permission. We can rename
-        // into this path successfully even if we can't write to the file, but
-        // we retain the policy that if the user couldn't open the file for
-        // writing, they can't write to the file via this buffer object.
-        if (access(realFilePath.c_str(), W_OK) != 0) {
-            if (errno != ENOENT) {
-                if (reason) {
-                    *reason = TfStringPrintf(
-                        "Insufficient permissions to write to destination "
-                        "file '%s'",
-                        realFilePath.c_str());
-                }
-                return false;
-            }
-        }
-    }
-
-    string tmpFilePrefix = TfStringGetBeforeSuffix(TfGetBaseName(realFilePath));
-    int tmpFd = ArchMakeTmpFile(dirPath, tmpFilePrefix, &_tmpFilePath);
-    if (tmpFd == -1) {
-        if (reason) {
-            *reason = TfStringPrintf(
-                "Unable to open temporary file '%s' for writing: %s",
-                _tmpFilePath.c_str(),
-                strerror(errno));
-        }
-        return false;
-    }
-
+    
     // Close the temp file descriptor returned by Arch, and open this buffer
     // with the same file name.
-    close(tmpFd);
+    ArchCloseFile(tmpFd);
 
     _stream.open(_tmpFilePath.c_str(),
-        std::fstream::out|std::fstream::binary|std::fstream::trunc);
-    if (not _stream) {
+                 std::fstream::out|std::fstream::binary|std::fstream::trunc);
+    if (!_stream) {
         if (reason) {
             *reason = TfStringPrintf(
-                "Unable to open '%s' for writing",
-                _tmpFilePath.c_str());
+                "Unable to open '%s' for writing: %s",
+                _tmpFilePath.c_str(), ArchStrerror().c_str());
         }
         return false;
     }
@@ -154,7 +102,7 @@ bool
 TfAtomicOfstreamWrapper::Commit(
     string* reason)
 {
-    if (not _stream.is_open()) {
+    if (!_stream.is_open()) {
         if (reason) {
             *reason = "Stream is not open";
         }
@@ -165,43 +113,15 @@ TfAtomicOfstreamWrapper::Commit(
     // before calling rename.
     _stream.close();
 
-    // The default file mode for new files is user r/w and group r/w, subject
-    // to the process umask. If the file already exists, renaming the
-    // temporary file results in temporary file permissions, which doesn't
-    // allow the group to write.
-    mode_t fileMode = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP;
-    struct stat st;
-    if (stat(_filePath.c_str(), &st) != -1) {
-        fileMode = st.st_mode & 0777;
-    }
-
-    if (chmod(_tmpFilePath.c_str(), fileMode) != 0) {
-        // CODE_COVERAGE_OFF
-        TF_WARN("Unable to set permissions for temporary file '%s': %s",
-            _tmpFilePath.c_str(), strerror(errno));
-        // CODE_COVERAGE_ON
-    }
-
-    bool success = true;
-    if (rename(_tmpFilePath.c_str(), _filePath.c_str()) != 0) {
-        if (reason) {
-            *reason = TfStringPrintf(
-                "Unable to rename '%s' to '%s': %s",
-                _tmpFilePath.c_str(),
-                _filePath.c_str(),
-                strerror(errno));
-        }
-        success = false;
-    }
-
-    return success;
+    std::string localError, *err = reason ? reason : &localError;
+    return Tf_AtomicRenameFileOver(_tmpFilePath, _filePath, err);
 }
 
 bool
 TfAtomicOfstreamWrapper::Cancel(
     string* reason)
 {
-    if (not _stream.is_open()) {
+    if (!_stream.is_open()) {
         if (reason) {
             *reason = "Buffer is not open";
         }
@@ -213,13 +133,14 @@ TfAtomicOfstreamWrapper::Cancel(
     _stream.close();
 
     bool success = true;
-    if (unlink(_tmpFilePath.c_str()) != 0) {
+
+    if (ArchUnlinkFile(_tmpFilePath.c_str()) != 0) {
         if (errno != ENOENT) {
             if (reason) {
                 *reason = TfStringPrintf(
                     "Unable to remove temporary file '%s': %s",
                     _tmpFilePath.c_str(),
-                    strerror(errno));
+                    ArchStrerror(errno).c_str());
             }
             success = false;
         }
@@ -228,3 +149,4 @@ TfAtomicOfstreamWrapper::Cancel(
     return success;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

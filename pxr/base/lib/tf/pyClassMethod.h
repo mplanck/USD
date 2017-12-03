@@ -24,10 +24,14 @@
 #ifndef TF_PY_CLASS_METHOD_H
 #define TF_PY_CLASS_METHOD_H
 
+#include "pxr/pxr.h"
+
 #include <boost/python/class.hpp>
 #include <boost/python/dict.hpp>
 #include <boost/python/object.hpp>
 #include <boost/python/def_visitor.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 namespace Tf_PyClassMethod {
 
@@ -65,7 +69,7 @@ private:
         if (PyCallable_Check(expect_non_null(callable)))
             return callable;
 
-        ::PyErr_Format( PyExc_TypeError,
+        PyErr_Format( PyExc_TypeError,
            "classmethod expects callable object; got an object of type %s, "
            "which is not callable",
            callable->ob_type->tp_name);
@@ -92,5 +96,7 @@ private:
 /// \endcode
 ///
 typedef Tf_PyClassMethod::_TfPyClassMethod TfPyClassMethod;
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_PY_CLASS_METHOD_H

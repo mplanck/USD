@@ -24,6 +24,7 @@
 #ifndef SDF_VALUETYPEREGISTRY_H
 #define SDF_VALUETYPEREGISTRY_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/valueTypeName.h"
 #include "pxr/base/tf/enum.h"
 #include "pxr/base/vt/array.h"
@@ -32,9 +33,14 @@
 #include <boost/scoped_ptr.hpp>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class TfType;
 
+/// \class Sdf_ValueTypeRegistry
+///
 /// A registry of value type names used by a schema.
+///
 class Sdf_ValueTypeRegistry : boost::noncopyable {
 public:
     Sdf_ValueTypeRegistry();
@@ -96,4 +102,6 @@ private:
     boost::scoped_ptr<_Impl> _impl;
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_VALUETYPEREGISTRY_H

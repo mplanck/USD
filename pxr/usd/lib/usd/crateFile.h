@@ -24,11 +24,13 @@
 #ifndef USD_CRATEFILE_H
 #define USD_CRATEFILE_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/crateData.h"
 
 #include "shared.h"
 #include "crateValueInliners.h"
 
+#include "pxr/base/arch/fileSystem.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/base/vt/value.h"
 #include "pxr/base/work/arenaDispatcher.h"
@@ -50,7 +52,7 @@
 #include <utility>
 #include <vector>
 
-#include <sys/types.h>
+PXR_NAMESPACE_OPEN_SCOPE
 
 namespace Usd_CrateFile {
 
@@ -62,11 +64,11 @@ using std::unordered_map;
 using std::tuple;
 using std::vector;
 
-// Tag indicating trivially copyable types, hack since gcc doesn't yet implement
-// is_trivially_copyable correctly.
-struct _BitwiseReadWrite {};
+// Trait indicating trivially copyable types, a hack since gcc doesn't yet
+// implement is_trivially_copyable correctly.
+template <class T> struct _IsBitwiseReadWrite;
 
-enum class TypeEnum : int;
+enum class TypeEnum : int32_t;
 
 // Value in file representation.  Consists of a 2 bytes of type information
 // (type enum value, array bit, and inlined-value bit) and 6 bytes of data.
@@ -75,7 +77,7 @@ enum class TypeEnum : int;
 // (zero vectors, identity matrices, etc).  For values that aren't stored
 // inline, the 6 data bytes are the offset from the start of the file to the
 // value's location.
-struct ValueRep : _BitwiseReadWrite {
+struct ValueRep {
 
     friend class CrateFile;
 
@@ -121,7 +123,7 @@ struct ValueRep : _BitwiseReadWrite {
         return data == other.data;
     }
     bool operator!=(ValueRep other) const {
-        return not (*this == other);
+        return !(*this == other);
     }
 
     friend inline size_t hash_value(ValueRep v) {
@@ -141,6 +143,7 @@ private:
 
     uint64_t data;
 };
+template <> struct _IsBitwiseReadWrite<ValueRep> : std::true_type {};
 
 struct TimeSamples {
     typedef Usd_Shared<vector<double>> SharedTimes;
@@ -152,7 +155,7 @@ struct TimeSamples {
     }
 
     // Original rep from file if read from file.  This will have GetData()
-    // == 0 if not from file or if the samples are been modified.
+    // == 0 if not from file or if the samples have been modified.
     ValueRep valueRep;
 
     // Sample times.
@@ -168,9 +171,9 @@ struct TimeSamples {
     // Note that equality does a very shallow equality check since otherwise
     // we'd have to pull all the values from the file.
     bool operator==(TimeSamples const &other) const {
-        return valueRep == other.valueRep and
-            times == other.times and
-            values == other.values and
+        return valueRep == other.valueRep && 
+            times == other.times &&
+            values == other.values &&
             valuesFileOffset == other.valuesFileOffset;
     }
 
@@ -201,7 +204,9 @@ enum class TypeEnum {
     Invalid = 0,
 #define xx(ENUMNAME, ENUMVALUE, _unused1, _unused2)     \
     ENUMNAME = ENUMVALUE,
+
 #include "crateDataTypes.h"
+
 #undef xx
     NumTypes
 };
@@ -209,11 +214,11 @@ enum class TypeEnum {
 // Index base class.  Used to index various tables.  Deriving adds some
 // type-safety so we don't accidentally use one kind of index with the wrong
 // kind of table.
-struct Index : _BitwiseReadWrite {
+struct Index {
     Index() : value(~0) {}
     explicit Index(uint32_t value) : value(value) {}
     bool operator==(const Index &other) const { return value == other.value; }
-    bool operator!=(const Index &other) const { return not (*this == other); }
+    bool operator!=(const Index &other) const { return !(*this == other); }
     uint32_t value;
 };
 
@@ -259,14 +264,10 @@ struct _Hasher {
 
 class CrateFile
 {
-    struct _Munmapper {
-        _Munmapper() : fileSize(-1) {}
-        explicit _Munmapper(int64_t fileSize) : fileSize(fileSize) {}
-        void operator()(char *mapStart) const;
-        int64_t fileSize;
-    };
-    typedef std::unique_ptr<char, _Munmapper> _UniqueMap;
+public:
+    struct Version;
 
+private:
     struct _Fcloser {
         void operator()(FILE *f) const;
     };
@@ -276,15 +277,16 @@ class CrateFile
 
     // _BootStrap structure.  Appears at end of file, houses version, file
     // identifier string and offset to _TableOfContents.
-    struct _BootStrap : _BitwiseReadWrite {
+    struct _BootStrap {
         _BootStrap();
+        explicit _BootStrap(Version const &);
         uint8_t ident[8]; // "PXR-USDC"
         uint8_t version[8]; // 0: major, 1: minor, 2: patch, rest unused.
         int64_t tocOffset;
         int64_t _reserved[8];
     };
 
-    struct _Section : _BitwiseReadWrite {
+    struct _Section {
         _Section() { memset(this, 0, sizeof(*this)); }
         _Section(char const *name, int64_t start, int64_t size);
         char name[_SectionNameMaxLength+1];
@@ -298,16 +300,29 @@ class CrateFile
     };
 
 public:
-    friend class ValueRep;
-    friend class TimeSamples;
+    friend struct ValueRep;
+    friend struct TimeSamples;
 
     typedef std::pair<TfToken, VtValue> FieldValuePair;
 
-    struct Field : _BitwiseReadWrite {
+    struct Field {
+        // This padding field accounts for a bug in an earlier implementation,
+        // where both this class and its first member derived an empty base
+        // class.  The standard requires that those not have the same address so
+        // GCC & clang inserted 4 bytes for this class's empty base, causing the
+        // first member to land at offset 4.  Porting to MSVC revealed this,
+        // since MSVC didn't implement this correctly and the first member
+        // landed at offset 0.  To fix this, we've removed the empty base and
+        // inserted our own 4 byte padding to ensure the layout comes out the
+        // same everywhere.  This doesn't actually change the overall structure
+        // size since the first member is 4 bytes and the second is 8.  It's
+        // still 16 bytes however you slice it.
+        uint32_t _unused_padding_;
+
         Field() {}
         Field(TokenIndex ti, ValueRep v) : tokenIndex(ti), valueRep(v) {}
         bool operator==(const Field &other) const {
-            return tokenIndex == other.tokenIndex and
+            return tokenIndex == other.tokenIndex &&
                 valueRep == other.valueRep;
         }
         friend size_t hash_value(const Field &f) {
@@ -320,19 +335,59 @@ public:
         ValueRep valueRep;
     };
 
-    struct Spec : _BitwiseReadWrite {
+    struct Spec_0_0_1;
+    
+    struct Spec {
         Spec() {}
         Spec(PathIndex pi, SdfSpecType type, FieldSetIndex fsi)
             : pathIndex(pi), fieldSetIndex(fsi), specType(type) {}
+        Spec(Spec_0_0_1 const &);
         bool operator==(const Spec &other) const {
-            return pathIndex == other.pathIndex and
-                fieldSetIndex == other.fieldSetIndex and
+            return pathIndex == other.pathIndex &&
+                fieldSetIndex == other.fieldSetIndex &&
                 specType == other.specType;
         }
         bool operator!=(const Spec &other) const {
-            return not (*this == other);
+            return !(*this == other);
         }
         friend size_t hash_value(Spec const &s) {
+            _Hasher h;
+            size_t result = h(s.pathIndex);
+            boost::hash_combine(result, s.fieldSetIndex);
+            boost::hash_combine(result, s.specType);
+            return result;
+        }
+        PathIndex pathIndex;
+        FieldSetIndex fieldSetIndex;
+        SdfSpecType specType;
+    };
+
+    struct Spec_0_0_1 {
+        // This padding field accounts for a bug in this earlier implementation,
+        // where both this class and its first member derived an empty base
+        // class.  The standard requires that those not have the same address so
+        // GCC & clang inserted 4 bytes for this class's empty base, causing the
+        // first member to land at offset 4.  Porting to MSVC revealed this,
+        // since MSVC didn't implement this correctly and the first member
+        // landed at offset 0.  To fix this, we've removed the empty base and
+        // inserted our own 4 byte padding to ensure the layout comes out the
+        // same everywhere.  File version 0.1.0 revises this structure to the
+        // smaller size with no padding.
+        uint32_t _unused_padding_;
+
+        Spec_0_0_1() {}
+        Spec_0_0_1(PathIndex pi, SdfSpecType type, FieldSetIndex fsi)
+            : pathIndex(pi), fieldSetIndex(fsi), specType(type) {}
+        Spec_0_0_1(Spec const &);
+        bool operator==(const Spec_0_0_1 &other) const {
+            return pathIndex == other.pathIndex &&
+                fieldSetIndex == other.fieldSetIndex &&
+                specType == other.specType;
+        }
+        bool operator!=(const Spec_0_0_1 &other) const {
+            return !(*this == other);
+        }
+        friend size_t hash_value(Spec_0_0_1 const &s) {
             _Hasher h;
             size_t result = h(s.pathIndex);
             boost::hash_combine(result, s.fieldSetIndex);
@@ -451,7 +506,7 @@ public:
     // Make \p ts mutable so that individual sample values may be modified, but
     // not the number of samples.
     inline void MakeTimeSampleValuesMutable(TimeSamples &ts) const {
-        if (not ts.IsInMemory()) {
+        if (!ts.IsInMemory()) {
             _MakeTimeSampleValuesMutableImpl(ts);
         }
     }
@@ -466,16 +521,19 @@ public:
 
 private:
     explicit CrateFile(bool useMmap);
-    CrateFile(string const &fileName, _UniqueMap mapStart, int64_t fileSize);
-    CrateFile(string const &fileName, _UniqueFILE inputFile, int64_t fileSize);
+    CrateFile(string const &fileName, ArchConstFileMapping mapStart);
+    CrateFile(string const &fileName, _UniqueFILE inputFile);
 
     CrateFile(CrateFile const &) = delete;
     CrateFile &operator=(CrateFile const &) = delete;
 
-    static _UniqueMap _MmapFile(char const *fileName, FILE *file);
+    void _InitMMap();
+    void _InitPread();
+
+    static ArchConstFileMapping _MmapFile(char const *fileName, FILE *file);
 
     class _Writer;
-    
+    class _BufferedOutput;
     class _ReaderBase;
     template <class ByteStream> class _Reader;
 
@@ -486,6 +544,8 @@ private:
     void _WriteSection(
         _Writer &w, _SectionName name, _TableOfContents &toc, Fn writeFn) const;
 
+    void _AddDeferredTimeSampledSpecs();
+
     bool _Write();
 
     void _AddSpec(const SdfPath &path, SdfSpecType type,
@@ -494,11 +554,24 @@ private:
     VtValue _GetTimeSampleValueImpl(TimeSamples const &ts, size_t i) const;
     void _MakeTimeSampleValuesMutableImpl(TimeSamples &ts) const;
 
+    void _WriteFields(_Writer &w);
+    void _WriteFieldSets(_Writer &w);
     void _WritePaths(_Writer &w);
+    void _WriteSpecs(_Writer &w);
 
     template <class Iter>
     Iter _WritePathTree(_Writer &w, Iter cur, Iter end);
+
+    template <class Container>
+    void _WriteCompressedPathData(_Writer &w, Container const &pathData);
     
+    template <class Iter>
+    Iter _BuildCompressedPathDataRecursive(
+        size_t &curIndex, Iter cur, Iter end,
+        vector<uint32_t> &pathIndexes,
+        vector<int32_t> &elementTokenIndexes,
+        vector<int32_t> &jumps);
+
     inline void _WriteTokens(_Writer &w);
 
     template <class Reader>
@@ -508,24 +581,34 @@ private:
     static _BootStrap _ReadBootStrap(ByteStream src, int64_t fileSize);
 
     template <class Reader>
-    _TableOfContents _ReadTOC(Reader src, class _BootStrap const &b) const;
+    _TableOfContents _ReadTOC(Reader src, _BootStrap const &b) const;
 
+    template <class Reader> void _PrefetchStructuralSections(Reader src) const; 
     template <class Reader> void _ReadFieldSets(Reader src);
     template <class Reader> void _ReadFields(Reader src);
     template <class Reader> void _ReadSpecs(Reader src);
     template <class Reader> void _ReadStrings(Reader src);
     template <class Reader> void _ReadTokens(Reader src);
     template <class Reader> void _ReadPaths(Reader src);
+    template <class Header, class Reader>
+    void _ReadPathsImpl(Reader reader,
+                        WorkArenaDispatcher &dispatcher,
+                        SdfPath parentPath=SdfPath());
     template <class Reader>
-    void _ReadPathsRecursively(
-        Reader src, const SdfPath &parentPath,
-        const struct _PathItemHeader &h,
+    void _ReadCompressedPaths(Reader reader,
+                              WorkArenaDispatcher &dispatcher);
+    void _BuildDecompressedPathsImpl(
+        std::vector<uint32_t> const &pathIndexes,
+        std::vector<int32_t> const &elementTokenIndexes,
+        std::vector<int32_t> const &jumps,
+        size_t curIndex,
+        SdfPath parentPath,
         WorkArenaDispatcher &dispatcher);
 
     void _ReadRawBytes(int64_t start, int64_t size, char *buf) const;
 
     PathIndex _AddPath(const SdfPath &path);
-    FieldSetIndex _AddFieldSet(const std::vector<FieldValuePair> &fields);
+    FieldSetIndex _AddFieldSet(const std::vector<FieldIndex> &fieldIndexes);
     FieldIndex _AddField(const FieldValuePair &fv);
     TokenIndex _AddToken(const TfToken &token);
     TokenIndex _GetIndexForToken(const TfToken &token) const;
@@ -560,6 +643,7 @@ private:
     template <class T> void _DoTypeRegistration();
     void _DoAllTypeRegistrations();
     void _DeleteValueHandlers();
+    void _ClearValueHandlerDedupTables();
 
     static bool _IsKnownSection(char const *name);
 
@@ -574,6 +658,24 @@ private:
 
     // An index into the path list, plus a range of fields.
     vector<Spec> _specs;
+
+    // Deferred specs with timeSamples that we write separately at the end,
+    // time-by-time so that time-sampled data is collocated by time.
+    struct _DeferredTimeSampledSpec {
+        _DeferredTimeSampledSpec() = default;
+        _DeferredTimeSampledSpec(PathIndex p, SdfSpecType t,
+                                 vector<FieldIndex> &&of,
+                                 vector<pair<TfToken, TimeSamples>> &&ts)
+            : path(p)
+            , specType(t)
+            , ordinaryFields(std::move(of))
+            , timeSampleFields(std::move(ts)) {}
+        PathIndex path;
+        SdfSpecType specType;
+        vector<FieldIndex> ordinaryFields;
+        vector<pair<TfToken, TimeSamples>> timeSampleFields;
+    };
+    vector<_DeferredTimeSampledSpec> _deferredTimeSampledSpecs;
 
     // All unique fields.
     vector<Field> _fields;
@@ -626,14 +728,36 @@ private:
 
     // We'll only have one of these, depending on whether we're doing mmap() or
     // pread().
-    _UniqueMap _mapStart; // NULL if this wasn't populated from file.
+    ArchConstFileMapping _mapStart; // NULL if this wasn't populated from file.
     _UniqueFILE _inputFile; // NULL if this wasn't populated from file.
 
     std::string _fileName; // Empty if this file data is in-memory only.
 
+    std::unique_ptr<char []> _debugPageMap; // Debug page access map, see
+                                            // USDC_DUMP_PAGE_MAPS.
+
     const bool _useMmap; // If true, use mmap for reads, otherwise use pread.
 };
 
+template <>
+struct _IsBitwiseReadWrite<CrateFile::_BootStrap> : std::true_type {};
+
+template <>
+struct _IsBitwiseReadWrite<CrateFile::_Section> : std::true_type {};
+
+template <>
+struct _IsBitwiseReadWrite<CrateFile::Field> : std::true_type {};
+
+template <>
+struct _IsBitwiseReadWrite<CrateFile::Spec> : std::true_type {};
+
+template <>
+struct _IsBitwiseReadWrite<CrateFile::Spec_0_0_1> : std::true_type {};
+
+
 } // Usd_CrateFile
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_CRATEFILE_H

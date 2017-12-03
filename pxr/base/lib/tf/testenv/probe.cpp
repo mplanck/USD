@@ -21,12 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/regTest.h"
 #include "pxr/base/tf/notice.h"
 #include "pxr/base/tf/noticeRegistry.h"
 #include "pxr/base/tf/type.h"
 #include "pxr/base/tf/diagnosticLite.h"
-#include "pxr/base/arch/nap.h"
 #include "pxr/base/arch/systemInfo.h"
 #include <string>
 #include <vector>
@@ -35,6 +36,7 @@
 #include <sstream>
 
 using namespace std;
+PXR_NAMESPACE_USING_DIRECTIVE
 
 int beginSendCount = 0;
 int endSendCount = 0;
@@ -90,8 +92,7 @@ private:
 
 class ProbeListener : public TfWeakBase {
 public:
-    explicit ProbeListener(int identity)
-        : _identity(identity)
+    explicit ProbeListener()
     {
     }
 
@@ -99,9 +100,6 @@ public:
     void ProcessNotice(const TfNotice&) {
         processedNoticeCount++;
     }
-
-private:
-    int _identity;
 };
 
 TF_REGISTRY_FUNCTION(TfType)
@@ -115,7 +113,7 @@ static bool
 Test_TfProbe()
 {
     _NoticeProbe _probe;
-    ProbeListener *l1 = new ProbeListener(1);
+    ProbeListener *l1 = new ProbeListener();
     TfWeakPtr<ProbeListener> wl1(l1);
 
     TfNotice::Register(wl1, &ProbeListener::ProcessNotice);

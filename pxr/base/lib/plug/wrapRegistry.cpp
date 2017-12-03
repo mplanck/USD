@@ -21,16 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/plug/registry.h"
 #include "pxr/base/plug/plugin.h"
-
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyFunction.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pySingleton.h"
 #include "pxr/base/tf/stringUtils.h"
 
-#include <boost/bind.hpp>
 #include <boost/range.hpp>
 #include <boost/python.hpp>
 
@@ -47,6 +47,10 @@ using std::string;
 using std::vector;
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 typedef TfWeakPtr<PlugRegistry> PlugRegistryPtr;
 
@@ -85,7 +89,6 @@ _GetAllDerivedTypes(TfType const &type)
 }
 
 // For testing -- load plugins in parallel.
-namespace {
 
 typedef bool PluginPredicateSig(PlugPluginPtr);
 typedef boost::function<PluginPredicateSig> PluginPredicateFn;
@@ -96,8 +99,8 @@ struct SharedState : boost::noncopyable {
         while (true) {
             // Try to take the next plugin to load.
             size_t cur = nextAvailable;
-            while (cur != plugins.size() and
-                   not nextAvailable.compare_exchange_strong(cur, cur+1)) {
+            while (cur != plugins.size() &&
+                   !nextAvailable.compare_exchange_strong(cur, cur+1)) {
                 cur = nextAvailable;
             }
 
@@ -120,7 +123,7 @@ string PluginNames(Range const &range) {
     using std::distance;
     vector<string> names(distance(boost::begin(range), boost::end(range)));
     transform(boost::begin(range), boost::end(range), names.begin(),
-              boost::bind(&PlugPlugin::GetName, _1));
+              [](PlugPluginPtr const &plug) { return plug->GetName(); });
     return TfStringJoin(names.begin(), names.end(), ", ");
 }
 
@@ -140,10 +143,10 @@ void _LoadPluginsConcurrently(PluginPredicateFn pred,
     // Shuffle all already loaded plugins to the end.
     PlugPluginPtrVector::iterator alreadyLoaded =
         partition(plugins.begin(), plugins.end(),
-                  not boost::bind(&PlugPlugin::IsLoaded, _1));
+                  [](PlugPluginPtr const &plug) { return !plug->IsLoaded(); });
 
     // Report any already loaded plugins as skipped.
-    if (verbose and alreadyLoaded != plugins.end()) {
+    if (verbose && alreadyLoaded != plugins.end()) {
         printf("Skipping already-loaded plugins: %s\n",
                PluginNames(make_pair(alreadyLoaded, plugins.end())).c_str());
     }
@@ -191,35 +194,7 @@ void _LoadPluginsConcurrently(PluginPredicateFn pred,
     }
 }
 
-PlugPluginPtr
-_ThisPlugin()
-{
-    object sys = import("sys");
-    if (sys) {
-        // The caller's frame.
-        object frame = sys.attr("_getframe")(0);
-        if (frame) {
-            // The caller's module name.
-            object name = frame.attr("f_locals")["__name__"];
-            if (name) {
-                // The caller's package path.
-                object path = sys.attr("modules")[name].attr("__path__")[0];
-                extract<std::string> e(path);
-                if (e.check()) {
-                    // XXX: This doesn't find a shared library plugin
-                    //      because the path is the Python package
-                    //      path and the plugin would be registered
-                    //      under the library's path.  PlugRegistry
-                    //      should support lookup given this path.
-                    return PlugRegistry::GetInstance().GetPluginWithPath(e());
-                }
-            }
-        }
-    }
-    return TfNullPtr;
-}
-
-} // anon
+} // anonymous namespace 
 
 void wrapRegistry()
 {
@@ -229,13 +204,13 @@ void wrapRegistry()
     class_<This, TfWeakPtr<This>, boost::noncopyable>
         ("Registry", no_init)
         .def(TfPySingleton())
-        .def("RegisterPlugins", &::_RegisterPlugins,
+        .def("RegisterPlugins", &_RegisterPlugins,
             return_value_policy<TfPySequenceToList>())
-        .def("RegisterPlugins", &::_RegisterPluginsList,
+        .def("RegisterPlugins", &_RegisterPluginsList,
             return_value_policy<TfPySequenceToList>())
-        .def("GetStringFromPluginMetaData", &::_GetStringFromPluginMetaData)
-        .def("GetPluginWithPath", &This::GetPluginWithPath)
-        .def("GetPluginForType", &::_GetPluginForType)
+        .def("GetStringFromPluginMetaData", &_GetStringFromPluginMetaData)
+        .def("GetPluginWithName", &This::GetPluginWithName)
+        .def("GetPluginForType", &_GetPluginForType)
         .def("GetAllPlugins", &This::GetAllPlugins,
              return_value_policy<TfPySequenceToList>())
 
@@ -261,6 +236,4 @@ void wrapRegistry()
     def("_LoadPluginsConcurrently",
         _LoadPluginsConcurrently,
         (arg("predicate"), arg("numThreads")=0, arg("verbose")=false));
-
-    def("ThisPlugin", _ThisPlugin);
 }

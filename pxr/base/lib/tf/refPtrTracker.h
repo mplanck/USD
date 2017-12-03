@@ -21,11 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file refPtrTracker.h
-
 #ifndef TF_REFPTRTRACKER_H
 #define TF_REFPTRTRACKER_H
 
+/// \file tf/refPtrTracker.h
+
+#include "pxr/pxr.h"
+
+#include "pxr/base/tf/api.h"
 #include "pxr/base/tf/hash.h"
 #include "pxr/base/tf/hashmap.h"
 #include "pxr/base/tf/weakBase.h"
@@ -35,11 +38,14 @@
 #include <mutex>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class TfRefBase;
 template <class T> class TfRefPtr;
 
 /// \class TfRefPtrTracker
-/// \brief Provides tracking of \c TfRefPtr objects to particular objects.
+///
+/// Provides tracking of \c TfRefPtr objects to particular objects.
 ///
 /// Clients can enable, at compile time, tracking of \c TfRefPtr objects that
 /// point to particular instances of classes derived from \c TfRefBase.
@@ -92,15 +98,17 @@ class TfRefPtrTracker : public TfWeakBase, boost::noncopyable {
 public:
     enum TraceType { Add, Assign };
 
-    static TfRefPtrTracker& GetInstance()
+    TF_API static TfRefPtrTracker& GetInstance()
     {
          return TfSingleton<TfRefPtrTracker>::GetInstance();
     }
 
     /// Returns the maximum stack trace depth.
+    TF_API
     size_t GetStackTraceMaxDepth() const;
 
     /// Sets the maximum stack trace depth.
+    TF_API
     void SetStackTraceMaxDepth(size_t);
 
     /// A track trace.
@@ -125,19 +133,24 @@ public:
 
     /// Returns the watched objects and the number of owners of each.
     /// Returns a copy for thread safety.
+    TF_API
     WatchedCounts GetWatchedCounts() const;
 
     /// Returns traces for all owners.  Returns a copy for thread safety.
+    TF_API
     OwnerTraces GetAllTraces() const;
 
     /// Writes all watched objects and the number of owners of each
     /// to \p stream.
+    TF_API
     void ReportAllWatchedCounts(std::ostream& stream) const;
 
     /// Writes all traces to \p stream.
+    TF_API
     void ReportAllTraces(std::ostream& stream) const;
 
     /// Writes traces for all owners of \p watched.
+    TF_API
     void ReportTracesForWatched(std::ostream& stream,
                                 const TfRefBase* watched) const;
 
@@ -187,6 +200,8 @@ private:
     friend class TfSingleton<TfRefPtrTracker>;
 };
 
+TF_API_TEMPLATE_CLASS(TfSingleton<TfRefPtrTracker>);
+
 // For internal use only.
 class Tf_RefPtrTrackerUtil {
 public:
@@ -226,7 +241,7 @@ inline void Tf_RefPtrTracker_Assign(const void* owner, T* obj, T* oldObj);
 
 #define TF_DEFINE_REFPTR_TRACK(T, COND)                                     \
 inline void Tf_RefPtrTracker_FirstRef(const void*, T* obj) {                \
-    if (obj and COND(obj)) Tf_RefPtrTrackerUtil::Watch(obj);                \
+    if (obj && COND(obj)) Tf_RefPtrTrackerUtil::Watch(obj);                \
 }                                                                           \
 inline void Tf_RefPtrTracker_LastRef(const void*, T* obj) {                 \
     Tf_RefPtrTrackerUtil::Unwatch(obj);                                     \
@@ -242,5 +257,7 @@ inline void Tf_RefPtrTracker_Assign(const void* owner, T* obj, T* oldObj) { \
         Tf_RefPtrTrackerUtil::AddTrace(owner, obj, TfRefPtrTracker::Assign);\
     }                                                                       \
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

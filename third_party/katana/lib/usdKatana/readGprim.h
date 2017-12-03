@@ -21,6 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 #ifndef PXRUSDKATANA_READGPRIM_H
 #define PXRUSDKATANA_READGPRIM_H
 
@@ -35,11 +39,6 @@ PxrUsdKatanaReadGprim(
         const UsdGeomGprim& gprim,
         const PxrUsdKatanaUsdInPrivateData& data,
         PxrUsdKatanaAttrMap& attrs);
-
-Foundry::Katana::Attribute
-PxrUsdKatanaGeomGetPrimvarGroup(
-        const UsdGeomGprim& gprim,
-        const PxrUsdKatanaUsdInPrivateData& data);
 
 Foundry::Katana::Attribute
 PxrUsdKatanaGeomGetDisplayColorAttr(
@@ -61,6 +60,14 @@ PxrUsdKatanaGeomGetNormalAttr(
     const UsdGeomPointBased& points,
     const PxrUsdKatanaUsdInPrivateData& data);
 
+Foundry::Katana::Attribute
+PxrUsdKatanaGeomGetVelocityAttr(
+    const UsdGeomPointBased& points,
+    const PxrUsdKatanaUsdInPrivateData& data);
+
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDKATANA_READGPRIM_H
 

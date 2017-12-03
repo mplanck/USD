@@ -21,7 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/tf/pyExceptionState.h"
+
+#include "pxr/pxr.h"
+
+#include "pxr/base/tf/pyErrorInternal.h"
 
 #include <boost/python/object.hpp>
 #include <boost/python/extract.hpp>
@@ -29,22 +32,28 @@
 using namespace boost::python;
 using std::string;
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 string 
 TfPyExceptionState::GetExceptionString() const
 {
     TfPyLock lock;
     string s;
+    // Save the exception state so we can restore it -- getting the exception
+    // string should not affect the exception state.
+    TfPyExceptionStateScope exceptionStateScope;
     try {
         object tbModule(handle<>(PyImport_ImportModule("traceback")));
         object exception = tbModule.attr("format_exception")(_type, _value, 
                                                                     _trace);
-        long size = len(exception);
-        for (long i = 0; i < size; ++i) {
+        boost::python::ssize_t size = len(exception);
+        for (boost::python::ssize_t i = 0; i < size; ++i) {
             s += extract<string>(exception[i]);
         }
     } catch (boost::python::error_already_set const &) {
         // Just ignore the exception.
-        PyErr_Clear();
     }
     return s;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

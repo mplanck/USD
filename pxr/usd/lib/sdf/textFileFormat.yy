@@ -24,6 +24,9 @@
 
 %{
 
+#include "pxr/pxr.h"
+#include "pxr/base/arch/errno.h"
+#include "pxr/base/arch/fileSystem.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/usd/sdf/allowed.h"
@@ -40,7 +43,7 @@
 
 #include "pxr/base/tracelite/trace.h"
 
-
+#include "pxr/base/arch/errno.h"
 #include "pxr/base/tf/enum.h"
 #include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/ostreamMethods.h"
@@ -49,20 +52,20 @@
 #include "pxr/base/gf/matrix4d.h"
 #include "pxr/base/tf/mallocTag.h"
 
-#include <boost/bind.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/optional.hpp>
 #include <boost/variant.hpp>
 
+#include <functional>
 #include <sstream>
 #include <string>
-#include <sys/mman.h>
-#include <unistd.h>
 #include <vector>
 
 // See this page for info as to why this is here.  Especially note the last
 // paragraph.  http://www.delorie.com/gnu/docs/bison/bison_91.html
 #define YYINITDEPTH 1500
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 using Sdf_ParserHelpers::Value;
 using boost::get;
@@ -78,7 +81,7 @@ using boost::get;
 #define ERROR_IF_NOT_ALLOWED(context, allowed)                   \
     {                                                            \
         const SdfAllowed allow = allowed;                        \
-        if (not allow) {                                         \
+        if (!allow) {                                            \
             Err(context, "%s", allow.GetWhyNot().c_str());       \
         }                                                        \
     }
@@ -86,7 +89,7 @@ using boost::get;
 #define ERROR_AND_RETURN_IF_NOT_ALLOWED(context, allowed)        \
     {                                                            \
         const SdfAllowed allow = allowed;                        \
-        if (not allow) {                                         \
+        if (!allow) {                                            \
             Err(context, "%s", allow.GetWhyNot().c_str());       \
             return;                                              \
         }                                                        \
@@ -106,7 +109,7 @@ void textFileFormatYyerror(Sdf_TextParserContext *context, const char *s);
 
 extern int textFileFormatYylex(YYSTYPE *yylval_param, yyscan_t yyscanner);
 extern char *textFileFormatYyget_text(yyscan_t yyscanner);
-extern int textFileFormatYyget_leng(yyscan_t yyscanner);
+extern size_t textFileFormatYyget_leng(yyscan_t yyscanner);
 extern int textFileFormatYylex_init(yyscan_t *yyscanner);
 extern int textFileFormatYylex_destroy(yyscan_t yyscanner);
 extern void textFileFormatYyset_extra(Sdf_TextParserContext *context, 
@@ -137,7 +140,7 @@ _HasDuplicates(const std::vector<T> &v)
 {
     std::set<T> s;
     TF_FOR_ALL(i, v) {
-        if (not s.insert(*i).second) {
+        if (!s.insert(*i).second) {
             return true;
         }
     }
@@ -231,8 +234,8 @@ _MatchMagicIdentifier(const Value& arg1, Sdf_TextParserContext *context)
     const std::string cookie = TfStringTrimRight(arg1.Get<std::string>());
     const std::string expected = "#" + context->magicIdentifierToken + " ";
     if (TfStringStartsWith(cookie, expected)) {
-        if (not context->versionString.empty() and
-            not TfStringEndsWith(cookie, context->versionString)) {
+        if (!context->versionString.empty() &&
+            !TfStringEndsWith(cookie, context->versionString)) {
             TF_WARN("File '%s' is not the latest %s version (found '%s', "
                 "expected '%s'). The file may parse correctly and yield "
                 "incorrect results.",
@@ -283,7 +286,7 @@ _ValueAppendAtomic(const Value& arg1, Sdf_TextParserContext *context)
 static void
 _ValueSetAtomic(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
+    if (!context->values.IsRecordingString()) {
         if (context->values.valueIsShaped) {
             Err(context, "Type name has [] for non-shaped value!\n");
             return;
@@ -301,7 +304,7 @@ _ValueSetAtomic(Sdf_TextParserContext *context)
 static void
 _PrimSetInheritListItems(SdfListOpType opType, Sdf_TextParserContext *context) 
 {
-    if (context->inheritParsingTargetPaths.empty() and 
+    if (context->inheritParsingTargetPaths.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting inherit paths to None (or empty list) is only allowed "
@@ -336,7 +339,7 @@ _InheritAppendPath(Sdf_TextParserContext *context)
 static void
 _PrimSetSpecializesListItems(SdfListOpType opType, Sdf_TextParserContext *context) 
 {
-    if (context->specializesParsingTargetPaths.empty() and 
+    if (context->specializesParsingTargetPaths.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting specializes paths to None (or empty list) is only allowed "
@@ -371,7 +374,7 @@ _SpecializesAppendPath(Sdf_TextParserContext *context)
 static void
 _PrimSetReferenceListItems(SdfListOpType opType, Sdf_TextParserContext *context) 
 {
-    if (context->referenceParsingRefs.empty() and 
+    if (context->referenceParsingRefs.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting references to None (or an empty list) is only allowed "
@@ -405,7 +408,7 @@ _PrimSetVariantSetNamesListItems(SdfListOpType opType,
     _SetListOpItems(SdfFieldKeys->VariantSetNames, opType, names, context);
 
     // If the op type is added or explicit, create the variant sets
-    if (opType == SdfListOpTypeAdded or opType == SdfListOpTypeExplicit) {
+    if (opType == SdfListOpTypeAdded || opType == SdfListOpTypeExplicit) {
         TF_FOR_ALL(i, context->nameVector) {
             _CreateSpec(
                 context->path.AppendVariantSelection(*i,""),
@@ -425,7 +428,7 @@ _RelationshipInitTarget(const SdfPath& targetPath,
 {
     SdfPath path = context->path.AppendTarget(targetPath);
 
-    if (not _HasSpec(path, context)) {
+    if (!_HasSpec(path, context)) {
         // Create relationship target spec by setting the appropriate 
         // object type flag.
         _CreateSpec(path, SdfSpecTypeRelationshipTarget, context);
@@ -440,12 +443,12 @@ static void
 _RelationshipSetTargetsList(SdfListOpType opType, 
                             Sdf_TextParserContext *context)
 {
-    if (not context->relParsingTargetPaths) {
+    if (!context->relParsingTargetPaths) {
         // No target paths were encountered.
         return;
     }
 
-    if (context->relParsingTargetPaths->empty() and 
+    if (context->relParsingTargetPaths->empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting relationship targets to None (or empty list) is only "
@@ -459,7 +462,7 @@ _RelationshipSetTargetsList(SdfListOpType opType,
             SdfSchema::IsValidRelationshipTargetPath(*path));
     }
 
-    if (opType == SdfListOpTypeAdded or 
+    if (opType == SdfListOpTypeAdded || 
         opType == SdfListOpTypeExplicit) {
 
         // Initialize relationship target specs for each target path that
@@ -487,7 +490,7 @@ _PrimSetVariantSelection(Sdf_TextParserContext *context)
     }
 
     TF_FOR_ALL(it, context->currentDictionaries[0]) {
-        if (not it->second.IsHolding<std::string>()) {
+        if (!it->second.IsHolding<std::string>()) {
             Err(context, "variant name must be a string");
             return;
         } else {
@@ -514,12 +517,12 @@ _RelocatesAdd(const Value& arg1, const Value& arg2,
     SdfPath srcPath(srcStr);
     SdfPath targetPath(targetStr);
 
-    if (not srcPath.IsPrimPath()) {
+    if (!srcPath.IsPrimPath()) {
         Err(context, "'%s' is not a valid prim path",
             srcStr.c_str());
         return;
     }
-    if (not targetPath.IsPrimPath()) {
+    if (!targetPath.IsPrimPath()) {
         Err(context, "'%s' is not a valid prim path",
             targetStr.c_str());
         return;
@@ -541,7 +544,7 @@ static void
 _AttributeSetConnectionTargetsList(SdfListOpType opType, 
                                    Sdf_TextParserContext *context)
 {
-    if (context->connParsingTargetPaths.empty() and 
+    if (context->connParsingTargetPaths.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, "Setting connection paths to None (or an empty list) "
             "is only allowed when setting explicit connection paths, "
@@ -555,12 +558,12 @@ _AttributeSetConnectionTargetsList(SdfListOpType opType,
             SdfSchema::IsValidAttributeConnectionPath(*path));
     }
 
-    if (opType == SdfListOpTypeAdded or 
+    if (opType == SdfListOpTypeAdded || 
         opType == SdfListOpTypeExplicit) {
 
         TF_FOR_ALL(pathIter, context->connParsingTargetPaths) {
             SdfPath path = context->path.AppendTarget(*pathIter);
-            if (not _HasSpec(path, context)) {
+            if (!_HasSpec(path, context)) {
                 _CreateSpec(path, SdfSpecTypeConnection, context);
             }
         }
@@ -596,8 +599,7 @@ _AttributeAppendConnectionPath(Sdf_TextParserContext *context)
         TF_WARN("Connection path <%s> (in file @%s@, line %i) has a variant "
                 "selection, but variant selections are not meaningful in "
                 "connection paths.  Stripping the variant selection and "
-                "using <%s> instead.  Resaving the menva file will fix "
-                "this issue.  (See also bug 68132.)",
+                "using <%s> instead.  Resaving the file will fix this issue.",
                 absPath.GetText(),
                 context->fileContext.c_str(),
                 context->menvaLineNo,
@@ -612,7 +614,7 @@ static void
 _PrimInitAttribute(const Value &arg1, Sdf_TextParserContext *context)  
 {
     TfToken name(arg1.Get<std::string>());
-    if (not SdfPath::IsValidNamespacedIdentifier(name)) {
+    if (!SdfPath::IsValidNamespacedIdentifier(name)) {
         Err(context, "'%s' is not a valid attribute name", name.GetText());
     }
 
@@ -624,7 +626,7 @@ _PrimInitAttribute(const Value &arg1, Sdf_TextParserContext *context)
     // If we haven't seen this attribute before, then set the object type
     // and add it to the parent's list of properties. Otherwise both have
     // already been done, so we don't need to do anything.
-    if (not _HasSpec(context->path, context)) {
+    if (!_HasSpec(context->path, context)) {
         context->propertiesStack.back().push_back(name);
         _CreateSpec(context->path, SdfSpecTypeAttribute, context);
         _SetField(context->path, SdfFieldKeys->Custom, false, context);
@@ -723,7 +725,7 @@ _DictionaryInitScalarFactory(const Value& arg1,
                              Sdf_TextParserContext *context)
 {
     const std::string& typeName = arg1.Get<std::string>();
-    if (not _SetupValue(typeName, context)) {
+    if (!_SetupValue(typeName, context)) {
         Err(context, "Unrecognized value typename '%s' for dictionary", 
             typeName.c_str());
     }
@@ -734,7 +736,7 @@ _DictionaryInitShapedFactory(const Value& arg1,
                              Sdf_TextParserContext *context)
 {
     const std::string typeName = arg1.Get<std::string>() + "[]";
-    if (not _SetupValue(typeName, context)) {
+    if (!_SetupValue(typeName, context)) {
         Err(context, "Unrecognized value typename '%s' for dictionary", 
             typeName.c_str());
     }
@@ -743,7 +745,7 @@ _DictionaryInitShapedFactory(const Value& arg1,
 static void
 _ValueSetTuple(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
+    if (!context->values.IsRecordingString()) {
         if (context->values.valueIsShaped) {
             Err(context, "Type name has [] for non-shaped value.\n");
             return;
@@ -761,8 +763,8 @@ _ValueSetTuple(Sdf_TextParserContext *context)
 static void
 _ValueSetList(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
-        if (not context->values.valueIsShaped) {
+    if (!context->values.IsRecordingString()) {
+        if (!context->values.valueIsShaped) {
             Err(context, "Type name missing [] for shaped value.");
             return;
         }
@@ -779,8 +781,8 @@ _ValueSetList(Sdf_TextParserContext *context)
 static void
 _ValueSetShaped(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
-        if (not context->values.valueIsShaped) {
+    if (!context->values.IsRecordingString()) {
+        if (!context->values.valueIsShaped) {
             Err(context, "Type name missing [] for shaped value.");
             return;
         }
@@ -820,14 +822,14 @@ _PrimInitRelationship(const Value& arg1,
                       Sdf_TextParserContext *context)
 {
     TfToken name( arg1.Get<std::string>() );
-    if (not SdfPath::IsValidNamespacedIdentifier(name)) {
+    if (!SdfPath::IsValidNamespacedIdentifier(name)) {
         Err(context, "'%s' is not a valid relationship name", name.GetText());
         return;
     }
 
     context->path = context->path.AppendProperty(name);
 
-    if (not _HasSpec(context->path, context)) {
+    if (!_HasSpec(context->path, context)) {
         context->propertiesStack.back().push_back(name);
         _CreateSpec(context->path, SdfSpecTypeRelationship, context);
     }
@@ -848,7 +850,7 @@ _PrimInitRelationship(const Value& arg1,
 static void
 _PrimEndRelationship(Sdf_TextParserContext *context)
 {
-    if (not context->relParsingNewTargetChildren.empty()) {
+    if (!context->relParsingNewTargetChildren.empty()) {
         std::vector<SdfPath> children = 
             context->data->GetAs<std::vector<SdfPath> >(
                 SdfAbstractDataSpecId(&context->path), 
@@ -874,7 +876,7 @@ _RelationshipAppendTargetPath(const Value& arg1,
     const std::string& pathStr = arg1.Get<std::string>();
     SdfPath path(pathStr);
 
-    if (not path.IsAbsolutePath()) {
+    if (!path.IsAbsolutePath()) {
         // Expand paths relative to the containing prim.
         //
         // This strips any variant selections from the containing prim
@@ -883,7 +885,7 @@ _RelationshipAppendTargetPath(const Value& arg1,
         path = path.MakeAbsolutePath(context->path.GetPrimPath());
     }
 
-    if (not context->relParsingTargetPaths) {
+    if (!context->relParsingTargetPaths) {
         // This is the first target we've seen for this relationship.
         // Start tracking them in a vector.
         context->relParsingTargetPaths = SdfPathVector();
@@ -911,18 +913,35 @@ _PathSetProperty(const Value& arg1, Sdf_TextParserContext *context)
     }
 }
 
+static void
+_PathSetPrimOrPropertyScenePath(const Value& arg1,
+                                Sdf_TextParserContext *context)
+{
+    const std::string& pathStr = arg1.Get<std::string>();
+    context->savedPath = SdfPath(pathStr);
+    // Valid paths are prim or property paths that do not contain variant
+    // selections.
+    SdfPath const &path = context->savedPath;
+    bool pathValid = (path.IsPrimPath() || path.IsPropertyPath()) &&
+        !path.ContainsPrimVariantSelection();
+    if (!pathValid) {
+        Err(context, "'%s' is not a valid prim or property scene path",
+            pathStr.c_str());
+    }
+}
+
 template <class ListOpType>
 static bool
 _SetItemsIfListOp(const TfType& type, Sdf_TextParserContext *context)
 {
-    if (not type.IsA<ListOpType>()) {
+    if (!type.IsA<ListOpType>()) {
         return false;
     }
 
     typedef VtArray<typename ListOpType::value_type> ArrayType;
 
-    if (not TF_VERIFY(context->currentValue.IsHolding<ArrayType>() or
-                      context->currentValue.IsEmpty())) {
+    if (!TF_VERIFY(context->currentValue.IsHolding<ArrayType>() ||
+                   context->currentValue.IsEmpty())) {
         return true;
     }
 
@@ -942,11 +961,11 @@ _SetGenericMetadataListOpItems(const TfType& fieldType,
 {
     // Chain together attempts to set list op items using 'or' to bail
     // out as soon as we successfully write out the list op we're holding.
-    _SetItemsIfListOp<SdfIntListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfInt64ListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfUIntListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfUInt64ListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfStringListOp>(fieldType, context) or
+    _SetItemsIfListOp<SdfIntListOp>(fieldType, context)    ||
+    _SetItemsIfListOp<SdfInt64ListOp>(fieldType, context)  ||
+    _SetItemsIfListOp<SdfUIntListOp>(fieldType, context)   ||
+    _SetItemsIfListOp<SdfUInt64ListOp>(fieldType, context) ||
+    _SetItemsIfListOp<SdfStringListOp>(fieldType, context) ||
     _SetItemsIfListOp<SdfTokenListOp>(fieldType, context);
 }
 
@@ -968,11 +987,11 @@ static bool
 _IsGenericMetadataListOpType(const TfType& type,
                              TfType* itemArrayType = nullptr)
 {
-    return _IsListOpType<SdfIntListOp>(type, itemArrayType) or
-           _IsListOpType<SdfInt64ListOp>(type, itemArrayType) or
-           _IsListOpType<SdfUIntListOp>(type, itemArrayType) or
-           _IsListOpType<SdfUInt64ListOp>(type, itemArrayType) or
-           _IsListOpType<SdfStringListOp>(type, itemArrayType) or
+    return _IsListOpType<SdfIntListOp>(type, itemArrayType)    ||
+           _IsListOpType<SdfInt64ListOp>(type, itemArrayType)  || 
+           _IsListOpType<SdfUIntListOp>(type, itemArrayType)   ||
+           _IsListOpType<SdfUInt64ListOp>(type, itemArrayType) ||
+           _IsListOpType<SdfStringListOp>(type, itemArrayType) ||
            _IsListOpType<SdfTokenListOp>(type, itemArrayType);
 }
 
@@ -1025,7 +1044,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
         const TfType fieldType = fieldDef.GetFallbackValue().GetType();
 
         if (_IsGenericMetadataListOpType(fieldType)) {
-            if (not fieldDef.IsValidListValue(context->currentValue)) {
+            if (!fieldDef.IsValidListValue(context->currentValue)) {
                 Err(context, "invalid value for field \"%s\"", 
                     context->genericMetadataKey.GetText());
             }
@@ -1034,7 +1053,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
             }
         }
         else {
-            if (not fieldDef.IsValidValue(context->currentValue) or
+            if (!fieldDef.IsValidValue(context->currentValue) ||
                 context->currentValue.IsEmpty()) {
                 Err(context, "invalid value for field \"%s\"", 
                     context->genericMetadataKey.GetText());
@@ -1067,10 +1086,13 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
                 VtValue v;
                 if (_HasField(context->path, context->genericMetadataKey,
                               &v, context)
-                    and TF_VERIFY(v.IsHolding<SdfUnregisteredValue>())) {
-                    return v.UncheckedGet<SdfUnregisteredValue>().GetValue();
+                    && TF_VERIFY(v.IsHolding<SdfUnregisteredValue>())) {
+                    v = v.UncheckedGet<SdfUnregisteredValue>().GetValue();
                 }
-                return VtValue();
+                else {
+                    v = VtValue();
+                }
+                return v;
             };
 
             auto getRecordedStringAsUnregisteredValue = [context]() {
@@ -1083,8 +1105,8 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
                 // a single SdfUnregisteredValue, but strip off the enclosing
                 // brackets so that we don't write out two sets of brackets
                 // when serializing out the list op.
-                if (not s.empty() and s.front() == '[') { s.erase(0, 1); }
-                if (not s.empty() and s.back() == ']') { s.pop_back(); }
+                if (!s.empty() && s.front() == '[') { s.erase(0, 1); }
+                if (!s.empty() && s.back() == ']') { s.pop_back(); }
                 return std::vector<SdfUnregisteredValue>(
                     { SdfUnregisteredValue(s) });
             };
@@ -1099,7 +1121,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
                     SdfUnregisteredValue(context->values.GetRecordedString());
             }
             else if (oldValue.IsEmpty()
-                     or oldValue.IsHolding<SdfUnregisteredValueListOp>()) {
+                     || oldValue.IsHolding<SdfUnregisteredValueListOp>()) {
                 // In this case, we've parsed a list op statement so unpack
                 // it into a list op unless we've already parsed something
                 // for this field that *isn't* a list op.
@@ -1118,7 +1140,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
             }
         }
 
-        if (not value.IsEmpty()) {
+        if (!value.IsEmpty()) {
             _SetField(context->path, context->genericMetadataKey, 
                       value, context);
         }
@@ -1170,6 +1192,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
 // them to the 'keyword' production rule below.
 %token TOK_ABSTRACT
 %token TOK_ADD
+%token TOK_APPEND
 %token TOK_ATTRIBUTES
 %token TOK_CLASS
 %token TOK_CONFIG
@@ -1192,6 +1215,8 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
 %token TOK_PERMISSION
 %token TOK_PAYLOAD
 %token TOK_PREFIX_SUBSTITUTIONS
+%token TOK_SUFFIX_SUBSTITUTIONS
+%token TOK_PREPEND
 %token TOK_PROPERTIES
 %token TOK_REFERENCES
 %token TOK_RELOCATES
@@ -1220,6 +1245,7 @@ menva_file:
 keyword:
       TOK_ABSTRACT
     | TOK_ADD
+    | TOK_APPEND
     | TOK_ATTRIBUTES
     | TOK_CLASS
     | TOK_CONFIG
@@ -1242,6 +1268,8 @@ keyword:
     | TOK_PAYLOAD
     | TOK_PERMISSION
     | TOK_PREFIX_SUBSTITUTIONS
+    | TOK_SUFFIX_SUBSTITUTIONS
+    | TOK_PREPEND
     | TOK_PROPERTIES
     | TOK_REFERENCES
     | TOK_RELOCATES
@@ -1341,6 +1369,18 @@ layer_metadata:
     | TOK_ADD identifier {
             _GenericMetadataStart($2, SdfSpecTypePseudoRoot, context);
             context->listOpType = SdfListOpTypeAdded;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+        }
+    | TOK_PREPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypePseudoRoot, context);
+            context->listOpType = SdfListOpTypePrepended;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+        }
+    | TOK_APPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypePseudoRoot, context);
+            context->listOpType = SdfListOpTypeAppended;
         } '=' metadata_listop_list {
             _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
         }
@@ -1473,7 +1513,7 @@ prim_type_name :
 prim_stmt_int:
     TOK_STRING {
             TfToken name($1.Get<std::string>());
-            if (not SdfPath::IsValidIdentifier(name)) {
+            if (!SdfPath::IsValidIdentifier(name)) {
                 Err(context, "'%s' is not a valid prim name", name.GetText());
             }
             context->path = context->path.AppendChild(name);
@@ -1496,7 +1536,7 @@ prim_stmt_int:
                 context->path, SdfFieldKeys->Specifier, 
                 context->specifier, context);
 
-            if (not context->typeName.IsEmpty())
+            if (!context->typeName.IsEmpty())
                 _SetField(
                     context->path, SdfFieldKeys->TypeName, 
                     context->typeName, context);
@@ -1506,14 +1546,14 @@ prim_stmt_int:
     prim_contents_list_opt 
     '}' {
             // Store the names of our children
-            if (not context->nameChildrenStack.back().empty()) {
+            if (!context->nameChildrenStack.back().empty()) {
                 _SetField(
                     context->path, SdfChildrenKeys->PrimChildren,
                     context->nameChildrenStack.back(), context);
             }
 
             // Store the names of our properties, if there are any
-            if (not context->propertiesStack.back().empty()) {
+            if (!context->propertiesStack.back().empty()) {
                 _SetField(
                     context->path, SdfChildrenKeys->PropertyChildren,
                     context->propertiesStack.back(), context);
@@ -1578,6 +1618,18 @@ prim_metadata:
         } '=' metadata_listop_list {
             _GenericMetadataEnd(SdfSpecTypePrim, context);
         }
+    | TOK_PREPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypePrim, context);
+            context->listOpType = SdfListOpTypePrepended;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        }
+    | TOK_APPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypePrim, context);
+            context->listOpType = SdfListOpTypeAppended;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        }
     | TOK_REORDER identifier {
             _GenericMetadataStart($2, SdfSpecTypePrim, context);
             context->listOpType = SdfListOpTypeOrdered;
@@ -1632,6 +1684,16 @@ prim_metadata:
         } '=' inherit_list {
             _PrimSetInheritListItems(SdfListOpTypeAdded, context);
         }
+    | TOK_PREPEND TOK_INHERITS {
+            context->inheritParsingTargetPaths.clear();
+        } '=' inherit_list {
+            _PrimSetInheritListItems(SdfListOpTypePrepended, context);
+        }
+    | TOK_APPEND TOK_INHERITS {
+            context->inheritParsingTargetPaths.clear();
+        } '=' inherit_list {
+            _PrimSetInheritListItems(SdfListOpTypeAppended, context);
+        }
     | TOK_REORDER TOK_INHERITS {
             context->inheritParsingTargetPaths.clear();
         } '=' inherit_list {
@@ -1652,6 +1714,16 @@ prim_metadata:
             context->specializesParsingTargetPaths.clear();
         } '=' specializes_list {
             _PrimSetSpecializesListItems(SdfListOpTypeAdded, context);
+        }
+    | TOK_PREPEND TOK_SPECIALIZES {
+            context->specializesParsingTargetPaths.clear();
+        } '=' specializes_list {
+            _PrimSetSpecializesListItems(SdfListOpTypePrepended, context);
+        }
+    | TOK_APPEND TOK_SPECIALIZES {
+            context->specializesParsingTargetPaths.clear();
+        } '=' specializes_list {
+            _PrimSetSpecializesListItems(SdfListOpTypeAppended, context);
         }
     | TOK_REORDER TOK_SPECIALIZES {
             context->specializesParsingTargetPaths.clear();
@@ -1679,6 +1751,20 @@ prim_metadata:
             context->referenceParsingRefs.clear();
         } '=' reference_list {
             _PrimSetReferenceListItems(SdfListOpTypeAdded, context);
+        }
+    | TOK_PREPEND TOK_REFERENCES {
+            context->layerRefPath = std::string();
+            context->savedPath = SdfPath();
+            context->referenceParsingRefs.clear();
+        } '=' reference_list {
+            _PrimSetReferenceListItems(SdfListOpTypePrepended, context);
+        }
+    | TOK_APPEND TOK_REFERENCES {
+            context->layerRefPath = std::string();
+            context->savedPath = SdfPath();
+            context->referenceParsingRefs.clear();
+        } '=' reference_list {
+            _PrimSetReferenceListItems(SdfListOpTypeAppended, context);
         }
     | TOK_REORDER TOK_REFERENCES {
             context->layerRefPath = std::string();
@@ -1713,6 +1799,14 @@ prim_metadata:
             _PrimSetVariantSetNamesListItems(SdfListOpTypeAdded, context);
             context->nameVector.clear();
         }
+    | TOK_PREPEND TOK_VARIANTSETS '=' name_list {
+            _PrimSetVariantSetNamesListItems(SdfListOpTypePrepended, context);
+            context->nameVector.clear();
+        }
+    | TOK_APPEND TOK_VARIANTSETS '=' name_list {
+            _PrimSetVariantSetNamesListItems(SdfListOpTypeAppended, context);
+            context->nameVector.clear();
+        }
     | TOK_REORDER TOK_VARIANTSETS '=' name_list {
             _PrimSetVariantSetNamesListItems(SdfListOpTypeOrdered, context);
             context->nameVector.clear();
@@ -1734,6 +1828,14 @@ prim_metadata:
     | TOK_PREFIX_SUBSTITUTIONS '=' string_dictionary {
             _SetField(
                 context->path, SdfFieldKeys->PrefixSubstitutions, 
+                context->currentDictionaries[0], context);
+            context->currentDictionaries[0].clear();
+        }
+    // Not parsed with generic metadata because: uses special Python-like
+    // dictionary syntax
+    | TOK_SUFFIX_SUBSTITUTIONS '=' string_dictionary {
+            _SetField(
+                context->path, SdfFieldKeys->SuffixSubstitutions, 
                 context->currentDictionaries[0], context);
             context->currentDictionaries[0].clear();
         }
@@ -1761,7 +1863,7 @@ reference_list_item:
         if (context->layerRefPath.empty()) {
             Err(context, "Reference asset path must not be empty. If this "
                 "is intended to be an internal reference, remove the "
-                "'@@'.");
+                "'@' delimiters.");
         }
 
         SdfReference ref(context->layerRefPath,
@@ -1779,7 +1881,7 @@ reference_list_item:
         ABORT_IF_ERROR(context->seenError);
       } 
       reference_params_opt {
-        if (not $1.Get<std::string>().empty()) {
+        if (!$1.Get<std::string>().empty()) {
            _PathSetPrim($1, context);
         }
         else {
@@ -1917,7 +2019,7 @@ variantset_stmt:
         context->path = context->path.GetParentPath();
 
         // Create this VariantSetSpec if it does not already exist.
-        if (not _HasSpec(variantSetPath, context)) {
+        if (!_HasSpec(variantSetPath, context)) {
             _CreateSpec(variantSetPath, SdfSpecTypeVariantSet, context);
 
             // Add the name of this variant set to the VariantSets field
@@ -1964,12 +2066,12 @@ variant_stmt:
 
     } prim_metadata_opt '{' prim_contents_list_opt '}' newlines_opt {
         // Store the names of the prims and properties defined in this variant.
-        if (not context->nameChildrenStack.back().empty()) {
+        if (!context->nameChildrenStack.back().empty()) {
             _SetField(
                 context->path, SdfChildrenKeys->PrimChildren, 
                 context->nameChildrenStack.back(), context);
         }
-        if (not context->propertiesStack.back().empty()) {
+        if (!context->propertiesStack.back().empty()) {
             _SetField(
                 context->path, SdfChildrenKeys->PropertyChildren, 
                 context->propertiesStack.back(), context);
@@ -2053,12 +2155,12 @@ prim_attribute_default:
     prim_attribute_full_type namespaced_name {
         _PrimInitAttribute($2, context);
 
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StartRecordingString();
         }
     } 
     attribute_assignment_opt {
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StopRecordingString();
         }
     }
@@ -2072,12 +2174,12 @@ prim_attribute_fallback:
         context->custom = true;
         _PrimInitAttribute($3, context);
 
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StartRecordingString();
         }
     } 
     attribute_assignment_opt {
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StopRecordingString();
         }
     }
@@ -2101,6 +2203,22 @@ prim_attribute_connect :
         context->connParsingAllowConnectionData = true;
     }  connect_rhs {
         _AttributeSetConnectionTargetsList(SdfListOpTypeAdded, context);
+        context->path = context->path.GetParentPath();
+    }
+    | TOK_PREPEND prim_attribute_full_type namespaced_name '.' TOK_CONNECT '=' {
+        _PrimInitAttribute($3, context);
+        context->connParsingTargetPaths.clear();
+        context->connParsingAllowConnectionData = true;
+    }  connect_rhs {
+        _AttributeSetConnectionTargetsList(SdfListOpTypePrepended, context);
+        context->path = context->path.GetParentPath();
+    }
+    | TOK_APPEND prim_attribute_full_type namespaced_name '.' TOK_CONNECT '=' {
+        _PrimInitAttribute($3, context);
+        context->connParsingTargetPaths.clear();
+        context->connParsingAllowConnectionData = true;
+    }  connect_rhs {
+        _AttributeSetConnectionTargetsList(SdfListOpTypeAppended, context);
         context->path = context->path.GetParentPath();
     }
     | TOK_DELETE prim_attribute_full_type namespaced_name '.' TOK_CONNECT '=' {
@@ -2253,7 +2371,7 @@ connect_list:
     ;
 
 connect_item:
-    property_path {
+    prim_or_property_scene_path {
             _AttributeAppendConnectionPath(context);
         }
     | property_path {
@@ -2267,7 +2385,7 @@ connect_item:
 
                 // Create the connection spec object if one doesn't already
                 // exist to parent the marker data.
-                if (not _HasSpec(specPath, context)) {
+                if (!_HasSpec(specPath, context)) {
                     _CreateSpec(specPath, SdfSpecTypeConnection, context);
                 }
 
@@ -2358,6 +2476,18 @@ attribute_metadata:
     | TOK_ADD identifier {
             _GenericMetadataStart($2, SdfSpecTypeAttribute, context);
             context->listOpType = SdfListOpTypeAdded;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypeAttribute, context);
+        }
+    | TOK_PREPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypeAttribute, context);
+            context->listOpType = SdfListOpTypePrepended;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypeAttribute, context);
+        }
+    | TOK_APPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypeAttribute, context);
+            context->listOpType = SdfListOpTypeAppended;
         } '=' metadata_listop_list {
             _GenericMetadataEnd(SdfSpecTypeAttribute, context);
         }
@@ -2723,6 +2853,22 @@ prim_relationship:
             _RelationshipSetTargetsList(SdfListOpTypeAdded, context);
             _PrimEndRelationship(context);
         }
+    | TOK_PREPEND prim_relationship_type namespaced_name {
+            _PrimInitRelationship($3, context);
+            context->relParsingAllowTargetData = true;
+        }
+        relationship_assignment_opt {
+            _RelationshipSetTargetsList(SdfListOpTypePrepended, context);
+            _PrimEndRelationship(context);
+        }
+    | TOK_APPEND prim_relationship_type namespaced_name {
+            _PrimInitRelationship($3, context);
+            context->relParsingAllowTargetData = true;
+        }
+        relationship_assignment_opt {
+            _RelationshipSetTargetsList(SdfListOpTypeAppended, context);
+            _PrimEndRelationship(context);
+        }
 
     | TOK_REORDER prim_relationship_type namespaced_name {
             _PrimInitRelationship($3, context);
@@ -2791,6 +2937,18 @@ relationship_metadata:
     | TOK_ADD identifier {
             _GenericMetadataStart($2, SdfSpecTypeRelationship, context);
             context->listOpType = SdfListOpTypeAdded;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypeRelationship, context);
+        }
+    | TOK_PREPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypeRelationship, context);
+            context->listOpType = SdfListOpTypePrepended;
+        } '=' metadata_listop_list {
+            _GenericMetadataEnd(SdfSpecTypeRelationship, context);
+        }
+    | TOK_APPEND identifier {
+            _GenericMetadataStart($2, SdfSpecTypeRelationship, context);
+            context->listOpType = SdfListOpTypeAppended;
         } '=' metadata_listop_list {
             _GenericMetadataEnd(SdfSpecTypeRelationship, context);
         }
@@ -2896,14 +3054,14 @@ relational_attributes:
 
             context->propertiesStack.push_back(std::vector<TfToken>());
 
-            if (not context->relParsingAllowTargetData) {
+            if (!context->relParsingAllowTargetData) {
                 Err(context, 
                     "Relational attributes cannot be specified in lists of "
                     "targets to be deleted or reordered");
             }
         }
     newlines_opt relational_attributes_list_opt '}' {
-        if (not context->propertiesStack.back().empty()) {
+        if (!context->propertiesStack.back().empty()) {
             _SetField(
                 context->path, SdfChildrenKeys->PropertyChildren, 
                 context->propertiesStack.back(), context);
@@ -2960,6 +3118,12 @@ prim_path:
 property_path:
     TOK_PATHREF {
             _PathSetProperty($1, context);
+        }
+    ;
+
+prim_or_property_scene_path:
+    TOK_PATHREF {
+            _PathSetPrimOrPropertyScenePath($1, context);
         }
     ;
 
@@ -3041,7 +3205,7 @@ void textFileFormatYyerror(Sdf_TextParserContext *context, const char *msg)
     const std::string nextToken(textFileFormatYyget_text(context->scanner), 
                                 textFileFormatYyget_leng(context->scanner));
     const bool isNewlineToken = 
-        (nextToken.length() == 1 and nextToken[0] == '\n');
+        (nextToken.length() == 1 && nextToken[0] == '\n');
 
     int errLineNumber = context->menvaLineNo;
 
@@ -3061,7 +3225,7 @@ void textFileFormatYyerror(Sdf_TextParserContext *context, const char *msg)
         errLineNumber);
 
     // Append file context, if known.
-    if (not context->fileContext.empty()) {
+    if (!context->fileContext.empty()) {
         s += " in file " + context->fileContext;
     }
     s += "\n";
@@ -3084,125 +3248,82 @@ static void _ReportParseError(Sdf_TextParserContext *context,
 
 // Helper class for generating/managing the buffer used by flex.
 //
-// This class attempts to mmap the given file and pass that buffer along
-// for flex to use. Normally, flex reads data from a given file in blocks
-// of 8KB, which leads to O(n^2) behavior when trying to match strings that 
-// are over this size. Giving flex a pre-filled buffer avoids this behavior.
-struct Sdf_MMappedFlexBuffer : public boost::noncopyable
+// This simply reads the given file entirely into memory, padded as flex
+// requires, and passes it along. Normally, flex reads data from a given file in
+// blocks of 8KB, which leads to O(n^2) behavior when trying to match strings
+// that are over this size. Giving flex a pre-filled buffer avoids this
+// behavior.
+struct Sdf_MemoryFlexBuffer : public boost::noncopyable
 {
 public:
-    Sdf_MMappedFlexBuffer(FILE* file, const std::string& name, yyscan_t scanner);
-    ~Sdf_MMappedFlexBuffer();
+    Sdf_MemoryFlexBuffer(FILE* file, const std::string& name, yyscan_t scanner);
+    ~Sdf_MemoryFlexBuffer();
 
     yy_buffer_state *GetBuffer() { return _flexBuffer; }
 
 private:
     yy_buffer_state *_flexBuffer;
 
-    char*  _fileBuffer;
-    size_t _fileBufferSize;
-
-    char*  _paddingBuffer;
-    size_t _paddingBufferSize;
+    std::unique_ptr<char[]> _fileBuffer;
 
     yyscan_t _scanner;
 };
 
-Sdf_MMappedFlexBuffer::Sdf_MMappedFlexBuffer(FILE* file, 
+Sdf_MemoryFlexBuffer::Sdf_MemoryFlexBuffer(FILE* file, 
                                            const std::string& name,
                                            yyscan_t scanner)
-    : _flexBuffer(NULL),
-      _fileBuffer(NULL), _fileBufferSize(0), 
-      _paddingBuffer(NULL), _paddingBufferSize(0),
-      _scanner(scanner)
+    : _flexBuffer(nullptr)
+    , _scanner(scanner)
 {
-    const int fd = fileno(file);
-
-    struct stat fileInfo;
-    if (fstat(fd, &fileInfo) != 0) {
+    int64_t fileSize = ArchGetFileLength(file);
+    if (fileSize == -1) {
         TF_RUNTIME_ERROR("Error retrieving file size for @%s@: %s", 
-                         name.c_str(), strerror(errno));
+                         name.c_str(), ArchStrerror(errno).c_str());
         return;
     }
 
-    // flex requires 2 bytes of NUL padding at the end of any buffers it
-    // is given. We can't guarantee that the file we're mmap'ing will meet
-    // this requirement, so we're going to fake it.
-    const size_t paddingBytesRequired = 2;
+    // flex requires 2 bytes of null padding at the end of any buffers it is
+    // given.  We'll allocate a buffer with 2 padding bytes, then read the
+    // entire file in.
+    static const size_t paddingBytesRequired = 2;
 
-    // First, establish an mmap for the given file along with the additional
-    // padding bytes.
-    const size_t fileSize = fileInfo.st_size;
-    const size_t fileBufferSize = fileSize + paddingBytesRequired;
+    std::unique_ptr<char[]> buffer(new char[fileSize + paddingBytesRequired]);
 
-#if defined(ARCH_HAS_MMAP_MAP_POPULATE)
-    const int mmapFlags = MAP_PRIVATE | MAP_POPULATE;
-#else
-    const int mmapFlags = MAP_PRIVATE;
-#endif
-
-    char* fileSpace = static_cast<char*>(
-        mmap(NULL, fileBufferSize,
-             PROT_READ | PROT_WRITE, mmapFlags, fd, 0));
-    if (fileSpace == MAP_FAILED) {
-        TF_RUNTIME_ERROR("Failed to mmap file @%s@: %s", 
-                         name.c_str(), strerror(errno));
-        return;
-    }
-
-    _fileBuffer = fileSpace;
-    _fileBufferSize = fileBufferSize;
-
-    // Check whether the required padding fits in the last page used by the
-    // file mmap, or if it would spill over into the next page.
-    //
-    // If the padding fits in the last page, it's safe to access those bytes
-    // (even though they are outside the file).
-    // 
-    // If the padding spills over, accessing those bytes results in a SIGBUS.
-    // To avoid this, we try to create an anonymous mmap for the padding that 
-    // is contiguous with the last page. flex will see the two mmap'd space
-    // as one contiguous buffer and can then access the padding bytes safely.
-    const size_t pageSize = sysconf(_SC_PAGESIZE);
-    const size_t numberOfPagesUsedByFile = (fileSize - 1 + pageSize) / pageSize;
-    const size_t totalBytesUsedByPages = numberOfPagesUsedByFile * pageSize;
-
-    if (fileBufferSize > totalBytesUsedByPages) { 
-        char* paddingSpace = _fileBuffer + totalBytesUsedByPages;
-        if (mmap(paddingSpace, paddingBytesRequired, 
-                PROT_READ | PROT_WRITE, 
-                MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0) == MAP_FAILED) {
-
-            // If we can't create this mmap for some reason, fall back to
-            // creating a flex buffer by copying all of the data out of
-            // the mmap'd file.
-            TF_WARN("Can't mmap extra space for @%s@: %s. "
-                    "Copying entire layer into memory.", 
-                    name.c_str(), strerror(errno));
-            _flexBuffer = textFileFormatYy_scan_bytes(_fileBuffer, fileSize, _scanner);
-            return;
+    fseek(file, 0, SEEK_SET);
+    clearerr(file);
+    if (fread(buffer.get(), 1, fileSize, file) !=
+        static_cast<size_t>(fileSize)) {
+        if (feof(file)) {
+            TF_RUNTIME_ERROR("Failed to read file contents @%s@: "
+                             "premature end-of-file",
+                             name.c_str());
         }
-
-        _paddingBuffer = paddingSpace;
-        _paddingBufferSize = paddingBytesRequired;
+        else if (ferror(file)) {
+            TF_RUNTIME_ERROR("Failed to read file contents @%s@: "
+                             "an error occurred while reading",
+                             name.c_str());
+        }
+        else {
+            TF_RUNTIME_ERROR("Failed to read file contents @%s@: "
+                             "fread() reported incomplete read but "
+                             "neither feof() nor ferror() returned "
+                             "nonzero",
+                             name.c_str());
+        }
+        return;
     }
 
-    _flexBuffer = textFileFormatYy_scan_buffer(_fileBuffer, _fileBufferSize, _scanner);
+    // Set null padding.
+    memset(buffer.get() + fileSize, '\0', paddingBytesRequired);
+    _fileBuffer = std::move(buffer);
+    _flexBuffer = textFileFormatYy_scan_buffer(
+        _fileBuffer.get(), fileSize + paddingBytesRequired, _scanner);
 }
 
-Sdf_MMappedFlexBuffer::~Sdf_MMappedFlexBuffer()
+Sdf_MemoryFlexBuffer::~Sdf_MemoryFlexBuffer()
 {
-    if (_flexBuffer) {
+    if (_flexBuffer)
         textFileFormatYy_delete_buffer(_flexBuffer, _scanner);
-    }
-
-    if (_fileBuffer) {
-        munmap(_fileBuffer, _fileBufferSize);
-    }
-
-    if (_paddingBuffer) {
-        munmap(_paddingBuffer, _paddingBufferSize);
-    }
 }
 
 #ifdef SDF_PARSER_DEBUG_MODE
@@ -3242,7 +3363,8 @@ bool Sdf_ParseMenva(const std::string & fileContext, FILE *fin,
     context.magicIdentifierToken = magicId;
     context.versionString = versionString;
     context.metadataOnly = metadataOnly;
-    context.values.errorReporter = boost::bind(_ReportParseError, &context, _1);
+    context.values.errorReporter =
+        std::bind(_ReportParseError, &context, std::placeholders::_1);
 
     // Initialize the scanner, allowing it to be reentrant.
     textFileFormatYylex_init(&context.scanner);
@@ -3250,7 +3372,7 @@ bool Sdf_ParseMenva(const std::string & fileContext, FILE *fin,
 
     int status = -1;
     {
-        Sdf_MMappedFlexBuffer input(fin, fileContext, context.scanner);
+        Sdf_MemoryFlexBuffer input(fin, fileContext, context.scanner);
         yy_buffer_state *buf = input.GetBuffer();
 
         // Continue parsing if we have a valid input buffer. If there 
@@ -3291,7 +3413,8 @@ bool Sdf_ParseMenvaFromString(const std::string & menvaString,
     context.data = data;
     context.magicIdentifierToken = magicId;
     context.versionString = versionString;
-    context.values.errorReporter = boost::bind(_ReportParseError, &context, _1);
+    context.values.errorReporter =
+        std::bind(_ReportParseError, &context, std::placeholders::_1);
 
     // Initialize the scanner, allowing it to be reentrant.
     textFileFormatYylex_init(&context.scanner);

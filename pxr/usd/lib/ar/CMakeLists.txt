@@ -1,7 +1,7 @@
 set(PXR_PREFIX pxr/usd)
 set(PXR_PACKAGE ar)
 
-pxr_shared_library(ar
+pxr_library(ar
     LIBRARIES
         arch
         tf
@@ -15,7 +15,7 @@ pxr_shared_library(ar
     PUBLIC_HEADERS
         api.h
         assetInfo.h
-        pyResolverContext.h
+        defaultResolver.h
         resolver.h
         resolverContext.h
         resolverContextBinder.h
@@ -23,30 +23,45 @@ pxr_shared_library(ar
         defineResolver.h
         defineResolverContext.h
 
+    PYTHON_PUBLIC_HEADERS
+        pyResolverContext.h
+
     PRIVATE_HEADERS
         debugCodes.h
-        defaultResolver.h
 
     CPPFILES
         assetInfo.cpp
-        pyResolverContext.cpp
         resolver.cpp
         resolverContext.cpp
         resolverContextBinder.cpp
         resolverScopedCache.cpp
         debugCodes.cpp
         defaultResolver.cpp
+
+    PYTHON_CPPFILES
+        pyResolverContext.cpp
         moduleDeps.cpp
 
     PYMODULE_CPPFILES
         module.cpp
+        wrapDefaultResolver.cpp
         wrapResolver.cpp
         wrapResolverContext.cpp
         wrapResolverContextBinder.cpp
         wrapResolverScopedCache.cpp
 
-    PYTHON_FILES
+    PYMODULE_FILES
         __init__.py
+
+    RESOURCE_FILES
         plugInfo.json
 )
 
+pxr_test_scripts(
+    testenv/testArDefaultResolver.py
+)
+
+pxr_register_test(testArDefaultResolver
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testArDefaultResolver"
+)

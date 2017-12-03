@@ -23,4 +23,44 @@
 //
 #include "pxr/usd/usdShade/tokens.h"
 
-TF_DEFINE_PUBLIC_TOKENS(UsdShadeTokens, USDSHADE_TOKENS);
+PXR_NAMESPACE_OPEN_SCOPE
+
+UsdShadeTokensType::UsdShadeTokensType() :
+    connectedSourceFor("connectedSourceFor:", TfToken::Immortal),
+    derivesFrom("derivesFrom", TfToken::Immortal),
+    displacement("displacement", TfToken::Immortal),
+    full("full", TfToken::Immortal),
+    infoId("info:id", TfToken::Immortal),
+    inputs("inputs:", TfToken::Immortal),
+    interface_("interface:", TfToken::Immortal),
+    interfaceOnly("interfaceOnly", TfToken::Immortal),
+    interfaceRecipientsOf("interfaceRecipientsOf:", TfToken::Immortal),
+    lookBinding("look:binding", TfToken::Immortal),
+    materialBind("materialBind", TfToken::Immortal),
+    materialBinding("material:binding", TfToken::Immortal),
+    materialVariant("materialVariant", TfToken::Immortal),
+    outputs("outputs:", TfToken::Immortal),
+    surface("surface", TfToken::Immortal),
+    allTokens({
+        connectedSourceFor,
+        derivesFrom,
+        displacement,
+        full,
+        infoId,
+        inputs,
+        interface_,
+        interfaceOnly,
+        interfaceRecipientsOf,
+        lookBinding,
+        materialBind,
+        materialBinding,
+        materialVariant,
+        outputs,
+        surface
+    })
+{
+}
+
+TfStaticData<UsdShadeTokensType> UsdShadeTokens;
+
+PXR_NAMESPACE_CLOSE_SCOPE

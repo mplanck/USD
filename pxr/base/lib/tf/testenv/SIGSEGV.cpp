@@ -21,12 +21,17 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/errorMark.h"
+#include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/arch/stackTrace.h"
 
+#include <chrono>
+#include <iostream>
 #include <thread>
 
-#include <iostream>
+PXR_NAMESPACE_USING_DIRECTIVE
 
 /**
  * This executable performs an invalid memory reference (SIGSEGV)
@@ -38,7 +43,7 @@ _ThreadTask()
 {
     TfErrorMark m;
     TF_RUNTIME_ERROR("Pending secondary thread error for crash report!");
-    sleep(600); // 10 minutes.
+    std::this_thread::sleep_for(std::chrono::minutes(10));
 }
 
 int
@@ -46,13 +51,18 @@ main(int argc, char **argv)
 {
     ArchSetFatalStackLogging( true );
 
+    // Make sure handlers have been installed
+    // This isn't guaranteed in external environments
+    // as we leave them off by default.
+    TfInstallTerminateAndCrashHandlers();
+
     TfErrorMark m;
 
     TF_RUNTIME_ERROR("Pending error to report in crash output!");
 
     std::thread t(_ThreadTask);
 
-    sleep(1);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     int* bunk(0);
     std::cout << *bunk << '\n';

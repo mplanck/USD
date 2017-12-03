@@ -23,10 +23,13 @@
 //
 #include "pxrUsdInShipped/declareCoreOps.h"
 
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readPrim.h"
 
-PXRUSDKATANA_USDIN_PLUGIN_DEFINE(PxrUsdInCore_ScopeOp, privateData, interface)
+PXR_NAMESPACE_USING_DIRECTIVE
+
+PXRUSDKATANA_USDIN_PLUGIN_DEFINE(PxrUsdInCore_ScopeOp, privateData, opArgs, interface)
 {
     PxrUsdKatanaAttrMap attrs;
 

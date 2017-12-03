@@ -24,18 +24,23 @@
 #ifndef GLF_UVTEXTURE_DATA_H
 #define GLF_UVTEXTURE_DATA_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/imaging/glf/baseTextureData.h"
 
 #include <boost/shared_ptr.hpp>
 
+#include <memory>
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 typedef boost::shared_ptr<class GlfImage> GlfImageSharedPtr;
 
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfUVTextureData);
 
-class GlfUVTextureData : public GlfBaseTextureData
-{
+class GlfUVTextureData : public GlfBaseTextureData {
 public:
     struct Params {
         Params() 
@@ -48,22 +53,23 @@ public:
 
         bool operator==(const Params& rhs) const
         {
-            return (targetMemory == rhs.targetMemory and
-                    cropTop == rhs.cropTop and
-                    cropBottom == rhs.cropBottom and
-                    cropLeft == rhs.cropLeft and
+            return (targetMemory == rhs.targetMemory &&
+                    cropTop == rhs.cropTop           && 
+                    cropBottom == rhs.cropBottom     && 
+                    cropLeft == rhs.cropLeft         && 
                     cropRight == rhs.cropRight);
         }
 
         bool operator!=(const Params& rhs) const
         {
-            return not (*this == rhs);
+            return !(*this == rhs);
         }
 
         size_t targetMemory;
         unsigned int cropTop, cropBottom, cropLeft, cropRight;
     };
 
+    GLF_API
     static GlfUVTextureDataRefPtr
     New(std::string const &filePath,
         size_t targetMemory,
@@ -72,19 +78,18 @@ public:
         unsigned int cropLeft,
         unsigned int cropRight);
 
+    GLF_API
     static GlfUVTextureDataRefPtr
     New(std::string const &filePath, Params const &params);
 
     const Params& GetParams() const { return _params; }
 
     // GlfBaseTextureData overrides
-    virtual int ResizedWidth() const {
-        return _resizedWidth;
-    };
+    GLF_API
+    virtual int ResizedWidth(int mipLevel = 0) const;
 
-    virtual int ResizedHeight() const {
-        return _resizedHeight;
-    };
+    GLF_API
+    virtual int ResizedHeight(int mipLevel = 0) const;
 
     virtual GLenum GLInternalFormat() const {
         return _glInternalFormat;
@@ -106,27 +111,55 @@ public:
         return _wrapInfo;
     };
 
-    virtual int  ComputeBytesUsed() const;
+    GLF_API
+    virtual size_t ComputeBytesUsed() const;
 
-    virtual bool HasRawBuffer() const;
+    GLF_API
+    virtual size_t ComputeBytesUsedByMip(int mipLevel = 0) const;
 
-    virtual unsigned char * GetRawBuffer() const;
+    GLF_API
+    virtual bool HasRawBuffer(int mipLevel = 0) const;
 
+    GLF_API
+    virtual unsigned char * GetRawBuffer(int mipLevel = 0) const;
+
+    GLF_API
     virtual bool Read(int degradeLevel, bool generateMipmap);
 
+    GLF_API
+    virtual int GetNumMipLevels() const;
+
 private:
+    // A structure that keeps the mips loaded from disk in the format
+    // that the gpu needs.
+    struct Mip {
+        Mip() 
+            : size(0), offset(0), width(0), height(0)
+        { }
+
+        size_t size;
+        size_t offset;
+        int width;
+        int height;
+    };
+
     // A structure keeping a down-sampled image input and floats indicating the
     // downsample rate (e.g., if the resolution changed from 2048x1024 to
     // 512x256, scaleX=0.25 and scaleY=0.25).
     struct _DegradedImageInput {
-        _DegradedImageInput(double scaleX, double scaleY,
-		            GlfImageSharedPtr image)
-            : scaleX(scaleX), scaleY(scaleY), image(image) 
+        _DegradedImageInput(double scaleX, double scaleY, 
+            GlfImageSharedPtr image) : scaleX(scaleX), scaleY(scaleY)
+        { 
+            images.push_back(image);
+        }
+
+        _DegradedImageInput(double scaleX, double scaleY)
+            : scaleX(scaleX), scaleY(scaleY)
         { }
 
         double         scaleX;
         double         scaleY;
-        GlfImageSharedPtr image;
+        std::vector<GlfImageSharedPtr> images;
     };
 
     // Reads an image using GlfImage. If possible and requested, it will
@@ -140,8 +173,19 @@ private:
                                                 size_t targetMemory,
                                                 size_t degradeLevel);
 
-    GlfUVTextureData(std::string const &filePath,
-                      Params const &params);
+    // Helper to read degraded image chains, given a starting mip and an 
+    // ending mip it will fill the image chain.
+    _DegradedImageInput _GetDegradedImageInputChain(double scaleX, 
+                                                    double scaleY, 
+                                                    int startMip, 
+                                                    int lastMip);
+
+    // Given a GlfImage it will return the number of mip levels that 
+    // are actually valid to be loaded to the GPU. For instance, it will
+    // drop textures with non valid OpenGL pyramids.
+    int _GetNumMipLevelsValid(const GlfImageSharedPtr image) const;
+
+    GlfUVTextureData(std::string const &filePath, Params const &params);
     virtual ~GlfUVTextureData();
         
     const std::string _filePath;
@@ -159,7 +203,11 @@ private:
 
     size_t _size;
 
-    unsigned char *_rawBuffer;
+    std::unique_ptr<unsigned char[]> _rawBuffer;
+    std::vector<Mip> _rawBufferMips;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // GLF_UVTEXTURE_DATA_H

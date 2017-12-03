@@ -21,11 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glf/uvTexture.h
-
 #ifndef GLF_BASETEXTURE_H
 #define GLF_BASETEXTURE_H
 
+/// \file glf/uvTexture.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/imaging/glf/texture.h"
 
 #include "pxr/base/tf/declarePtrs.h"
@@ -36,16 +38,19 @@
 
 #include <string>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfBaseTexture);
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfBaseTextureData);
 
-/// 
-/// \class GlfBaseTexture Texture.h "pxr/imaging/glf/baseTexture.h"
-/// \brief Represents a texture object in Glf
+/// \class GlfBaseTexture
 ///
-
+/// Represents a texture object in Glf
+///
 class GlfBaseTexture : public GlfTexture {
 public:
+    GLF_API
     virtual ~GlfBaseTexture();
 
     /// Returns the OpenGl texture name for the texture. 
@@ -66,21 +71,26 @@ public:
     }
 
     // GlfTexture overrides
+    GLF_API
     virtual BindingVector GetBindings(TfToken const & identifier,
                                       GLuint samplerName) const;
+    GLF_API
     virtual VtDictionary GetTextureInfo() const;
 
 protected:
     
+    GLF_API
     GlfBaseTexture();
 
+    GLF_API
     void _UpdateTexture(GlfBaseTextureDataConstPtr texData);
+    GLF_API
     void _CreateTexture(GlfBaseTextureDataConstPtr texData,
-                        bool const generateMipmap,
-			int const unpackCropTop = 0,
-			int const unpackCropBottom = 0,
-			int const unpackCropLeft = 0,
-			int const unpackCropRight = 0);
+                        bool const useMipmaps,
+                        int const unpackCropTop = 0,
+                        int const unpackCropBottom = 0,
+                        int const unpackCropLeft = 0,
+                        int const unpackCropRight = 0);
 
 private:
 
@@ -95,5 +105,8 @@ private:
     GLenum	_wrapModeS;
     GLenum	_wrapModeT;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // GLF_BASETEXTURE_H

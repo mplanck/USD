@@ -24,6 +24,8 @@
 #ifndef SDF_LIST_OP_H
 #define SDF_LIST_OP_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/base/tf/token.h"
 
 #include <boost/function.hpp>
@@ -36,17 +38,26 @@
 #include <string>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \enum SdfListOpType
+///
 /// Enum for specifying one of the list editing operation types.
+///
 enum SdfListOpType {
     SdfListOpTypeExplicit,
     SdfListOpTypeAdded,
     SdfListOpTypeDeleted,
-    SdfListOpTypeOrdered
+    SdfListOpTypeOrdered,
+    SdfListOpTypePrepended,
+    SdfListOpTypeAppended
 };
 
-/// Trait classes for specializing behaviors of SdfListOp
-/// for a given item type.
+/// \struct Sdf_ListOpTraits
+///
+/// Trait classes for specializing behaviors of SdfListOp for a given item
+/// type.
+///
 template <class T>
 struct Sdf_ListOpTraits
 {
@@ -54,7 +65,8 @@ struct Sdf_ListOpTraits
 };
 
 /// \class SdfListOp
-/// \brief Value type representing a list-edit operation.
+///
+/// Value type representing a list-edit operation.
 ///
 /// SdfListOp is a value type representing an operation that edits a list.
 /// It may add or remove items, reorder them, or replace the list entirely.
@@ -67,18 +79,21 @@ public:
     typedef ItemType value_type;
     typedef ItemVector value_vector_type;
 
-    SdfListOp();
+    SDF_API SdfListOp();
 
-    void Swap(SdfListOp<T>& rhs);
+    SDF_API void Swap(SdfListOp<T>& rhs);
 
     /// Returns \c true if the editor has an explicit list (even if it's
-    /// empty) or it has any added, deleted, or ordered keys.
+    /// empty) or it has any added, prepended, appended, deleted,
+    /// or ordered keys.
     bool HasKeys() const
     {
         if (IsExplicit()) {
             return true;
         }
-        if (_addedItems.size() != 0 or
+        if (_addedItems.size() != 0 ||
+            _prependedItems.size() != 0 ||
+            _appendedItems.size() != 0 ||
             _deletedItems.size() != 0) {
             return true;
         }
@@ -103,6 +118,18 @@ public:
         return _addedItems;
     }
 
+    /// Returns the explicit items.
+    const ItemVector& GetPrependedItems() const
+    {
+        return _prependedItems;
+    }
+
+    /// Returns the explicit items.
+    const ItemVector& GetAppendedItems() const
+    {
+        return _appendedItems;
+    }
+
     /// Returns the deleted items.
     const ItemVector& GetDeletedItems() const
     {
@@ -116,21 +143,23 @@ public:
     }
 
     /// Return the item vector identified by \p type.
-    const ItemVector& GetItems(SdfListOpType type) const;
+    SDF_API const ItemVector& GetItems(SdfListOpType type) const;
 
-    void SetExplicitItems(const ItemVector &items);
-    void SetAddedItems(const ItemVector &items);
-    void SetDeletedItems(const ItemVector &items);
-    void SetOrderedItems(const ItemVector &items);
+    SDF_API void SetExplicitItems(const ItemVector &items);
+    SDF_API void SetAddedItems(const ItemVector &items);
+    SDF_API void SetPrependedItems(const ItemVector &items);
+    SDF_API void SetAppendedItems(const ItemVector &items);
+    SDF_API void SetDeletedItems(const ItemVector &items);
+    SDF_API void SetOrderedItems(const ItemVector &items);
 
     /// Sets the item vector for the given operation \p type.
-    void SetItems(const ItemVector &items, SdfListOpType type);
+    SDF_API void SetItems(const ItemVector &items, SdfListOpType type);
 
     /// Removes all items and changes the list to be non-explicit.
-    void Clear();
+    SDF_API void Clear();
 
     /// Removes all items and changes the list to be explicit.
-    void ClearAndMakeExplicit();
+    SDF_API void ClearAndMakeExplicit();
 
     /// Callback type for ApplyOperations.
     typedef boost::function<
@@ -142,8 +171,23 @@ public:
     /// before they are applied to \p vec. Consumers can use this to transform
     /// the items stored in the operation vectors to match what's stored in
     /// \p vec.
+    SDF_API 
     void ApplyOperations(ItemVector* vec, 
                          const ApplyCallback& cb = ApplyCallback()) const;
+
+    /// Applies edit operations to the given ListOp.
+    ///
+    /// The result is a ListOp that, when applied to a list, has the same
+    /// effect as applying \p inner and then \p this in sequence.
+    ///
+    /// The result will be empty if the result is not well defined.
+    /// The result is well-defined when \p inner and \p this do not
+    /// use the 'ordered' or 'added' item lists.  In other words, only
+    /// the explicit, prepended, appended, and deleted portions of
+    /// SdfListOp are closed under composition with ApplyOperations().
+    SDF_API 
+    boost::optional<SdfListOp<T>>
+    ApplyOperations(const SdfListOp<T> &inner) const;
 
     /// Callback type for ModifyOperations.
     typedef boost::function<
@@ -156,16 +200,18 @@ public:
     /// with the returned key.
     ///
     /// Returns true if a change was made, false otherwise.
-    bool ModifyOperations(const ModifyCallback& callback);
+    SDF_API bool ModifyOperations(const ModifyCallback& callback);
 
     /// Replaces the items in the specified operation vector in the range
     /// (index, index + n] with the given \p newItems. If \p newItems is empty
     /// the items in the range will simply be removed.
+    SDF_API 
     bool ReplaceOperations(const SdfListOpType op, size_t index, size_t n, 
                            const ItemVector& newItems);
 
     /// Composes a stronger SdfListOp's opinions for a given operation list
     /// over this one.
+    SDF_API 
     void ComposeOperations(const SdfListOp<T>& stronger, SdfListOpType op);
 
     friend inline size_t hash_value(const SdfListOp &op) {
@@ -173,6 +219,8 @@ public:
         boost::hash_combine(h, op._isExplicit);
         boost::hash_combine(h, op._explicitItems);
         boost::hash_combine(h, op._addedItems);
+        boost::hash_combine(h, op._prependedItems);
+        boost::hash_combine(h, op._appendedItems);
         boost::hash_combine(h, op._deletedItems);
         boost::hash_combine(h, op._orderedItems);
         return h;
@@ -182,6 +230,8 @@ public:
         return _isExplicit == rhs._isExplicit &&
                _explicitItems == rhs._explicitItems &&
                _addedItems == rhs._addedItems &&
+               _prependedItems == rhs._prependedItems &&
+               _appendedItems == rhs._appendedItems &&
                _deletedItems == rhs._deletedItems &&
                _orderedItems == rhs._orderedItems;
     };
@@ -198,6 +248,10 @@ private:
     typedef std::map<ItemType, typename _ApplyList::iterator, _ItemComparator>
         _ApplyMap;
 
+    void _AddKeys(SdfListOpType, const ApplyCallback& cb,
+                  _ApplyList* result, _ApplyMap* search) const;
+    void _PrependKeys(SdfListOpType, const ApplyCallback& cb,
+                      _ApplyList* result, _ApplyMap* search) const;
     void _AppendKeys(SdfListOpType, const ApplyCallback& cb,
                      _ApplyList* result, _ApplyMap* search) const;
     void _DeleteKeys(SdfListOpType, const ApplyCallback& cb,
@@ -209,6 +263,8 @@ private:
     bool _isExplicit;
     ItemVector _explicitItems;
     ItemVector _addedItems;
+    ItemVector _prependedItems;
+    ItemVector _appendedItems;
     ItemVector _deletedItems;
     ItemVector _orderedItems;
 };
@@ -216,12 +272,14 @@ private:
 // Helper function for applying an ordering operation described by \p orderVector
 // to vector \p v.
 template <class ItemType>
+SDF_API
 void SdfApplyListOrdering(std::vector<ItemType>* v, 
                           const std::vector<ItemType>& order);
 
 // Ostream output methods for list values (useful for debugging and required
 // for storing a list value in a VtValue).
 template <typename T>
+SDF_API
 std::ostream & operator<<( std::ostream &, const SdfListOp<T> & );
 
 // Concrete, instantiated listop types.
@@ -234,5 +292,7 @@ typedef class SdfListOp<std::string> SdfStringListOp;
 typedef class SdfListOp<class SdfPath> SdfPathListOp;
 typedef class SdfListOp<class SdfReference> SdfReferenceListOp;
 typedef class SdfListOp<class SdfUnregisteredValue> SdfUnregisteredValueListOp;
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_LIST_OP_H

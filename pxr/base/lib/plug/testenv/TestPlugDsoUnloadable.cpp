@@ -21,12 +21,23 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/plug/testPlugBase.h"
 
-// This plugin depends on an undefined external function
-// and so will be unloadable.
-extern int TestPlugDoSomethingUndefined();
-static int something = TestPlugDoSomethingUndefined();
+#include "pxr/pxr.h"
+#include "pxr/base/plug/testPlugBase.h"
+#include "pxr/base/tf/tf.h"
+
+// This plugin depends on an undefined external function and so will be
+// unloadable.  That's the whole point of this test.
+//
+// If you see an unresolved external symbol build error on Windows about
+// this symbol, please do as the symbol says and ignore the error.  The
+// link was successful, it just reported the error anyway.
+extern int Unresolved_external_symbol_error_is_expected_Please_ignore();
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+static int something =
+    Unresolved_external_symbol_error_is_expected_Please_ignore();
 
 class TestPlugUnloadable : public _TestPlugBase1 {
   public:
@@ -57,3 +68,5 @@ TF_REGISTRY_FUNCTION(TfType)
         .SetFactory<_TestPlugFactory<TestPlugUnloadable> >()
         ;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

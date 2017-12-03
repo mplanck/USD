@@ -24,9 +24,9 @@
 #ifndef TF_PYPOLYMORPHIC_H
 #define TF_PYPOLYMORPHIC_H
 
-///
-/// \file PyPolymorphic.h
-///
+/// \file tf/pyPolymorphic.h
+
+#include "pxr/pxr.h"
 
 #include "pxr/base/tf/pyOverride.h"
 
@@ -40,14 +40,14 @@
 #include <boost/python/object/class_detail.hpp>
 #include <boost/function.hpp>
 #include <boost/python/wrapper.hpp>
-#include <boost/static_assert.hpp>
 #include <boost/type_traits.hpp>
 #include <boost/python/has_back_reference.hpp>
 
 #include <type_traits>
 
-// XXX All this stuff with holding onto the class needs to go away
-// 2/07.
+// TODO: All this stuff with holding onto the class needs to go away.
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 template <typename Derived>
 struct TfPyPolymorphic :
@@ -104,7 +104,7 @@ struct TfPyPolymorphic :
                     PyErr_Clear();
 
                     // do the appropriate conversion, if possible
-                    if (borrowed_f and PyMethod_Check(borrowed_f.get())) {
+                    if (borrowed_f && PyMethod_Check(borrowed_f.get())) {
                         func_object =
                             ((PyMethodObject*)borrowed_f.get())->im_func;
                     }
@@ -126,7 +126,7 @@ struct TfPyPolymorphic :
     Override GetPureOverride(char const *func) const {
         TfPyLock pyLock;
         Override ret = GetOverride(func);
-        if (not ret) {
+        if (!ret) {
             // Raise a *python* exception when no virtual is found.  This is
             // because a subsequent attempt to call ret will result in a python
             // exception, but a far less useful one.  If we were to simply make
@@ -202,7 +202,8 @@ TfPyPolymorphic<Derived>::CallVirtual(
     char const *fname,
     Ret (Cls::*defaultImpl)(Args...))
 {
-    BOOST_STATIC_ASSERT((boost::is_base_of<This, Cls>::value));
+    static_assert(std::is_base_of<This, Cls>::value,
+                  "This must be a base of Cls.");
     TfPyLock lock;
     if (Override o = GetOverride(fname))
         return boost::function<Ret (Args...)>(TfPyCall<Ret>(o));
@@ -218,7 +219,8 @@ TfPyPolymorphic<Derived>::CallVirtual(
     char const *fname,
     Ret (Cls::*defaultImpl)(Args...) const) const
 {
-    BOOST_STATIC_ASSERT((boost::is_base_of<This, Cls>::value));
+    static_assert(std::is_base_of<This, Cls>::value,
+                  "This must be a base of Cls.");
     TfPyLock lock;
     if (Override o = GetOverride(fname))
         return boost::function<Ret (Args...)>(TfPyCall<Ret>(o));
@@ -226,13 +228,17 @@ TfPyPolymorphic<Derived>::CallVirtual(
         defaultImpl, static_cast<Cls const *>(this));
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // Specialize has_back_reference<> so that boost.python will pass
 // PyObject* as the 1st argument to TfPyPolymorphic's ctor.
 namespace boost { namespace python {
     template <typename T>
-    struct has_back_reference< TfPyPolymorphic<T> >
+    struct has_back_reference< PXR_NS::TfPyPolymorphic<T> >
         : mpl::true_ {};
-}}
+}} // end namespace boost
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // Base case for internal Tf_PyMemberFunctionPointerUpcast.
 template <typename Base, typename Fn>
@@ -260,5 +266,7 @@ TfPyProtectedVirtual( Fn fn )
     
     return static_cast<Ret>(fn);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_PYPOLYMORPHIC_H

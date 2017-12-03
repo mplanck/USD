@@ -24,78 +24,105 @@
 #ifndef HD_SHADER_H
 #define HD_SHADER_H
 
-#include "pxr/imaging/hd/version.h"
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
+#include "pxr/imaging/hd/sprim.h"
+#include "pxr/imaging/hd/sceneDelegate.h"
 
-#include "pxr/imaging/hd/resourceBinder.h"  // XXX: including a private class
-#include "pxr/imaging/hd/shaderParam.h"
-#include "pxr/base/tf/token.h"
+PXR_NAMESPACE_OPEN_SCOPE
 
-#include <boost/shared_ptr.hpp>
+// XXX: Temporary until Rprim moves to HdSt.
+typedef boost::shared_ptr<class HdShaderCode> HdShaderCodeSharedPtr;
 
-#include <string>
-#include <vector>
-
-typedef std::vector<class HdBindingRequest> HdBindingRequestVector;
-
-typedef boost::shared_ptr<class HdShader> HdShaderSharedPtr;
-typedef boost::shared_ptr<class HdTexture> HdTextureSharedPtr;
-typedef std::vector<HdShaderSharedPtr> HdShaderSharedPtrVector;
-typedef std::vector<HdShaderSharedPtr> HdTextureSharedPtrVector;
-
-/// A shader base class, used in conjunction with HdRenderPass.
 ///
-/// This interface provides a simple way for clients to affect the
-/// composition of shading programs used for a render pass.
-class HdShader {
+/// Hydra Schema for a shader object.
+///
+class HdShader : public HdSprim {
 public:
-    typedef size_t ID;
+    // change tracking for HdShader prim
+    enum DirtyBits : HdDirtyBits {
+        Clean                 = 0,
+        // XXX: Got to skip varying and force sync bits for now
+        DirtySurfaceShader    = 1 << 2,
+        DirtyParams           = 1 << 3,
+        DirtyComputeShader    = 1 << 4,
+        DirtyResource         = 1 << 5,
+        AllDirty              = (DirtySurfaceShader
+                                 |DirtyParams
+                                 |DirtyComputeShader
+                                 |DirtyResource)
+    };
 
-    HdShader();
+    HD_API
     virtual ~HdShader();
 
-    /// Returns the hash value of this shader.
-    virtual ID ComputeHash() const = 0;
+    /// Causes the shader to be reloaded.
+    virtual void Reload() = 0;
 
-    /// Returns the combined hash values of multiple shaders.
-    static ID ComputeHash(HdShaderSharedPtrVector const &shaders);
+    // XXX: Temporary until Rprim moves to HdSt.
+    // Obtains the render delegate specific representation of the shader.
+    virtual HdShaderCodeSharedPtr GetShaderCode() const = 0;
 
-    /// Returns the shader source provided by this shader
-    /// for \a shaderStageKey
-    virtual std::string GetSource(TfToken const &shaderStageKey) const = 0;
+protected:
+    HD_API
+    HdShader(SdfPath const& id);
 
-    // XXX: Should be pure-virtual
-    /// Returns the shader parameters for this shader.
-    virtual HdShaderParamVector const& GetParams() const;
-
-    struct TextureDescriptor {
-        TfToken name;
-        size_t handle; // GLuint64, for bindless textures
-        enum { TEXTURE_2D, TEXTURE_PTEX_TEXEL, TEXTURE_PTEX_LAYOUT };
-        int type;
-        unsigned int sampler;
-    };
-    typedef std::vector<TextureDescriptor> TextureDescriptorVector;
-
-    // XXX: DOC
-    virtual TextureDescriptorVector GetTextures() const;
-
-    // XXX: Should be pure-virtual
-    /// Returns a buffer which stores parameter fallback values and texture
-    /// handles.
-    virtual HdBufferArrayRangeSharedPtr const& GetShaderData() const;
-
-    /// Binds shader-specific resources to \a program
-    /// XXX: this interface is meant to be used for bridging
-    /// the GlfSimpleLightingContext mechanism, and not for generic use-cases.
-    virtual void BindResources(Hd_ResourceBinder const &binder,
-                               int program) = 0;
-
-    /// Unbinds shader-specific resources.
-    virtual void UnbindResources(Hd_ResourceBinder const &binder,
-                                 int program) = 0;
-
-    /// Add custom bindings (used by codegen)
-    virtual void AddBindings(HdBindingRequestVector* customBindings) = 0;
+private:
+    // Class can not be default constructed or copied.
+    HdShader()                             = delete;
+    HdShader(const HdShader &)             = delete;
+    HdShader &operator =(const HdShader &) = delete;
 };
 
-#endif //HD_SHADER_H
+
+/// \struct HdMaterialRelationship
+///
+/// Describes a connection between two nodes/terminals.
+struct HdMaterialRelationship {
+    SdfPath sourceId;
+    TfToken sourceTerminal;
+    SdfPath remoteId;
+    TfToken remoteTerminal;
+};
+
+// VtValue requirements
+bool operator==(const HdMaterialRelationship& lhs, 
+                const HdMaterialRelationship& rhs);
+
+
+/// \struct HdMaterialNode
+///
+/// Describes a material node which is made of a path, a type and
+/// a list of parameters.
+struct HdMaterialNode {
+    SdfPath path;
+    TfToken type;
+    std::map<TfToken, VtValue> parameters;
+};
+
+// VtValue requirements
+HD_API
+bool operator==(const HdMaterialNode& lhs, const HdMaterialNode& rhs);
+
+
+/// \struct HdMaterialNodes
+///
+/// Describes a material network composed of nodes and relationships
+/// between the nodes and terminals of those nodes.
+struct HdMaterialNodes {
+    std::vector<HdMaterialRelationship> relationships;
+    std::vector<HdMaterialNode> nodes;
+};
+
+// VtValue requirements
+HD_API
+std::ostream& operator<<(std::ostream& out, const HdMaterialNodes& pv);
+HD_API
+bool operator==(const HdMaterialNodes& lhs, const HdMaterialNodes& rhs);
+HD_API
+bool operator!=(const HdMaterialNodes& lhs, const HdMaterialNodes& rhs);
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // HD_SHADER_H

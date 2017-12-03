@@ -24,16 +24,20 @@
 #ifndef TF_TEMPLATE_STRING_H
 #define TF_TEMPLATE_STRING_H
 
-///
-/// \file Tf/TemplateString.h
-#include <boost/shared_ptr.hpp>
-#include <boost/noncopyable.hpp>
+/// \file tf/templateString.h
+
+#include "pxr/pxr.h"
+
+#include "pxr/base/tf/api.h"
 
 #include <tbb/spin_mutex.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 /// \class TfTemplateString
 /// \ingroup group_tf_String
@@ -61,9 +65,11 @@ public:
     typedef std::map<std::string, std::string> Mapping;
 
     /// Constructs a new template string.
+    TF_API
     TfTemplateString();
 
     /// Constructs a new template string.
+    TF_API
     TfTemplateString(const std::string& template_);
 
     /// Returns the template source string supplied to the constructor.
@@ -73,22 +79,27 @@ public:
     /// contains keys which match the placeholders in the template. If a
     /// placeholder is found for which no mapping is present, a coding error is
     /// raised.
+    TF_API
     std::string Substitute(const Mapping&) const;
 
     /// Like Substitute(), except that if placeholders are missing from the
     /// mapping, instead of raising a coding error, the original placeholder
     /// will appear in the resulting string intact.
+    TF_API
     std::string SafeSubstitute(const Mapping&) const;
 
     /// Returns an empty mapping for the current template. This method first
     /// calls IsValid to ensure that the template is valid.
+    TF_API
     Mapping GetEmptyMapping() const;
 
     /// Returns true if the current template is well formed. Empty templates are
     /// valid.
+    TF_API
     bool IsValid() const;
 
     /// Returns any error messages generated during template parsing.
+    TF_API
     std::vector<std::string> GetParseErrors() const;
 
 private:
@@ -117,8 +128,11 @@ private:
     void _EmitParseErrors() const;
 
     // Structure side-allocated and shared between copies.
-    struct _Data : boost::noncopyable
+    struct _Data
     {
+        _Data(_Data const &) = delete;
+        _Data &operator=(_Data const &) = delete;
+
         _Data() : parsed(false) {}
 
         std::string template_;
@@ -128,9 +142,9 @@ private:
         mutable tbb::spin_mutex mutex;
     };
 
-    boost::shared_ptr<_Data> _data;
+    std::shared_ptr<_Data> _data;
 };
 
-#endif /* TF_TEMPLATE_STRING_H */
+PXR_NAMESPACE_CLOSE_SCOPE
 
-
+#endif // TF_TEMPLATE_STRING_H 

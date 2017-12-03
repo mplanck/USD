@@ -21,11 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glf/bindingMap.h
-
 #ifndef GLF_BINDING_MAP_H
 #define GLF_BINDING_MAP_H
 
+/// \file glf/bindingMap.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/imaging/garch/gl.h"
 #include "pxr/base/tf/refBase.h"
 #include "pxr/base/tf/stringUtils.h"
@@ -34,23 +36,33 @@
 
 #include "pxr/base/tf/hashmap.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class GlfBindingMap : public TfRefBase, public TfWeakBase {
 public:
     typedef TfHashMap<TfToken, int, TfToken::HashFunctor> BindingMap;
 
+    GLF_API
     int GetSamplerUnit(std::string const &name);
+    GLF_API
     int GetSamplerUnit(TfToken const & name);
 
     // If GetAttributeIndex is called with an unknown
     // attribute token they return -1
+    GLF_API
     int GetAttributeIndex(std::string const & name);
+    GLF_API
     int GetAttributeIndex(TfToken const & name);
 
+    GLF_API
     int GetUniformBinding(std::string const & name);
+    GLF_API
     int GetUniformBinding(TfToken const & name);
 
+    GLF_API
     bool HasUniformBinding(std::string const & name) const;
+    GLF_API
     bool HasUniformBinding(TfToken const & name) const;
 
     int GetNumSamplerBindings() const {
@@ -69,12 +81,16 @@ public:
         return _attribBindings;
     }
 
+    GLF_API
     void AssignSamplerUnitsToProgram(GLuint program);
 
+    GLF_API
     void AssignUniformBindingsToProgram(GLuint program);
 
+    GLF_API
     void AddCustomBindings(GLuint program);
 
+    GLF_API
     void Debug() const;
 
 private:
@@ -86,5 +102,8 @@ private:
     BindingMap _samplerBindings;
     BindingMap _uniformBindings;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // GLF_BINDING_MAP_H

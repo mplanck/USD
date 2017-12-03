@@ -23,12 +23,15 @@
 //
 #include "usdVMP.h"
 
+#include "pxr/pxr.h"
 #include "usdKatana/cache.h"
 #include "usdKatana/locks.h"
 #include "pxr/base/work/threadLimits.h"
 
 #include "pxr/base/tf/envSetting.h"
 #include "pxr/base/arch/systemInfo.h"
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 TF_DEFINE_ENV_SETTING(USDVMP_PROXY_OVERLAY, "ghosted",
             "Overlay effect to distinguish proxies from real geometry. "
@@ -46,8 +49,8 @@ _GetProxyOverlayMode()
 {
     TfToken overlay(TfGetEnvSetting(USDVMP_PROXY_OVERLAY));
     if (overlay != _tokens->ghosted
-        and overlay != _tokens->none
-        and overlay != _tokens->wireframe)
+        && overlay != _tokens->none
+        && overlay != _tokens->wireframe)
     {
         TF_WARN("Invalid proxy USDVMP_PROXY_OVERLAY mode: %s\n", overlay.GetText());
         return _tokens->ghosted;
@@ -99,7 +102,7 @@ USDVMP::setup(FnKat::ViewerModifierInput& input)
     boost::shared_lock<boost::upgrade_mutex> readerLock(UsdKatanaGetStageLock());
 
     // Open stage if necessary.
-    if (not _stage) {
+    if (!_stage) {
 
         // Get usd file, node path, and current time, 
         // needed to call TidSceneRenderer
@@ -109,8 +112,17 @@ USDVMP::setup(FnKat::ViewerModifierInput& input)
                 input.getAttribute("rootLocation");
         FnKat::StringAttribute usdReferencePathAttr = 
                 input.getAttribute("referencePath");
-        FnKat::StringAttribute variantStringAttr =
-                input.getAttribute("variants");
+        
+        FnKat::GroupAttribute sessionAttr =
+               input.getAttribute("session");
+        
+        std::string sessionLocation = FnKat::StringAttribute(
+                input.getAttribute("rootLocation")).getValue("", false);
+        sessionLocation = FnKat::StringAttribute(
+                input.getAttribute("sessionLocation")).getValue(
+                        sessionLocation, false);
+
+        
         FnKat::StringAttribute ignoreLayerAttr=
                 input.getAttribute("ignoreLayerRegex");
         FnKat::FloatAttribute forcePopulateAttr = 
@@ -119,7 +131,13 @@ USDVMP::setup(FnKat::ViewerModifierInput& input)
         std::string usdFile = usdFileAttr.getValue("", false);
         std::string usdRootLocation = usdRootLocationAttr.getValue("", false);
         std::string usdReferencePath = usdReferencePathAttr.getValue("",false);
-        std::string variantString = variantStringAttr.getValue("",false);
+        
+        std::string sessionKey;
+        if (sessionAttr.isValid())
+        {
+            sessionKey = sessionAttr.getHash().str();
+        }
+        
         std::string ignoreLayerRegex = ignoreLayerAttr.getValue("$^", false);
         bool forcePopulate = forcePopulateAttr.getValue((float)true,false);
 
@@ -127,11 +145,12 @@ USDVMP::setup(FnKat::ViewerModifierInput& input)
             return;
 
         _stage = UsdKatanaCache::GetInstance().GetStage(usdFile, 
-                                                        variantString,
+                                                        sessionAttr,
+                                                        sessionLocation,
                                                         ignoreLayerRegex,
                                                         forcePopulate);
 
-        if (not _stage) {
+        if (!_stage) {
             TF_DEBUG(KATANA_DEBUG_VMP_USD).Msg(
                 "Cannot resolve path %s", usdFile.c_str());
             return;
@@ -142,14 +161,14 @@ USDVMP::setup(FnKat::ViewerModifierInput& input)
         else
             _prim = _stage->GetPrimAtPath(SdfPath(usdReferencePath));
 
-        if (not _prim)
+        if (!_prim)
             FnLogWarn(std::string("Cannot compose ") + 
                 _prim.GetPath().GetString());
 
-        _params.cullStyle = UsdImagingEngine::CULL_STYLE_BACK_UNLESS_DOUBLE_SIDED;
+        _params.cullStyle = UsdImagingGLEngine::CULL_STYLE_BACK_UNLESS_DOUBLE_SIDED;
 
         _renderer = UsdKatanaCache::GetInstance()
-                                  .GetRenderer(_stage, _prim, variantString);
+                                  .GetRenderer(_stage, _prim, sessionKey);
     }
     
     // always update frame time
@@ -158,6 +177,9 @@ USDVMP::setup(FnKat::ViewerModifierInput& input)
     _params.frame = currentTime;
     
     
+    // To allow drawing of proxies, load the current prim's subtree
+    // before rendering.
+    _loadSubtreeForCurrentPrim();
     
 }
 
@@ -167,12 +189,23 @@ USDVMP::deepSetup(FnKat::ViewerModifierInput& input)
     TF_DEBUG(KATANA_DEBUG_VMP_USD).Msg("%s @ %p : %s\n",
             TF_FUNC_NAME().c_str(), this, input.getFullName().c_str());
 
-    // To allow drawing of proxies, load the current prim's subtree
-    // before rendering.
-    _loadSubtreeForCurrentPrim();
     
     // We are taking over all drawing for this location.
     input.overrideHostGeometry();
+
+    // store the view matrix
+    FnKat::DoubleAttribute mAttr = input.getDisplayMatrix(VIEW);
+    if (mAttr.isValid()) {
+        FnKat::DoubleConstVector vm = mAttr.getNearestSample(0.f);
+        _viewMatrix =
+              GfMatrix4d(GfRotation(GfVec3d(-1,0,0), 90), GfVec3d(0))
+            * GfMatrix4d(vm[0], vm[1], vm[2], vm[3],
+                         vm[4], vm[5], vm[6], vm[7],
+                         vm[8], vm[9], vm[10], vm[11],
+                         vm[12], vm[13], vm[14], vm[15]);
+    } else {
+        _viewMatrix = GfMatrix4d(1);
+    }
 }
 
 
@@ -261,7 +294,38 @@ USDVMP::draw(FnKat::ViewerModifierInput& input)
         glGetIntegerv(GL_CURRENT_PROGRAM, &oldProgram);
 
         if (TF_VERIFY(_renderer)) {
-            _renderer->SetCameraStateFromOpenGL();
+            // Copy camera from GL state, Katana does not provide it directly
+            GfMatrix4d modelViewMatrix, projectionMatrix;
+            GfVec4d viewport;
+            glGetDoublev(GL_MODELVIEW_MATRIX, modelViewMatrix.GetArray());
+            glGetDoublev(GL_PROJECTION_MATRIX, projectionMatrix.GetArray());
+            glGetDoublev(GL_VIEWPORT, &viewport[0]);
+
+            _renderer->SetCameraState(_viewMatrix, projectionMatrix, viewport);
+
+            GfMatrix4d modelMatrix = modelViewMatrix * (_viewMatrix.GetInverse());
+            
+            /// XXX suppressing repeated calls to SetRootTransform for very
+            ///     similar values. The episilon is big to account for the
+            ///     precision lost when computing relative to the _viewMatrix
+            ///     Querying the GL state for transformation is currently the
+            ///     most reliable way of getting (close to) accurate answers
+            ///     for all cases given our use of a VMP within a katana viewer
+            ///     proxy sub-scene.
+            ///     TODO: find a better way and ensure that katana 3.0's
+            ///           viewer can answer this directly.
+            double * modelMatrixValues = modelMatrix.GetArray();
+            for (int i = 0; i < 16; ++i)
+            {
+                if (!GfIsClose(modelMatrixValues[i], _lastModelMatrix[i], 0.01))
+                {
+                    _renderer->SetRootTransform(modelMatrix);
+                    memcpy(&_lastModelMatrix[0], modelMatrixValues,
+                            sizeof(double) * 16);
+                    break;
+                }
+            }
+            
 
             glPushAttrib(GL_LIGHTING_BIT | GL_ENABLE_BIT);
 
@@ -272,7 +336,11 @@ USDVMP::draw(FnKat::ViewerModifierInput& input)
                 glLightfv(GL_LIGHT0, GL_AMBIENT, params);
             }
 
+            glMatrixMode(GL_MODELVIEW);
+            glPushMatrix();
+            glLoadMatrixd(_viewMatrix.GetArray());
             _renderer->SetLightingStateFromOpenGL();
+            glPopMatrix();
 
             glPopAttrib();
 
@@ -322,13 +390,17 @@ USDVMP::flush()
 void
 USDVMP::_loadSubtreeForCurrentPrim()
 {
+    if (!_prim) {
+        return;
+    }
+
     // Grab an upgrade lock in case we have to write. Only one thread can pass
     // this lock, but it does not block other shared locks.
     boost::upgrade_lock<boost::upgrade_mutex>
                                 readerLock(UsdKatanaGetStageLock());
 
     UsdPrimSiblingRange childrenToLoad = _prim.GetFilteredChildren(
-                not UsdPrimIsLoaded and UsdPrimIsActive);
+                !UsdPrimIsLoaded && UsdPrimIsActive);
 
     if(!childrenToLoad.empty()) {
         // We have to compose more of the usd stage, upgrade to a unique lock

@@ -24,15 +24,20 @@
 #ifndef USD_SCHEMAREGISTRY_H
 #define USD_SCHEMAREGISTRY_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
+
 #include "pxr/usd/sdf/layer.h"
 #include "pxr/usd/sdf/primSpec.h"
-SDF_DECLARE_HANDLES(SdfAttributeSpec);
-SDF_DECLARE_HANDLES(SdfRelationshipSpec);
 
 #include "pxr/base/tf/hash.h"
 #include "pxr/base/tf/singleton.h"
-
 #include "pxr/base/tf/hashmap.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+SDF_DECLARE_HANDLES(SdfAttributeSpec);
+SDF_DECLARE_HANDLES(SdfRelationshipSpec);
 
 /// \class UsdSchemaRegistry
 ///
@@ -47,8 +52,10 @@ SDF_DECLARE_HANDLES(SdfRelationshipSpec);
 /// for un-instantiated "builtin" properties of schema classes, and also
 /// to enumerate all properties for a given schema class, and finally to
 /// provide fallback values for unauthored builtin properties.
+///
 class UsdSchemaRegistry : public TfSingleton<UsdSchemaRegistry> {
 public:
+    USD_API
     static UsdSchemaRegistry& GetInstance() {
         return TfSingleton<UsdSchemaRegistry>::GetInstance();
     }
@@ -59,12 +66,14 @@ public:
 
     /// Return the PrimSpec that contains all the builtin metadata and
     /// properties for the given \a primType.  Return null if there is no such
-    /// prim defintion.
+    /// prim definition.
+    USD_API
     static SdfPrimSpecHandle GetPrimDefinition(const TfToken &primType);
 
     /// Return the PrimSpec that contains all the bulitin metadata and
     /// properties for the given \a primType.  Return null if there is no such
-    /// prim defintion.
+    /// prim definition.
+    USD_API
     static SdfPrimSpecHandle GetPrimDefinition(const TfType &primType);
 
     /// Return the PrimSpec that contains all the builtin metadata and
@@ -78,6 +87,7 @@ public:
     /// Return the property spec that defines the fallback for the property
     /// named \a propName on prims of type \a primType.  Return null if there is
     /// no such property definition.
+    USD_API
     static SdfPropertySpecHandle
     GetPropertyDefinition(const TfToken& primType,
                           const TfToken& propName);
@@ -85,6 +95,7 @@ public:
     /// This is a convenience method. It is shorthand for
     /// TfDynamic_cast<SdfAttributeSpecHandle>(
     ///     GetPropertyDefinition(primType, attrName));
+    USD_API
     static SdfAttributeSpecHandle
     GetAttributeDefinition(const TfToken& primType,
                            const TfToken& attrName);
@@ -92,6 +103,7 @@ public:
     /// This is a convenience method. It is shorthand for
     /// TfDynamic_cast<SdfRelationshipSpecHandle>(
     ///     GetPropertyDefinition(primType, relName));
+    USD_API
     static SdfRelationshipSpecHandle
     GetRelationshipDefinition(const TfToken& primType, const TfToken& relName);
 
@@ -145,6 +157,25 @@ public:
         return false;
     }
 
+    /// Returns list of fields that cannot have fallback values
+    /// specified in schemas. 
+    /// 
+    /// Fields are generally in this list because their fallback values
+    /// aren't used. For instance, fallback values for composition arcs
+    /// aren't used during composition, so allowing them to be set in
+    /// schemas would be misleading.
+    USD_API
+    static std::vector<TfToken> GetDisallowedFields();
+
+    /// Returns true if the prim type \p primType inherits from \ref UsdTyped. 
+    USD_API
+    static bool IsTyped(const TfType& primType);
+
+    /// Returns true if the prim type \p primType is instantiable
+    /// in scene description.
+    USD_API
+    static bool IsConcrete(const TfType& primType);
+
 private:
     friend class TfSingleton<UsdSchemaRegistry>;
 
@@ -160,6 +191,7 @@ private:
     // Helper for looking up the prim definition path for a given primType.
     const SdfPath& _GetSchemaPrimPath(const TfType &primType) const;
 
+    USD_API
     const SdfAbstractDataSpecId *_GetSpecId(const TfToken &primType,
                                             const TfToken &propName) const;
 
@@ -196,5 +228,9 @@ private:
         _TokenPairHash> _PrimTypePropNameToSpecIdMap;
     _PrimTypePropNameToSpecIdMap _primTypePropNameToSpecIdMap;
 };
+
+USD_API_TEMPLATE_CLASS(TfSingleton<UsdSchemaRegistry>);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //USD_SCHEMAREGISTRY_H

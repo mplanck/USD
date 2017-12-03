@@ -24,9 +24,26 @@
 #ifndef PXRUSDMAYA_JOBARGS_H
 #define PXRUSDMAYA_JOBARGS_H
 
+/// \file JobArgs.h
+
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
 #include "usdMaya/util.h"
 
+#include "pxr/base/tf/staticTokens.h"
 #include "pxr/base/tf/token.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+#define PXRUSDMAYA_TRANSLATOR_TOKENS \
+    ((UsdFileExtensionDefault, "usd")) \
+    ((UsdFileExtensionASCII, "usda")) \
+    ((UsdFileExtensionCrate, "usdc")) \
+    ((UsdFileFilter, "*.usd *.usda *.usdc"))
+
+TF_DECLARE_PUBLIC_TOKENS(PxrUsdMayaTranslatorTokens,
+        PXRUSDMAYA_TRANSLATOR_TOKENS);
 
 #define PXRUSDMAYA_JOBARGS_TOKENS \
     (Full) \
@@ -41,6 +58,7 @@ TF_DECLARE_PUBLIC_TOKENS(PxUsdExportJobArgsTokens,
 
 struct JobExportArgs
 {
+    PXRUSDMAYA_API
     JobExportArgs();
 
     bool exportRefsAsInstanceable;
@@ -48,6 +66,7 @@ struct JobExportArgs
     TfToken shadingMode;
     
     bool mergeTransformAndShape;
+    bool exportInstances;
 
     bool exportAnimation;
     bool excludeInvisible;
@@ -56,6 +75,9 @@ struct JobExportArgs
     bool exportMeshUVs;
     bool normalizeMeshUVs;
     
+    bool exportMaterialCollections;
+    std::string materialCollectionsPath;
+
     bool normalizeNurbs;
     bool exportNurbsExplicitUV;
     TfToken nurbsExplicitUVType;
@@ -83,18 +105,27 @@ struct JobExportArgs
     // where a _BaseModel_ root path is used instead of
     // the model path. This to allow a proper internal reference
     SdfPath usdModelRootOverridePath;
+
+    TfToken rootKind;
 };
 
 struct JobImportArgs
 {
+    PXRUSDMAYA_API
     JobImportArgs();
 
     TfToken shadingMode;
     TfToken defaultMeshScheme;
     TfToken assemblyRep;
     bool readAnimData;
+    bool useCustomFrameRange;
+    double startTime;
+    double endTime;
     bool importWithProxyShapes;
 };
 
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDMAYA_JOBARGS_H

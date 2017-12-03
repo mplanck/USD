@@ -21,10 +21,6 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 #
-from PySide import QtGui, QtCore
-from pxr import Tf
-from pxr import UsdGeom
-from datetime import datetime
 
 #
 # Edit the following to alter the set of custom attributes.
@@ -32,90 +28,87 @@ from datetime import datetime
 # Every entry should be an object derived from CustomAttribute,
 # defined below.
 #
-def _GetCustomAttributes(currentNode, bboxCache, xformCache):
-    attrList = [BoundingBoxAttribute(currentNode, bboxCache),
-                      LocalToWorldXformAttribute(currentNode, xformCache)]
-
-    attrList += [RelationshipAttribute(currentNode, relationship) \
-                    for relationship in currentNode.GetRelationships()]
-
-    return attrList
+def _GetCustomAttributes(currentPrim, bboxCache, xformCache):
+    return ([BoundingBoxAttribute(currentPrim, bboxCache),
+               LocalToWorldXformAttribute(currentPrim, xformCache)],
+            [RelationshipAttribute(currentPrim, relationship) \
+                    for relationship in currentPrim.GetRelationships()])
 
 #
-# The base class for per-node custom attributes.
+# The base class for per-prim custom attributes.
 #
 class CustomAttribute:
-    def __init__(self, currentNode):
-    	self._currentNode = currentNode
+    def __init__(self, currentPrim):
+        self._currentPrim = currentPrim
 
     def IsVisible(self):
-	return True
+        return True
 
     # GetName function to match UsdAttribute API
     def GetName(self):
-    	return ""
+        return ""
 
     # Get function to match UsdAttribute API
     def Get(self, frame):
-	return ""
+        return ""
 
     # convenience function to make this look more like a UsdAttribute
     def GetTypeName(self):
         return ""
-        
+
 #
-# Displays the bounding box of a node
+# Displays the bounding box of a prim
 #
 class BoundingBoxAttribute(CustomAttribute):
-    def __init__(self, currentNode, bboxCache):
-        CustomAttribute.__init__(self, currentNode)
+    def __init__(self, currentPrim, bboxCache):
+        CustomAttribute.__init__(self, currentPrim)
         # This is transient. The custom attr classes change every frame and
         # after every new selection.
         self._bboxCache = bboxCache
 
     def GetName(self):
-	return "World Bounding Box"
-	
+        return "World Bounding Box"
+
     def Get(self, frame):
-    	try:
-            bbox = self._bboxCache.ComputeWorldBound(self._currentNode)
-            
+        try:
+            bbox = self._bboxCache.ComputeWorldBound(self._currentPrim)
+
         except RuntimeError, err:
-    	    bbox = "Invalid: " + str(err)
-	
-	return bbox
+            bbox = "Invalid: " + str(err)
+
+        return bbox
 
 #
-# Displays the Local to world xform of a node
+# Displays the Local to world xform of a prim
 #
 class LocalToWorldXformAttribute(CustomAttribute):
-    def __init__(self, currentNode, xformCache):
-        CustomAttribute.__init__(self, currentNode)
+    def __init__(self, currentPrim, xformCache):
+        CustomAttribute.__init__(self, currentPrim)
         # This is transient. The custom attr classes change every frame and
         # after every new selection.
         self._xformCache = xformCache
 
     def GetName(self):
-	return "Local to World Xform"
-	
-    def Get(self, frame):
-    	try:
-    	    pwt = self._xformCache.GetLocalToWorldTransform(self._currentNode)
-    	except RuntimeError, err:
-    	    pwt = "Invalid: " + str(err)
-	
-	return pwt
+        return "Local to World Xform"
 
-# 
-# Displays a relationship on the node
+    def Get(self, frame):
+        try:
+            pwt = self._xformCache.GetLocalToWorldTransform(self._currentPrim)
+        except RuntimeError, err:
+            pwt = "Invalid: " + str(err)
+
+        return pwt
+
+#
+# Displays a relationship on the prim
 #
 class RelationshipAttribute(CustomAttribute):
-    def __init__(self, currentNode, relationship):
-        CustomAttribute.__init__(self, currentNode)
+    def __init__(self, currentPrim, relationship):
+        CustomAttribute.__init__(self, currentPrim)
         self._relationship = relationship
 
     def GetName(self):
-        return "[Relationship] " + self._relationship.GetName()
+        return self._relationship.GetName()
 
     def Get(self, frame):
         return self._relationship.GetTargets()

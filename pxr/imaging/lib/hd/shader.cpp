@@ -23,54 +23,56 @@
 //
 #include "pxr/imaging/hd/shader.h"
 
-#include "pxr/base/tf/iterator.h"
+PXR_NAMESPACE_OPEN_SCOPE
 
-#include <boost/functional/hash.hpp>
-
-HdShader::HdShader()
+HdShader::HdShader(SdfPath const& id)
+ : HdSprim(id)
 {
-    /*NOTHING*/
+    // NOTHING
 }
 
-/*virtual*/
 HdShader::~HdShader()
 {
-    /*NOTHING*/
+    // NOTHING
 }
 
-/* static */
-size_t
-HdShader::ComputeHash(HdShaderSharedPtrVector const &shaders)
+
+// -------------------------------------------------------------------------- //
+// VtValue Requirements
+// -------------------------------------------------------------------------- //
+
+std::ostream& operator<<(std::ostream& out, const HdMaterialNodes& pv)
 {
-    size_t hash = 0;
-    
-    TF_FOR_ALL(it, shaders) {
-        boost::hash_combine(hash, (*it)->ComputeHash());
-    }
-    
-    return hash;
+    out << "HdMaterialNodes Params: (...) " ;
+    return out;
 }
 
-/*virtual*/
-HdShaderParamVector const&
-HdShader::GetParams() const
+bool operator==(const HdMaterialRelationship& lhs, 
+                const HdMaterialRelationship& rhs)
 {
-    static HdShaderParamVector const empty;
-    return empty;
+    return lhs.sourceId       == rhs.sourceId && 
+           lhs.sourceTerminal == rhs.sourceTerminal &&
+           lhs.remoteId       == rhs.remoteId &&
+           lhs.remoteTerminal == rhs.remoteTerminal;
 }
 
-/*virtual*/
-HdBufferArrayRangeSharedPtr const&
-HdShader::GetShaderData() const
+bool operator==(const HdMaterialNode& lhs, const HdMaterialNode& rhs)
 {
-    static HdBufferArrayRangeSharedPtr EMPTY;
-    return EMPTY;
+    return lhs.path == rhs.path &&
+           lhs.type == rhs.type &&
+           lhs.parameters == rhs.parameters;
 }
 
-/*virtual*/
-HdShader::TextureDescriptorVector 
-HdShader::GetTextures() const
+bool operator==(const HdMaterialNodes& lhs, const HdMaterialNodes& rhs) 
 {
-    return HdShader::TextureDescriptorVector();
+    return lhs.relationships           == rhs.relationships && 
+           lhs.nodes                   == rhs.nodes;
 }
 
+bool operator!=(const HdMaterialNodes& lhs, const HdMaterialNodes& rhs) 
+{
+    return !(lhs == rhs);
+}
+
+
+PXR_NAMESPACE_CLOSE_SCOPE

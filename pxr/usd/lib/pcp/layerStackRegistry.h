@@ -21,15 +21,19 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file pcp/layerStackRegistry.h
-
 #ifndef PCP_LAYER_STACK_REGISTRY_H
 #define PCP_LAYER_STACK_REGISTRY_H
 
+/// \file pcp/layerStackRegistry.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/errors.h"
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/refBase.h"
-#include <boost/scoped_ptr.hpp>
+
+#include <memory>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_DECLARE_WEAK_AND_REF_PTRS(PcpLayerStack);
 TF_DECLARE_REF_PTRS(Pcp_LayerStackRegistry);
@@ -39,7 +43,8 @@ class Pcp_LayerStackRegistryData;
 class Pcp_MutedLayers;
 
 /// \class Pcp_LayerStackRegistry
-/// \brief A registry of layer stacks
+///
+/// A registry of layer stacks.
 ///
 class Pcp_LayerStackRegistry : public TfRefBase, public TfWeakBase {
 public:
@@ -100,6 +105,9 @@ private:
                            bool isUsd);
     ~Pcp_LayerStackRegistry();
 
+    // Find that doesn't lock.
+    PcpLayerStackPtr _Find(const PcpLayerStackIdentifier&) const;
+
     // Remove the layer stack with the given identifier from the registry.
     void _Remove(const PcpLayerStackIdentifier&,
                  const PcpLayerStack *);
@@ -125,11 +133,13 @@ private:
     friend class PcpLayerStack;
 
 private:
-    boost::scoped_ptr<Pcp_LayerStackRegistryData> _data;
+    std::unique_ptr<Pcp_LayerStackRegistryData> _data;
 };
 
 /// \class Pcp_MutedLayers
+///
 /// Helper for maintaining and querying a collection of muted layers.
+///
 class Pcp_MutedLayers
 {
 public:
@@ -145,4 +155,6 @@ private:
     std::vector<std::string> _layers;
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // PCP_LAYER_STACK_REGISTRY_H

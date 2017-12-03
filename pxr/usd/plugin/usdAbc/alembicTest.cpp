@@ -21,15 +21,18 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usdAbc/alembicTest.h"
 #include "pxr/usd/usdAbc/alembicData.h"
 #include "pxr/usd/sdf/fileFormat.h"
 #include "pxr/usd/sdf/layer.h"
 #include "pxr/usd/sdf/schema.h"
 #include "pxr/base/tf/ostreamMethods.h"
-#include <boost/foreach.hpp>
 #include <algorithm>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 template <class T>
 static bool _Truncate(VtValue& v, int max = 5)
@@ -67,9 +70,9 @@ public:
             std::sort(_ids.begin(), _ids.end());
             
             // Pass ids to the wrapped visitor.
-            BOOST_FOREACH(const _SpecId& id, _ids) {
+            for (const auto& id : _ids) {
                 if (_Pass(data, id)) {
-                    if (not _visitor->VisitSpec(data, id)) {
+                    if (!_visitor->VisitSpec(data, id)) {
                         break;
                     }
                 }
@@ -151,7 +154,7 @@ struct UsdAbc_AlembicWriteVisitor : public SdfAbstractDataSpecVisitor {
                     fprintf(stdout, "%s",
                             custom.UncheckedGet<bool>() ? "custom " : "");
                 }
-                else if (not custom.IsEmpty()) {
+                else if (!custom.IsEmpty()) {
                     fprintf(stdout, "!BAD_CUSTOM ");
                 }
 
@@ -159,14 +162,14 @@ struct UsdAbc_AlembicWriteVisitor : public SdfAbstractDataSpecVisitor {
                 if (typeName.IsHolding<TfToken>()) {
                     fprintf(stdout, "%s ", TfStringify(typeName).c_str());
                 }
-                else if (not typeName.IsEmpty()) {
+                else if (!typeName.IsEmpty()) {
                     fprintf(stdout, "!BAD_TYPE ");
                 }
 
                 fprintf(stdout, "%s", path.GetName().c_str());
 
                 VtValue value = data.Get(id, SdfFieldKeys->Default);
-                if (not value.IsEmpty()) {
+                if (!value.IsEmpty()) {
                     // Truncate shaped types to not dump too much data.
                     const char* trailing = NULL;
                     if (value.IsArrayValued()) {
@@ -231,7 +234,7 @@ struct UsdAbc_AlembicWriteVisitor : public SdfAbstractDataSpecVisitor {
                         fprintf(stdout, "%*s",
                                 2*int(path.GetPathElementCount()-1), "");
                         fprintf(stdout, "samples_at=[ ");
-                        BOOST_FOREACH(double t, times) {
+                        for (double t : times) {
                             fprintf(stdout, "%g ", t);
                         }
                         fprintf(stdout, "]\n");
@@ -251,7 +254,7 @@ struct UsdAbc_AlembicWriteVisitor : public SdfAbstractDataSpecVisitor {
                 tokens.erase(SdfFieldKeys->Default);
                 tokens.erase(SdfFieldKeys->TimeSamples);
                 const SdfSchema& schema = SdfSchema::GetInstance();
-                BOOST_FOREACH(const TfToken& field, tokens) {
+                for (const auto& field : tokens) {
                     const VtValue value = data.Get(id, field);
                     if (value != schema.GetFallback(field)) {
                         fprintf(stdout, "%*s# %s = %s\n",
@@ -276,7 +279,7 @@ struct UsdAbc_AlembicWriteVisitor : public SdfAbstractDataSpecVisitor {
                 if (typeName.IsHolding<TfToken>()) {
                     fprintf(stdout, "%s ", TfStringify(typeName).c_str());
                 }
-                else if (not typeName.IsEmpty()) {
+                else if (!typeName.IsEmpty()) {
                     fprintf(stdout, "!BAD_TYPE ");
                 }
 
@@ -295,7 +298,7 @@ struct UsdAbc_AlembicWriteVisitor : public SdfAbstractDataSpecVisitor {
 static void UsdAbc_PrintTimes(const char* msg, const std::set<double>& times)
 {
     fprintf(stdout, "%s: [", msg);
-    BOOST_FOREACH(double t, times) {
+    for (double t : times) {
         fprintf(stdout, " %f", t);
     }
     fprintf(stdout, " ]\n");
@@ -343,9 +346,9 @@ UsdAbc_TestAlembic(const std::string& pathname)
             SdfPath path("/octopus_low/octopus_lowShape.extent");
             SdfAbstractDataSpecId id(&path);
             std::set<double> times = data->ListTimeSamplesForPath(id);
-            if (not times.empty()) {
+            if (!times.empty()) {
                 fprintf(stdout, "\nExtent samples:\n");
-                BOOST_FOREACH(double t, times) {
+                for (double t : times) {
                     VtValue value;
                     if (data->QueryTimeSample(id, t, &value)) {
                         fprintf(stdout, "  %f: %s\n",
@@ -386,7 +389,7 @@ bool
 UsdAbc_WriteAlembic(const std::string& srcPathname, const std::string& dstPathname)
 {
     SdfLayerRefPtr layer = SdfLayer::OpenAsAnonymous(srcPathname);
-    if (not layer) {
+    if (!layer) {
         fprintf(stderr, "Can't open '%s'\n", srcPathname.c_str());
         return false;
     }
@@ -396,3 +399,6 @@ UsdAbc_WriteAlembic(const std::string& srcPathname, const std::string& dstPathna
         SdfFileFormat::FindByExtension(".abc")->
             WriteToFile(boost::get_pointer(layer), dstPathname);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -21,11 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file rankedTypeMap.h
-
 #ifndef GLF_RANKED_TYPE_MAP_H
 #define GLF_RANKED_TYPE_MAP_H
 
+/// \file glf/rankedTypeMap.h
+
+#include "pxr/pxr.h"
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/registry.h"
 #include "pxr/base/tf/debug.h"
@@ -34,7 +35,13 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class GlfRankedTypeMap
+///
 /// Holds a token-to-type map with support for precedence per type.
+///
 class GlfRankedTypeMap {
 public:
     typedef TfToken key_type;
@@ -59,7 +66,7 @@ public:
     {
         if (type) {
             auto i = _typeMap.find(key);
-            if (i == _typeMap.end() or i->second.precedence < precedence) {
+            if (i == _typeMap.end() || i->second.precedence < precedence) {
                 _typeMap[key] = { type, precedence };
             }
         }
@@ -103,7 +110,7 @@ GlfRankedTypeMap::Add(
     for (auto type: types) {
         // Get the plugin.
         PlugPluginPtr plugin = plugReg.GetPluginForType(type);
-        if (not plugin) {
+        if (!plugin) {
             TF_DEBUG(debugType).Msg(
 	            "[PluginDiscover] Plugin could not be loaded "
 		    "for TfType '%s'\n",
@@ -112,14 +119,14 @@ GlfRankedTypeMap::Add(
         }
 
         // Check the whitelist.
-        if (not restrictions.empty()) {
+        if (!restrictions.empty()) {
             bool goodPlugin = false;
             for (const auto& restriction: restrictions) {
                 if (type.GetTypeName() == restriction) {
                     goodPlugin = true;
                 }
             }
-            if (not goodPlugin) {
+            if (!goodPlugin) {
                 TF_DEBUG(debugType).Msg(	
                     "[PluginDiscover] Skipping restricted plugin: '%s'\n", 
                     type.GetTypeName().c_str());
@@ -143,7 +150,7 @@ GlfRankedTypeMap::Add(
 
         JsObject::const_iterator precedenceIt = metadata.find("precedence");
         if (precedenceIt != metadata.end()) {
-            if (not precedenceIt->second.Is<int>()) {
+            if (!precedenceIt->second.Is<int>()) {
                 TF_RUNTIME_ERROR("[PluginDiscover] 'precedence' metadata "
                         "can not be read for plugin '%s'\n", 
                         type.GetTypeName().c_str());
@@ -170,5 +177,8 @@ GlfRankedTypeMap::Add(
 	}
     }
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

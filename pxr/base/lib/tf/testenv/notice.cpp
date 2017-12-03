@@ -21,17 +21,18 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/tf/regTest.h"
 #include "pxr/base/tf/notice.h"
 #include "pxr/base/tf/type.h"
 #include "pxr/base/tf/diagnosticLite.h"
 #include "pxr/base/tf/weakBase.h"
 #include "pxr/base/tf/weakPtr.h"
-#include "pxr/base/arch/nap.h"
 #include "pxr/base/arch/systemInfo.h"
 
 #include <boost/function.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <iostream>
 #include <mutex>
@@ -46,6 +47,8 @@ using std::ostream;
 using std::string;
 using std::stringstream;
 using std::vector;
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 class TestNotice : public TfNotice {
 public:
@@ -203,16 +206,16 @@ void WorkTask() {
     workerThreadLog << "// WorkListener should respond once\n";
     WorkerNotice("WorkerNotice 1").Send();
 
-    ArchNap(10);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    ::_DumpLog(&workerThreadLog, &workerThreadList, &workerThreadLock);
+    _DumpLog(&workerThreadLog, &workerThreadList, &workerThreadLock);
 
     workListener->Revoke();
 
     workerThreadLog << "// WorkListener should not respond\n";
     WorkerNotice("WorkerNotice 2").Send();
 
-    ::_DumpLog(&workerThreadLog, &workerThreadList, &workerThreadLock);
+    _DumpLog(&workerThreadLog, &workerThreadList, &workerThreadLock);
 
     delete workListener;
 }
@@ -235,19 +238,19 @@ _TestThreadedNotices()
     
     mainListener->Revoke();
     
-    ::_DumpLog(&mainThreadLog, &mainThreadList, &mainThreadLock);
+    _DumpLog(&mainThreadLog, &mainThreadList, &mainThreadLock);
     
     mainThreadLog << "// MainListener::ProcessNotice should respond once\n";
     MainNotice("Main notice 2").Send();
 
-    ::_DumpLog(&mainThreadLog, &mainThreadList, &mainThreadLock);
+    _DumpLog(&mainThreadLog, &mainThreadList, &mainThreadLock);
     
     delete mainListener;
 
     mainThreadLog << "// MainListener should not respond\n";
     MainNotice("main: Error!").Send();
 
-    ::_DumpLog(&mainThreadLog, &mainThreadList, &mainThreadLock);
+    _DumpLog(&mainThreadLog, &mainThreadList, &mainThreadLock);
 
     cout << "\n--- Main Thread Log ---\n";
     cout << mainThreadLog.str();
@@ -392,30 +395,30 @@ _TestNoticeBlock()
 {
     BlockListener l;
     TestNotice("should not be blocked").Send();
-    assert(l.hits[0] == 1);
-    assert(l.hits[1] == 0);
+    TF_AXIOM(l.hits[0] == 1);
+    TF_AXIOM(l.hits[1] == 0);
 
     {
         TfNotice::Block noticeBlock;
         TestNotice("should be blocked").Send();
-        assert(l.hits[0] == 1);
-        assert(l.hits[1] == 0);
+        TF_AXIOM(l.hits[0] == 1);
+        TF_AXIOM(l.hits[1] == 0);
 
         TestNotice("should be blocked too").Send();
-        assert(l.hits[0] == 1);
-        assert(l.hits[1] == 0);
+        TF_AXIOM(l.hits[0] == 1);
+        TF_AXIOM(l.hits[1] == 0);
     }
 
     TestNotice("should not be blocked").Send();
-    assert(l.hits[0] == 2);
-    assert(l.hits[1] == 0);
+    TF_AXIOM(l.hits[0] == 2);
+    TF_AXIOM(l.hits[1] == 0);
 
     std::thread t(_TestNoticeBlockWorker, std::this_thread::get_id());
     _TestNoticeBlockWorker(std::this_thread::get_id());
     t.join();
 
-    assert(l.hits[0] == 2);
-    assert(l.hits[1] == 20);
+    TF_AXIOM(l.hits[0] == 2);
+    TF_AXIOM(l.hits[1] == 20);
 }
 
 static bool
@@ -486,11 +489,11 @@ Test_TfNotice()
     printf("// Expect: nothing\n");
     TestNotice("error!").Send();
 
-    ::_TestThreadedNotices();
+    _TestThreadedNotices();
 
-    ::_TestSpoofedNotices();
+    _TestSpoofedNotices();
 
-    ::_TestNoticeBlock();
+    _TestNoticeBlock();
     
     return true;
 }

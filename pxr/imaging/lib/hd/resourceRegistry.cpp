@@ -28,8 +28,6 @@
 #include "pxr/imaging/hd/bufferResource.h"
 #include "pxr/imaging/hd/computation.h"
 #include "pxr/imaging/hd/copyComputation.h"
-#include "pxr/imaging/hd/dispatchBuffer.h"
-#include "pxr/imaging/hd/persistentBuffer.h"
 #include "pxr/imaging/hd/glslProgram.h"
 #include "pxr/imaging/hd/interleavedMemoryManager.h"
 #include "pxr/imaging/hd/meshTopology.h"
@@ -38,36 +36,45 @@
 #include "pxr/imaging/hd/vboSimpleMemoryManager.h"
 #include "pxr/imaging/hd/vertexAdjacency.h"
 
+#include "pxr/imaging/glf/textureRegistry.h"
+
 #include "pxr/base/tf/instantiateSingleton.h"
 #include "pxr/base/tf/getenv.h"
 #include "pxr/base/work/loops.h"
 
-#include <boost/bind.hpp>
- 
 #include <algorithm>
+#include <functional>
 #include <iostream>
 #include <set>
 
-TF_INSTANTIATE_SINGLETON(HdResourceRegistry);
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 HdResourceRegistry::HdResourceRegistry() :
-    _nonUniformAggregationStrategy(NULL),
-    _uniformUboAggregationStrategy(NULL),
-    _uniformSsboAggregationStrategy(NULL),
-    _singleAggregationStrategy(NULL),
+    _nonUniformAggregationStrategy(),
+    _nonUniformImmutableAggregationStrategy(),
+    _uniformUboAggregationStrategy(),
+    _uniformSsboAggregationStrategy(),
+    _singleAggregationStrategy(),
     _numBufferSourcesToResolve(0)
 {
-    // default aggregation strategy for varying (vertex, varying) primvars
-    _nonUniformAggregationStrategy = &HdVBOMemoryManager::GetInstance();
+    // default aggregation strategies for varying (vertex, varying) primvars
+    _nonUniformAggregationStrategy.reset(
+        new HdVBOMemoryManager(/*isImmutable=*/false));
+    _nonUniformImmutableAggregationStrategy.reset(
+        new HdVBOMemoryManager(/*isImmutable=*/true));
 
     // default aggregation strategy for uniform on SSBO (for primvars)
-    _uniformSsboAggregationStrategy = &HdInterleavedSSBOMemoryManager::GetInstance();
+    _uniformSsboAggregationStrategy.reset(
+        new HdInterleavedSSBOMemoryManager());
 
     // default aggregation strategy for uniform on UBO (for globals)
-    _uniformUboAggregationStrategy = &HdInterleavedUBOMemoryManager::GetInstance();
+    _uniformUboAggregationStrategy.reset(
+        new HdInterleavedUBOMemoryManager());
 
     // default aggregation strategy for single buffers (for nested instancer)
-    _singleAggregationStrategy = &HdVBOSimpleMemoryManager::GetInstance();
+    _singleAggregationStrategy.reset(
+        new HdVBOSimpleMemoryManager());
 }
 
 HdResourceRegistry::~HdResourceRegistry()
@@ -75,16 +82,24 @@ HdResourceRegistry::~HdResourceRegistry()
     /*NOTHING*/
 }
 
-
-
-
 HdBufferArrayRangeSharedPtr
 HdResourceRegistry::AllocateNonUniformBufferArrayRange(
     TfToken const &role,
     HdBufferSpecVector const &bufferSpecs)
 {
     return _nonUniformBufferArrayRegistry.AllocateRange(
-                                    _nonUniformAggregationStrategy,
+                                    _nonUniformAggregationStrategy.get(),
+                                    role,
+                                    bufferSpecs);
+}
+
+HdBufferArrayRangeSharedPtr
+HdResourceRegistry::AllocateNonUniformImmutableBufferArrayRange(
+    TfToken const &role,
+    HdBufferSpecVector const &bufferSpecs)
+{
+    return _nonUniformImmutableBufferArrayRegistry.AllocateRange(
+                                    _nonUniformImmutableAggregationStrategy.get(),
                                     role,
                                     bufferSpecs);
 }
@@ -95,7 +110,7 @@ HdResourceRegistry::AllocateUniformBufferArrayRange(
     HdBufferSpecVector const &bufferSpecs)
 {
     return _uniformUboBufferArrayRegistry.AllocateRange(
-                                    _uniformUboAggregationStrategy,
+                                    _uniformUboAggregationStrategy.get(),
                                     role,
                                     bufferSpecs);
 }
@@ -106,7 +121,7 @@ HdResourceRegistry::AllocateShaderStorageBufferArrayRange(
     HdBufferSpecVector const &bufferSpecs)
 {
     return _uniformSsboBufferArrayRegistry.AllocateRange(
-                                    _uniformSsboAggregationStrategy,
+                                    _uniformSsboAggregationStrategy.get(),
                                     role,
                                     bufferSpecs);
 }
@@ -117,7 +132,7 @@ HdResourceRegistry::AllocateSingleBufferArrayRange(
     HdBufferSpecVector const &bufferSpecs)
 {
     return _singleBufferArrayRegistry.AllocateRange(
-                                    _singleAggregationStrategy,
+                                    _singleAggregationStrategy.get(),
                                     role,
                                     bufferSpecs);
 }
@@ -132,14 +147,14 @@ HdResourceRegistry::MergeBufferArrayRange(
 {
     HD_TRACE_FUNCTION();
 
-    if (not TF_VERIFY(range)) return HdBufferArrayRangeSharedPtr();
+    if (!TF_VERIFY(range)) return HdBufferArrayRangeSharedPtr();
 
     // get existing buffer specs
     HdBufferSpecVector oldBufferSpecs;
     range->AddBufferSpecs(&oldBufferSpecs);
 
-    // compare bufferspec
-    if (not HdBufferSpec::IsSubset(newBufferSpecs, oldBufferSpecs)) {
+    // immutable ranges should always be migrated, otherwise compare bufferspec
+    if (range->IsImmutable() || !HdBufferSpec::IsSubset(newBufferSpecs, oldBufferSpecs)) {
         // create / moveto the new buffer array.
 
         HdComputationVector computations;
@@ -165,7 +180,7 @@ HdResourceRegistry::MergeBufferArrayRange(
             strategy, role, bufferSpecs);
 
         // register copy computation.
-        if (not computations.empty()) {
+        if (!computations.empty()) {
             TF_FOR_ALL(it, computations) {
                 AddComputation(result, *it);
             }
@@ -196,18 +211,28 @@ HdResourceRegistry::MergeNonUniformBufferArrayRange(
     HdBufferSpecVector const &newBufferSpecs,
     HdBufferArrayRangeSharedPtr const &range)
 {
-    return MergeBufferArrayRange(_nonUniformAggregationStrategy,
+    return MergeBufferArrayRange(_nonUniformAggregationStrategy.get(),
                                  _nonUniformBufferArrayRegistry,
                                  role, newBufferSpecs, range);
 }
 
+HdBufferArrayRangeSharedPtr
+HdResourceRegistry::MergeNonUniformImmutableBufferArrayRange(
+    TfToken const &role,
+    HdBufferSpecVector const &newBufferSpecs,
+    HdBufferArrayRangeSharedPtr const &range)
+{
+    return MergeBufferArrayRange(_nonUniformImmutableAggregationStrategy.get(),
+                                 _nonUniformImmutableBufferArrayRegistry,
+                                 role, newBufferSpecs, range);
+}
 HdBufferArrayRangeSharedPtr
 HdResourceRegistry::MergeUniformBufferArrayRange(
     TfToken const &role,
     HdBufferSpecVector const &newBufferSpecs,
     HdBufferArrayRangeSharedPtr const &range)
 {
-    return MergeBufferArrayRange(_uniformUboAggregationStrategy,
+    return MergeBufferArrayRange(_uniformUboAggregationStrategy.get(),
                                  _uniformUboBufferArrayRegistry,
                                  role, newBufferSpecs, range);
 }
@@ -218,7 +243,7 @@ HdResourceRegistry::MergeShaderStorageBufferArrayRange(
     HdBufferSpecVector const &newBufferSpecs,
     HdBufferArrayRangeSharedPtr const &range)
 {
-    return MergeBufferArrayRange(_uniformSsboAggregationStrategy,
+    return MergeBufferArrayRange(_uniformSsboAggregationStrategy.get(),
                                  _uniformSsboBufferArrayRegistry,
                                  role, newBufferSpecs, range);
 }
@@ -228,7 +253,7 @@ HdResourceRegistry::AddSources(HdBufferArrayRangeSharedPtr const &range,
                                HdBufferSourceVector &sources)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     if (ARCH_UNLIKELY(sources.empty()))
     {
@@ -237,7 +262,7 @@ HdResourceRegistry::AddSources(HdBufferArrayRangeSharedPtr const &range,
     }
 
     // range has to be valid
-    if (ARCH_UNLIKELY(not (range and range->IsValid())))
+    if (ARCH_UNLIKELY(!(range && range->IsValid())))
     {
         TF_RUNTIME_ERROR("range is null or invalid");
         return;
@@ -250,6 +275,9 @@ HdResourceRegistry::AddSources(HdBufferArrayRangeSharedPtr const &range,
     size_t srcNum = 0;
     while (srcNum < sources.size()) {
         if (ARCH_LIKELY(sources[srcNum]->IsValid())) {
+            if (ARCH_UNLIKELY(sources[srcNum]->HasPreChainedBuffer())) {
+                AddSource(sources[srcNum]->GetPreChainedBuffer());
+            }
             ++srcNum;
         } else {
             TF_RUNTIME_ERROR("Source Buffer for %s is invalid", sources[srcNum]->GetName().GetText());
@@ -267,7 +295,7 @@ HdResourceRegistry::AddSources(HdBufferArrayRangeSharedPtr const &range,
     }
 
     // Check for no-valid buffer case
-    if (not sources.empty()) {
+    if (!sources.empty()) {
         _PendingSourceList::iterator it = _pendingSources.emplace_back(range);
         TF_VERIFY(range.use_count() >=2);
 
@@ -281,24 +309,31 @@ void
 HdResourceRegistry::AddSource(HdBufferArrayRangeSharedPtr const &range,
                               HdBufferSourceSharedPtr const &source)
 {
-    if (ARCH_UNLIKELY((not source) or (not range)))
+    HD_TRACE_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
+
+    if (ARCH_UNLIKELY((!source) || (!range)))
     {
         TF_RUNTIME_ERROR("An input pointer is null");
         return;
     }
 
     // range has to be valid
-    if (ARCH_UNLIKELY(not range->IsValid()))
+    if (ARCH_UNLIKELY(!range->IsValid()))
     {
         TF_RUNTIME_ERROR("range is invalid");
         return;
     }
 
     // Buffer has to be valid
-    if (ARCH_UNLIKELY(not source->IsValid()))
+    if (ARCH_UNLIKELY(!source->IsValid()))
     {
         TF_RUNTIME_ERROR("source buffer for %s is invalid", source->GetName().GetText());
         return;
+    }
+
+    if (ARCH_UNLIKELY(source->HasPreChainedBuffer())) {
+        AddSource(source->GetPreChainedBuffer());
     }
 
     _pendingSources.emplace_back(range, source);
@@ -309,24 +344,26 @@ void
 HdResourceRegistry::AddSource(HdBufferSourceSharedPtr const &source)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-    if (ARCH_UNLIKELY(not source))
+    HF_MALLOC_TAG_FUNCTION();
+
+    if (ARCH_UNLIKELY(!source))
     {
         TF_RUNTIME_ERROR("source pointer is null");
         return;
     }
 
-
     // Buffer has to be valid
-    if (ARCH_UNLIKELY(not source->IsValid()))
+    if (ARCH_UNLIKELY(!source->IsValid()))
     {
         TF_RUNTIME_ERROR("source buffer for %s is invalid", source->GetName().GetText());
         return;
     }
 
+    if (ARCH_UNLIKELY(source->HasPreChainedBuffer())) {
+        AddSource(source->GetPreChainedBuffer());
+    }
+
     _pendingSources.emplace_back(HdBufferArrayRangeSharedPtr(), source);
-
-
     ++_numBufferSourcesToResolve; // Atomic
 }
 
@@ -335,7 +372,7 @@ HdResourceRegistry::AddComputation(HdBufferArrayRangeSharedPtr const &range,
                                    HdComputationSharedPtr const &computation)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     // if the computation is buffer source computation, it will be appended
     // into pendingBufferSourceComputations, which is executed right after
@@ -351,7 +388,7 @@ void
 HdResourceRegistry::Commit()
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     // TODO: requests should be sorted by resource, and range.
     {
@@ -378,14 +415,15 @@ HdResourceRegistry::Commit()
                         // execute computation.
                         // call IsResolved first since Resolve is virtual and
                         // could be costly.
-                        if (not (*sourceIt)->IsResolved()) {
+                        if (!(*sourceIt)->IsResolved()) {
                             if ((*sourceIt)->Resolve()) {
-                                TF_VERIFY((*sourceIt)->IsResolved());
+                                TF_VERIFY((*sourceIt)->IsResolved(), 
+                                "Name = %s", (*sourceIt)->GetName().GetText());
 
                                 ++numBufferSourcesResolved;
 
                                 // call resize if it's the first source in sources.
-                                if (reqIt->range and
+                                if (reqIt->range &&
                                     (sourceIt.base() == reqIt->sources.begin())) {
                                     reqIt->range->Resize(
                                         (*sourceIt)->GetNumElements());
@@ -438,13 +476,15 @@ HdResourceRegistry::Commit()
         // 3. reallocation phase:
         //
         _nonUniformBufferArrayRegistry.ReallocateAll(
-            _nonUniformAggregationStrategy);
+            _nonUniformAggregationStrategy.get());
+        _nonUniformImmutableBufferArrayRegistry.ReallocateAll(
+            _nonUniformImmutableAggregationStrategy.get());
         _uniformUboBufferArrayRegistry.ReallocateAll(
-            _uniformUboAggregationStrategy);
+            _uniformUboAggregationStrategy.get());
         _uniformSsboBufferArrayRegistry.ReallocateAll(
-            _uniformSsboAggregationStrategy);
+            _uniformSsboAggregationStrategy.get());
         _singleBufferArrayRegistry.ReallocateAll(
-            _singleAggregationStrategy);
+            _singleAggregationStrategy.get());
     }
 
     {
@@ -454,7 +494,7 @@ HdResourceRegistry::Commit()
 
         TF_FOR_ALL(reqIt, _pendingSources) {
             // CPU computation may not have a range. (e.g. adjacency)
-            if (not reqIt->range) continue;
+            if (!reqIt->range) continue;
 
             // CPU computation may result in an empty buffer source
             // (e.g. GPU quadrangulation table could be empty for quad only
@@ -505,7 +545,7 @@ HdResourceRegistry::Commit()
         //   e.g. smooth normals -> quadrangulation.
         //
         TF_FOR_ALL(it, _pendingComputations) {
-            it->computation->Execute(it->range);
+            it->computation->Execute(it->range, this);
 
             HD_PERF_COUNTER_INCR(HdPerfTokens->computationsCommited);
         }
@@ -527,7 +567,7 @@ void
 HdResourceRegistry::GarbageCollect()
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     HD_PERF_COUNTER_INCR(HdPerfTokens->garbageCollected);
 
@@ -558,16 +598,34 @@ HdResourceRegistry::GarbageCollect()
     // reset index range perf counters
     HD_PERF_COUNTER_SET(HdPerfTokens->instBasisCurvesTopologyRange, numIndexRange);
 
+    // reset shared primvar range perf counter
+    size_t numSharedPrimvarRanges = _primvarRangeRegistry.GarbageCollect();
+    HD_PERF_COUNTER_SET(HdPerfTokens->instPrimvarRange, numSharedPrimvarRanges);
+
     // cleanup buffer array
     // buffer array retains weak_ptrs of range. All unused ranges should be
     // deleted (expired) at this point.
     _nonUniformBufferArrayRegistry.GarbageCollect();
+    _nonUniformImmutableBufferArrayRegistry.GarbageCollect();
     _uniformUboBufferArrayRegistry.GarbageCollect();
     _uniformSsboBufferArrayRegistry.GarbageCollect();
     _singleBufferArrayRegistry.GarbageCollect();
 
-    GarbageCollectDispatchBuffers();
-    GarbageCollectPersistentBuffers();
+    // Cleanup Shader registries
+    _geometricShaderRegistry.GarbageCollect();
+    _glslProgramRegistry.GarbageCollect();
+
+    // Cleanup texture registries
+    _textureResourceRegistry.GarbageCollect();
+
+    // Prompt derived registries to collect their garbage.
+    _GarbageCollect();
+}
+
+void
+HdResourceRegistry::_GarbageCollect()
+{
+    /* NOTHING */
 }
 
 VtDictionary
@@ -578,74 +636,89 @@ HdResourceRegistry::GetResourceAllocation() const
     size_t gpuMemoryUsed = 0;
 
     // buffer array allocation
-    gpuMemoryUsed += _nonUniformBufferArrayRegistry.GetResourceAllocation(result);
-    gpuMemoryUsed += _uniformUboBufferArrayRegistry.GetResourceAllocation(result);
-    gpuMemoryUsed += _uniformSsboBufferArrayRegistry.GetResourceAllocation(result);
-    gpuMemoryUsed += _singleBufferArrayRegistry.GetResourceAllocation(result);
+
+    size_t nonUniformSize   = 
+        _nonUniformBufferArrayRegistry.GetResourceAllocation(
+            _nonUniformAggregationStrategy.get(), result) +
+        _nonUniformImmutableBufferArrayRegistry.GetResourceAllocation(
+            _nonUniformImmutableAggregationStrategy.get(), result);
+    size_t uboSize          = 
+        _uniformUboBufferArrayRegistry.GetResourceAllocation(
+            _uniformUboAggregationStrategy.get(), result);
+    size_t ssboSize         = 
+        _uniformSsboBufferArrayRegistry.GetResourceAllocation(
+            _uniformSsboAggregationStrategy.get(), result);
+    size_t singleBufferSize = 
+        _singleBufferArrayRegistry.GetResourceAllocation(
+            _singleAggregationStrategy.get(), result);
+
+    result[HdPerfTokens->nonUniformSize]   = VtValue(nonUniformSize);
+    result[HdPerfTokens->uboSize]          = VtValue(uboSize);
+    result[HdPerfTokens->ssboSize]         = VtValue(ssboSize);
+    result[HdPerfTokens->singleBufferSize] = VtValue(singleBufferSize);
+    gpuMemoryUsed += nonUniformSize +
+                     uboSize        +
+                     ssboSize       +
+                     singleBufferSize;
 
     // glsl program & ubo allocation
     TF_FOR_ALL (progIt, _glslProgramRegistry) {
+        HdGLSLProgramSharedPtr const &program = progIt->second;
+        if (!program) continue;
         size_t size =
-            progIt->second->GetProgram().GetSize() +
-            progIt->second->GetGlobalUniformBuffer().GetSize();
+            program->GetProgram().GetSize() +
+            program->GetGlobalUniformBuffer().GetSize();
 
         // the role of program and global uniform buffer is always same.
-        std::string const &role = progIt->second->GetProgram().GetRole().GetString();
-        if (result.count(role)) {
-            size_t currentSize = result[role].Get<size_t>();
-            result[role] = VtValue(currentSize + size);
-        } else {
-            result[role] = VtValue(size);
-        }
+        std::string const &role = program->GetProgram().GetRole().GetString();
+        result[role] = VtDictionaryGet<size_t>(result, role,
+                                               VtDefault = 0) + size;
 
         gpuMemoryUsed += size;
     }
 
-    // dispatch buffers
-    TF_FOR_ALL (bufferIt, _dispatchBufferRegistry) {
-        HdDispatchBufferSharedPtr buffer = (*bufferIt);
-        if (not TF_VERIFY(buffer)) {
+    // textures
+    size_t hydraTexturesMemory = 0;
+
+    TF_FOR_ALL (textureResourceIt, _textureResourceRegistry) {
+        HdTextureResourceSharedPtr textureResource = (textureResourceIt->second);
+        if (!TF_VERIFY(textureResource)) {
             continue;
         }
 
-        std::string const & role = buffer->GetRole().GetString();
-        size_t size = size_t(buffer->GetEntireResource()->GetSize());
-
-        if (result.count(role)) {
-            size_t currentSize = result[role].Get<size_t>();
-            result[role] = VtValue(currentSize + size);
-        } else {
-            result[role] = VtValue(size);
-        }
-
-        gpuMemoryUsed += size;
+        hydraTexturesMemory += textureResource->GetMemoryUsed();
     }
+    result[HdPerfTokens->textureResourceMemory] = VtValue(hydraTexturesMemory);
+    gpuMemoryUsed += hydraTexturesMemory;
 
-    // persistent buffers
-    TF_FOR_ALL (bufferIt, _persistentBufferRegistry) {
-        HdPersistentBufferSharedPtr buffer = (*bufferIt);
-        if (not TF_VERIFY(buffer)) {
-            continue;
-        }
-
-        std::string const & role = buffer->GetRole().GetString();
-        size_t size = size_t(buffer->GetSize());
-
-        if (result.count(role)) {
-            size_t currentSize = result[role].Get<size_t>();
-            result[role] = VtValue(currentSize + size);
-        } else {
-            result[role] = VtValue(size);
-        }
-
-        gpuMemoryUsed += size;
+    GlfTextureRegistry &textureReg = GlfTextureRegistry::GetInstance();
+    std::vector<VtDictionary> textureInfo = textureReg.GetTextureInfos();
+    size_t textureMemory = 0;
+    TF_FOR_ALL (textureIt, textureInfo) {
+        VtDictionary &info = (*textureIt);
+        textureMemory += info["memoryUsed"].Get<size_t>();
     }
+    result[HdPerfTokens->textureMemory] = VtValue(textureMemory);
+
 
     result[HdPerfTokens->gpuMemoryUsed.GetString()] = gpuMemoryUsed;
+
+    // Prompt derived registries to tally their resources.
+    _TallyResourceAllocation(&result);
+
+    gpuMemoryUsed =
+        VtDictionaryGet<size_t>(result, HdPerfTokens->gpuMemoryUsed.GetString(),
+                                VtDefault = 0);
 
     HD_PERF_COUNTER_SET(HdPerfTokens->gpuMemoryUsed, gpuMemoryUsed);
 
     return result;
+}
+
+void
+HdResourceRegistry::_TallyResourceAllocation(VtDictionary*) const
+{
+    /* NOTHING */
 }
 
 static bool _IsEnabledTopologyInstancing()
@@ -718,6 +791,14 @@ HdResourceRegistry::RegisterBasisCurvesIndexRange(HdTopology::ID id,
 }
 
 std::unique_lock<std::mutex>
+HdResourceRegistry::RegisterPrimvarRange(HdTopology::ID id,
+		        HdInstance<HdTopology::ID, HdBufferArrayRangeSharedPtr> *instance)
+{
+    return _Register(id, _primvarRangeRegistry,
+                     HdPerfTokens->instPrimvarRange, instance);
+}
+
+std::unique_lock<std::mutex>
 HdResourceRegistry::RegisterGeometricShader(HdShaderKey::ID id,
                         HdInstance<HdShaderKey::ID, Hd_GeometricShaderSharedPtr> *instance)
 {
@@ -738,12 +819,28 @@ HdResourceRegistry::RegisterTextureResource(HdTextureResource::ID id,
     return _textureResourceRegistry.GetInstance(id, instance);
 }
 
+std::unique_lock<std::mutex>
+HdResourceRegistry::FindTextureResource(HdTextureResource::ID id,
+                        HdInstance<HdTextureResource::ID, HdTextureResourceSharedPtr> *instance, 
+                        bool *found)
+{
+    return _textureResourceRegistry.FindInstance(id, instance, found);
+}
+
+
+void HdResourceRegistry::InvalidateGeometricShaderRegistry()
+{
+    _geometricShaderRegistry.Invalidate();
+}
+
+HD_API
 std::ostream &operator <<(std::ostream &out,
                           const HdResourceRegistry& self)
 {
     out << "HdResourceRegistry " << &self << " :\n";
 
     out << self._nonUniformBufferArrayRegistry;
+    out << self._nonUniformImmutableBufferArrayRegistry;
     out << self._uniformUboBufferArrayRegistry;
     out << self._uniformSsboBufferArrayRegistry;
     out << self._singleBufferArrayRegistry;
@@ -751,51 +848,5 @@ std::ostream &operator <<(std::ostream &out,
     return out;
 }
 
-HdDispatchBufferSharedPtr
-HdResourceRegistry::RegisterDispatchBuffer(
-    TfToken const &role, int count, int commandNumUints)
-{
-    HdDispatchBufferSharedPtr result(
-        new HdDispatchBuffer(role, count, commandNumUints));
+PXR_NAMESPACE_CLOSE_SCOPE
 
-    _dispatchBufferRegistry.push_back(result);
-
-    return result;
-}
-
-void
-HdResourceRegistry::GarbageCollectDispatchBuffers()
-{
-    HD_TRACE_FUNCTION();
-
-    _dispatchBufferRegistry.erase(
-        std::remove_if(
-            _dispatchBufferRegistry.begin(), _dispatchBufferRegistry.end(),
-            boost::bind(&HdDispatchBufferSharedPtr::unique, _1)),
-        _dispatchBufferRegistry.end());
-}
-
-
-HdPersistentBufferSharedPtr
-HdResourceRegistry::RegisterPersistentBuffer(
-        TfToken const &role, size_t dataSize, void *data)
-{
-    HdPersistentBufferSharedPtr result(
-            new HdPersistentBuffer(role, dataSize, data));
-
-    _persistentBufferRegistry.push_back(result);
-
-    return result;
-}
-
-void
-HdResourceRegistry::GarbageCollectPersistentBuffers()
-{
-    HD_TRACE_FUNCTION();
-
-    _persistentBufferRegistry.erase(
-        std::remove_if(
-            _persistentBufferRegistry.begin(), _persistentBufferRegistry.end(),
-            boost::bind(&HdPersistentBufferSharedPtr::unique, _1)),
-        _persistentBufferRegistry.end());
-}

@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readGprim.h"
 #include "usdKatana/readXformable.h"
@@ -35,6 +36,9 @@
 
 #include <FnLogging/FnLogging.h>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 FnLogSetup("PxrUsdKatanaReadGprim");
 
 void
@@ -46,64 +50,6 @@ PxrUsdKatanaReadGprim(
     PxrUsdKatanaReadXformable(gprim, data, attrs);
 }
 
-FnKat::Attribute
-PxrUsdKatanaGeomGetPAttr(
-    const UsdGeomPointBased& points,
-    const PxrUsdKatanaUsdInPrivateData& data)
-{
-    UsdAttribute pointsAttr = points.GetPointsAttr();
-    if (not pointsAttr)
-    {
-        return FnKat::Attribute();
-    }
-
-    const double currentTime = data.GetUsdInArgs()->GetCurrentTime();
-    const std::vector<double>& motionSampleTimes = data.GetMotionSampleTimes(pointsAttr);
-
-    // Flag to check if we discovered the topology is varying, in
-    // which case we only output the sample at the curent frame.
-    bool varyingTopology = false;
-
-    // Used to compare value sizes to identify varying topology.
-    int arraySize = -1;
-
-    FnKat::FloatBuilder attrBuilder(/* tupleSize = */ 3);
-    TF_FOR_ALL(iter, motionSampleTimes)
-    {
-        double relSampleTime = *iter;
-        double time = currentTime + relSampleTime;
-
-        // Eval points.
-        VtVec3fArray ptArray;
-        pointsAttr.Get(&ptArray, time);
-
-        if (arraySize == -1) {
-            arraySize = ptArray.size();
-        } else if ( ptArray.size() != static_cast<size_t>(arraySize) ) {
-            // Topology has changed. Don't create this or subsequent samples.
-            varyingTopology = true;
-            break;
-        }
-
-        std::vector<float> &ptVec = attrBuilder.get(fabs(relSampleTime));
-        PxrUsdKatanaUtils::ConvertArrayToVector(ptArray, &ptVec);
-    }
-
-    // Varying topology was found, build for the current frame only.
-    if (varyingTopology)
-    {
-        FnKat::FloatBuilder defaultBuilder(/* tupleSize = */ 3);
-        VtVec3fArray ptArray;
-
-        pointsAttr.Get(&ptArray, currentTime);
-        std::vector<float> &ptVec = defaultBuilder.get(0);
-        PxrUsdKatanaUtils::ConvertArrayToVector(ptArray, &ptVec);
-        
-        return defaultBuilder.build();
-    }
-
-    return attrBuilder.build();
-}
 
 FnKat::Attribute
 PxrUsdKatanaGeomGetDisplayColorAttr(
@@ -112,8 +58,8 @@ PxrUsdKatanaGeomGetDisplayColorAttr(
 {
     // Eval color.
     VtArray<GfVec3f> color;
-    if (not gprim.GetDisplayColorPrimvar().ComputeFlattened(
-            &color, data.GetUsdInArgs()->GetCurrentTime())) {
+    if (!gprim.GetDisplayColorPrimvar().ComputeFlattened(
+        &color, data.GetCurrentTime())) {
         return FnKat::Attribute();
     }
 
@@ -137,80 +83,6 @@ PxrUsdKatanaGeomGetDisplayColorAttr(
     groupBuilder.set("scope", FnKat::StringAttribute("primitive"));
     groupBuilder.set("value", colorBuilder.build());
     return groupBuilder.build();
-}
-
-FnKat::Attribute
-PxrUsdKatanaGeomGetPrimvarGroup(
-        const UsdGeomGprim& gprim,
-        const PxrUsdKatanaUsdInPrivateData& data)
-{
-    // Usd primvars -> Primvar attributes
-    FnKat::GroupBuilder gdBuilder;
-
-    std::vector<UsdGeomPrimvar> primvarAttrs = gprim.GetPrimvars();
-    TF_FOR_ALL(primvar, primvarAttrs) {
-        TfToken          name, interpolation;
-        SdfValueTypeName typeName;
-        int              elementSize;
-
-        primvar->GetDeclarationInfo(&name, &typeName, 
-                                    &interpolation, &elementSize);
-
-        // Name: this will eventually want to be GetBaseName() to strip
-        // off prefixes
-        std::string gdName = name;
-
-        // Convert interpolation -> scope
-        FnKat::StringAttribute scopeAttr;
-        const bool isCurve = gprim.GetPrim().IsA<UsdGeomCurves>();
-        if (isCurve && interpolation == UsdGeomTokens->vertex) {
-            // it's a curve, so "vertex" == "vertex"
-            scopeAttr = FnKat::StringAttribute("vertex");
-        } else {
-            scopeAttr = FnKat::StringAttribute(
-                (interpolation == UsdGeomTokens->faceVarying)? "vertex" :
-                (interpolation == UsdGeomTokens->varying)    ? "point" :
-                (interpolation == UsdGeomTokens->vertex)     ? "point" /*see below*/ :
-                (interpolation == UsdGeomTokens->uniform)    ? "face" :
-                "primitive" );
-        }
-
-        // Resolve the value
-        VtValue vtValue;
-        if (not primvar->ComputeFlattened(
-                &vtValue, data.GetUsdInArgs()->GetCurrentTime()))
-        {
-            continue;
-        }
-
-        // Convert value to the required Katana attributes to describe it.
-        FnKat::Attribute valueAttr, inputTypeAttr, elementSizeAttr;
-        PxrUsdKatanaUtils::ConvertVtValueToKatCustomGeomAttr(
-            vtValue, elementSize, typeName.GetRole(),
-            &valueAttr, &inputTypeAttr, &elementSizeAttr);
-
-        // Bundle them into a group attribute
-        FnKat::GroupBuilder attrBuilder;
-        attrBuilder.set("scope", scopeAttr);
-        attrBuilder.set("inputType", inputTypeAttr);
-        if (elementSizeAttr.isValid()) {
-            attrBuilder.set("elementSize", elementSizeAttr);
-        }
-        attrBuilder.set("value", valueAttr);
-        // Note that 'varying' vs 'vertex' require special handling, as in
-        // Katana they are both expressed as 'point' scope above. To get
-        // 'vertex' interpolation we must set an additional
-        // 'interpolationType' attribute.  So we will flag that here.
-        const bool vertexInterpolationType = 
-            (interpolation == UsdGeomTokens->vertex);
-        if (vertexInterpolationType) {
-            attrBuilder.set("interpolationType",
-                FnKat::StringAttribute("subdiv"));
-        }
-        gdBuilder.set(gdName, attrBuilder.build());
-    }
-
-    return gdBuilder.build();
 }
 
 Foundry::Katana::Attribute
@@ -242,34 +114,101 @@ PxrUsdKatanaGeomGetWindingOrderAttr(
     }
 }
 
-Foundry::Katana::Attribute
-PxrUsdKatanaGeomGetNormalAttr(
-    const UsdGeomPointBased& points,
+namespace {
+
+template <typename T_USD, typename T_ATTR> FnKat::Attribute
+_ConvertGeomAttr(
+    const UsdAttribute& usdAttr,
+    const int tupleSize,
     const PxrUsdKatanaUsdInPrivateData& data)
 {
-    UsdAttribute normalsAttr = points.GetNormalsAttr();
-    if (not normalsAttr)
+    if (!usdAttr.HasValue())
     {
         return FnKat::Attribute();
     }
 
-    const double currentTime = data.GetUsdInArgs()->GetCurrentTime();
-    const std::vector<double>& motionSampleTimes =
-            data.GetMotionSampleTimes(normalsAttr);
+    const double currentTime = data.GetCurrentTime();
+    const std::vector<double>& motionSampleTimes = data.GetMotionSampleTimes(usdAttr);
 
-    FnKat::FloatBuilder attrBuilder(/* tupleSize = */ 3);
+    // Flag to check if we discovered the topology is varying, in
+    // which case we only output the sample at the curent frame.
+    bool varyingTopology = false;
+
+    // Used to compare value sizes to identify varying topology.
+    int arraySize = -1;
+
+    const bool isMotionBackward = data.IsMotionBackward();
+
+    FnKat::DataBuilder<T_ATTR> attrBuilder(tupleSize);
     TF_FOR_ALL(iter, motionSampleTimes)
     {
         double relSampleTime = *iter;
         double time = currentTime + relSampleTime;
 
-        // Retrieve normals at time.
-        VtVec3fArray normalsArray;
-        normalsAttr.Get(&normalsArray, time);
+        // Eval attr.
+        VtArray<T_USD> attrArray;
+        usdAttr.Get(&attrArray, time);
 
-        std::vector<float> &normalsVec = attrBuilder.get(fabs(relSampleTime));
-        PxrUsdKatanaUtils::ConvertArrayToVector(normalsArray, &normalsVec);
+        if (arraySize == -1) {
+            arraySize = attrArray.size();
+        } else if ( attrArray.size() != static_cast<size_t>(arraySize) ) {
+            // Topology has changed. Don't create this or subsequent samples.
+            varyingTopology = true;
+            break;
+        }
+
+        std::vector<typename T_ATTR::value_type> &attrVec = 
+            attrBuilder.get(isMotionBackward ?
+            PxrUsdKatanaUtils::ReverseTimeSample(relSampleTime) : relSampleTime);
+
+        PxrUsdKatanaUtils::ConvertArrayToVector(attrArray, &attrVec);
+    }
+
+    // Varying topology was found, build for the current frame only.
+    if (varyingTopology)
+    {
+        FnKat::DataBuilder<T_ATTR> defaultBuilder(tupleSize);
+        VtArray<T_USD> attrArray;
+
+        usdAttr.Get(&attrArray, currentTime);
+        std::vector<typename T_ATTR::value_type> &attrVec = defaultBuilder.get(0);
+        PxrUsdKatanaUtils::ConvertArrayToVector(attrArray, &attrVec);
+        
+        return defaultBuilder.build();
     }
 
     return attrBuilder.build();
 }
+
+} // anon namespace
+
+FnKat::Attribute
+PxrUsdKatanaGeomGetPAttr(
+    const UsdGeomPointBased& points,
+    const PxrUsdKatanaUsdInPrivateData& data)
+{
+    return _ConvertGeomAttr<GfVec3f, FnKat::FloatAttribute>(
+            points.GetPointsAttr(), 3, data);
+}
+
+Foundry::Katana::Attribute
+PxrUsdKatanaGeomGetNormalAttr(
+    const UsdGeomPointBased& points,
+    const PxrUsdKatanaUsdInPrivateData& data)
+{
+    return _ConvertGeomAttr<GfVec3f, FnKat::FloatAttribute>(
+            points.GetNormalsAttr(), 3, data);
+}
+
+Foundry::Katana::Attribute
+PxrUsdKatanaGeomGetVelocityAttr(
+    const UsdGeomPointBased& points,
+    const PxrUsdKatanaUsdInPrivateData& data)
+{
+    return _ConvertGeomAttr<GfVec3f, FnKat::FloatAttribute>(
+            points.GetVelocitiesAttr(), 3, data);
+
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/base/vt/value.h"
@@ -50,6 +52,10 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/enum.h"
 #include "pxr/base/tf/type.h"
+#include "pxr/base/tf/fileUtils.h"
+
+#include "pxr/base/arch/defines.h"
+#include "pxr/base/arch/fileSystem.h"
 
 #include <boost/scoped_ptr.hpp>
 
@@ -64,10 +70,10 @@ using std::string;
 using std::vector;
 using std::cout;
 using std::endl;
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static void die(const std::string &msg) {
-    string str = TfStringPrintf("ERROR: %s failed.", msg.c_str());
-    TF_FATAL_ERROR(str.c_str());
+    TF_FATAL_ERROR("ERROR: %s failed.", msg.c_str());
 }
 
 
@@ -88,7 +94,7 @@ static void testArray() {
     VtDoubleArray da2 = da;
     da2[0] = 333.333;
 
-    if (da2[0] != 333.333 or
+    if (da2[0] != 333.333 || 
         da[0] == 333.333)
         die("copy-on-write");
 
@@ -185,6 +191,31 @@ static void testArray() {
 
     }
 
+    {
+        // Test that mutating reserved data doesn't affect copies of an array.
+        VtArray<int> a(4);
+        a._GetReserved()->data[0] = 4;
+        a._GetReserved()->data[1] = 0;
+
+        VtArray<int> b = a;
+        const auto &ca = a;
+        const auto &cb = b;
+        TF_AXIOM(ca._GetReserved()->data[0] == cb._GetReserved()->data[0]);
+        TF_AXIOM(ca._GetReserved()->data[1] == cb._GetReserved()->data[1]);
+
+        b._GetReserved()->data[0] = 2;
+        b._GetReserved()->data[1] = 2;
+        b._GetReserved()->data[2] = 0;
+
+        // Check that a's reserved data is unchanged
+        TF_AXIOM(ca._GetReserved()->data[0] == 4);
+        TF_AXIOM(ca._GetReserved()->data[1] == 0);
+
+        // and that b's reserved data has been updated as expected.
+        TF_AXIOM(cb._GetReserved()->data[0] == 2);
+        TF_AXIOM(cb._GetReserved()->data[1] == 2);
+        TF_AXIOM(cb._GetReserved()->data[2] == 0);
+    }
 }
 
 static void testArrayOperators() {
@@ -243,7 +274,7 @@ static void testDictionaryKeyPathAPI()
     VtDictionary dict1, dict2;
 
     dict1.SetValueAtPath("foo:bar:baz", VtValue(1.234));
-    TF_AXIOM(not dict1.empty());
+    TF_AXIOM(!dict1.empty());
     TF_AXIOM(dict1.size() == 1);
     TF_AXIOM(dict1.GetValueAtPath("foo:bar:baz"));
     TF_AXIOM(*dict1.GetValueAtPath("foo:bar:baz") == VtValue(1.234));
@@ -486,57 +517,6 @@ static void testDictionaryOverRecursive() {
     }
 }
 
-static void testDictionaryPyFormatting() {
-    VtDictionary vt0;
-    vt0["key"] = "value";
-    vt0["list"] = VtValue(vector<VtValue>(1, VtValue("single item")));
-
-    string stuff = VtDictionaryPrettyPrint(vt0);
-    if (stuff.empty())
-        die("VtDictionaryPrettyPrint - formatting failed!");
-
-    VtDictionary vt1 = VtDictionaryFromPythonString(stuff);
-    if (vt0 != vt1) {
-        die(TfStringPrintf("VtDictionaryFromPythonString - "
-                           "'''%s''' != '''%s'''!",
-                           TfStringify(vt0).c_str(),
-                           TfStringify(vt1).c_str()));
-    }
-
-    const char* fileName = "testDictionaryPyFormatting.txt";
-    if (not VtDictionaryPrettyPrintToFile(vt0, fileName))
-        die("VtDictionaryPrettyPrintToFile - failed to write to file!");
-
-    VtDictionary vt2 = VtDictionaryFromFile(fileName);
-    if (vt0 != vt2)
-        die("VtDictionaryFromFile - written and read dictionaries differ!");
-
-    unlink("link-to-dictionary");
-    symlink(fileName, "link-to-dictionary");
-    VtDictionary vt3 = VtDictionaryFromFile("link-to-dictionary");
-    if (vt3 != vt2)
-        die("VtDictionaryFromFile - read from symlink failed!");
-
-    {
-        TfErrorMark m;
-        fprintf(stderr, "expected error:\n");
-        VtDictionary d = VtDictionaryFromPythonString("");
-        fprintf(stderr, "end expected error\n");
-        if (not d.empty() or m.IsClean())
-            die("VtDictionaryFromPythonString - empty string should fail!");
-    }
-
-    {
-        TfErrorMark m;
-        fprintf(stderr, "expected error:\n");
-        VtDictionary d = VtDictionaryFromPythonString("['notadict']");
-        fprintf(stderr, "end expected error\n");
-        if (not d.empty() or m.IsClean())
-            die("VtDictionaryFromPythonString - invalid dict");
-    }
-
-}
-
 static void
 testDictionaryIterators()
 {
@@ -619,6 +599,28 @@ testDictionaryIterators()
     }
 }
 
+static void
+testDictionaryInitializerList()
+{
+    const VtDictionary dict{};
+    TF_AXIOM(dict.empty());
+
+    const VtDictionary dict2 = {
+        { "key_a", VtValue(1) },
+        { "key_b", VtValue(2) }
+    };
+    TF_AXIOM(!dict2.empty());
+
+    int i = 0;
+    for (const string& k : {"key_a", "key_b"}) {
+        auto it = dict2.find(k);
+        TF_AXIOM(it != dict2.end());
+        TF_AXIOM(it->first == k);
+        TF_AXIOM(it->second.IsHolding<int>());
+        TF_AXIOM(it->second.UncheckedGet<int>() == ++i);
+    }
+}
+
 // dest and source types are flipped so we can allow compiler to infer
 // source type
 template <class VB, class VA>
@@ -629,13 +631,13 @@ void _TestVecCast(VA const &vecA)
     string  typeNameB = ArchGetDemangled<VB>();
     VtValue  val(vecA);
     
-    if (not val.CanCast<VB>()){
+    if (!val.CanCast<VB>()){
         die("Could not cast type " + typeNameA + " to a " + typeNameB);
     }
 
-    TF_AXIOM(not val.Cast<VB>().IsEmpty());
+    TF_AXIOM(!val.Cast<VB>().IsEmpty());
 
-    if (not (val.UncheckedGet<VB>() == VB(vecA)) ){
+    if (!(val.UncheckedGet<VB>() == VB(vecA)) ){
         die("Unboxed " + typeNameA + " to " + typeNameB + "did no compare equal");
     }
 }
@@ -697,7 +699,8 @@ TF_REGISTRY_FUNCTION(TfEnum)
 static void testValue() {
     {
         // Test that we can create values holding non-streamable types. 
-        BOOST_STATIC_ASSERT(not Vt_IsOutputStreamable<_NotStreamable>::value);
+        static_assert(!Vt_IsOutputStreamable<_NotStreamable>::value,
+                      "_NotStreamable must not satisfy Vt_IsOutputStreamable.");
         _NotStreamable n;
         VtValue v(n);
         VtValue copy = v;
@@ -741,7 +744,7 @@ static void testValue() {
     }
 
     VtValue v(1.234);
-    if (not v.IsHolding<double>())
+    if (!v.IsHolding<double>())
         die("IsHolding");
     
     if (v.Get<double>() != 1.234)
@@ -771,25 +774,25 @@ static void testValue() {
     // Test casts...
 
     v = VtValue(2.345);
-    if (not v.CanCast<double>())
+    if (!v.CanCast<double>())
         die("CanCast to same type");
     if (v != VtValue::Cast<double>(v))
         die("Cast to same type");
 
     v = VtValue(2.345);
-    if (not v.CanCast<int>())
+    if (!v.CanCast<int>())
         die("CanCast double to int");
     if (v.Cast<int>() != 2)
         die("Cast double to int");
 
     v = VtValue(2.345);
-    if (not v.CanCast<short>())
+    if (!v.CanCast<short>())
         die("CanCast double to short");
     if (v.Cast<short>() != short(2))
         die("Cast double to short");
 
     v = VtValue(1.25);
-    if (not v.CanCast<float>())
+    if (!v.CanCast<float>())
         die("CanCast double to float");
     if (v.Cast<float>() != 1.25f)
         die("Cast double to float");
@@ -797,33 +800,33 @@ static void testValue() {
     v = VtValue(1.25);
     if (v.CanCast<GfVec3d>())
         die("CanCast double to Vec3d");
-    if (not v.Cast<GfVec3d>().IsEmpty())
+    if (!v.Cast<GfVec3d>().IsEmpty())
         die("Cast to Vec3d type is not empty");
 
     v = VtValue(1.25);
-    if (not v.CanCastToTypeOf(v))
+    if (!v.CanCastToTypeOf(v))
         die("CanCast to same type");
     if (v.CastToTypeOf(v).Get<double>() != 1.25)
-	die("Casting to same type got wrong value");
+        die("Casting to same type got wrong value");
     
     v = VtValue(1.25);
     VtValue v2 = VtValue(3);
-    if (not v.CanCastToTypeOf(v2))
+    if (!v.CanCastToTypeOf(v2))
         die("CanCast to type of another value");
     if (v2.CastToTypeOf(v).Get<double>() != 3.0)
         die("Could not cast to type of another value");
 
     v = VtValue(1.25);
     v2 = VtValue(3);
-    if (not v.CanCastToTypeOf(v2))
+    if (!v.CanCastToTypeOf(v2))
         die("CanCast to type of another value");
     if (VtValue::CastToTypeOf(v2, v).Get<double>() != 3.0)
-	die("Could not cast to type of another value");
+        die("Could not cast to type of another value");
 
     v = VtValue(1.25);
-    if (not v.CanCastToTypeid(typeid(double)))
+    if (!v.CanCastToTypeid(typeid(double)))
         die("CanCast to typeid of same type");
-    if (not v.CanCastToTypeid(typeid(int)))
+    if (!v.CanCastToTypeid(typeid(int)))
         die("CanCast double to typeid of int");
     if (v.CanCastToTypeid(typeid(GfVec3d)))
         die("CanCast double to typeid of GfVec3d");
@@ -832,7 +835,7 @@ static void testValue() {
     // Range-checked casts.
     v = VtValue(std::numeric_limits<short>::max());
     v.Cast<short>();
-    TF_AXIOM(v.IsHolding<short>() and
+    TF_AXIOM(v.IsHolding<short>() &&
              v.UncheckedGet<short>() == std::numeric_limits<short>::max());
     // Out-of-range should fail.
     v = VtValue(std::numeric_limits<int>::max());
@@ -891,7 +894,7 @@ static void testValue() {
     v = VtValue();
     v2 = VtValue();
 
-    if (not (v == v2))
+    if (!(v == v2))
         die("comparison with empty");
 
     v = VtValue(1.234);
@@ -920,7 +923,7 @@ static void testValue() {
         die("scalar value reports it is shaped");
 
     v = VtValue(VtDoubleArray());
-    if (not v.IsArrayValued())
+    if (!v.IsArrayValued())
         die("array value reports it is not an array");
 
 
@@ -1023,7 +1026,7 @@ static void testValue() {
         fRoundTripped = vv.UncheckedGet<VtFloatArray>();
         // verify they compare euqal, but are physically two different arrays
         TF_AXIOM(fRoundTripped == fa);
-        TF_AXIOM(not fRoundTripped.IsIdentical(fa));
+        TF_AXIOM(!fRoundTripped.IsIdentical(fa));
     }
 
     // Test swapping VtValues holding dictionaries.
@@ -1057,7 +1060,7 @@ static void testValue() {
         TF_AXIOM(s == "hello world!");
         
         v.Swap(s);
-        TF_AXIOM(v.IsHolding<string>() and
+        TF_AXIOM(v.IsHolding<string>() &&
                  v.UncheckedGet<string>() == "hello world!");
         string t = v.Remove<string>();
         TF_AXIOM(t == "hello world!");
@@ -1065,7 +1068,7 @@ static void testValue() {
 
         v.Swap(t);
         TF_AXIOM(t.empty());
-        TF_AXIOM(v.IsHolding<string>() and
+        TF_AXIOM(v.IsHolding<string>() &&
                  v.UncheckedGet<string>() == "hello world!");
 
         t = v.UncheckedRemove<string>();
@@ -1080,7 +1083,7 @@ static void testValue() {
         VtValue empty;
         TfErrorMark m;
         TF_AXIOM(empty.Get<bool>() == false);
-        TF_AXIOM(not m.IsClean());
+        TF_AXIOM(!m.IsClean());
     }
 
     {
@@ -1091,13 +1094,45 @@ static void testValue() {
 
         m.SetMark();
         TF_AXIOM(d.Get<int>() == 0);
-        TF_AXIOM(not m.IsClean());
+        TF_AXIOM(!m.IsClean());
         
         m.SetMark();
         TF_AXIOM(d.Get<string>() == string());
-        TF_AXIOM(not m.IsClean());
+        TF_AXIOM(!m.IsClean());
     }
 
+}
+
+struct _Unhashable {};
+bool operator==(_Unhashable, _Unhashable) { return true; }
+
+static void
+testValueHash()
+{
+    static_assert(VtIsHashable<int>(), "");
+    static_assert(!VtIsHashable<_Unhashable>(), "");
+
+    VtValue vHashable{1};
+    VtValue vUnhashable{_Unhashable{}};
+
+    // Test the dynamic hashability check.
+    TF_AXIOM(vHashable.CanHash());
+    TF_AXIOM(!vUnhashable.CanHash());
+
+    {
+        // Test that hashable types can hash without error.
+        TfErrorMark m;
+        vHashable.GetHash();
+        TF_AXIOM(m.IsClean());
+    }
+
+    {
+        // Test that unhashable types post an error when attempting to hash.
+        TfErrorMark m;
+        vUnhashable.GetHash();
+        TF_AXIOM(!m.IsClean());
+        m.Clear();
+    }
 }
 
 int main(int argc, char *argv[])
@@ -1109,9 +1144,10 @@ int main(int argc, char *argv[])
     testDictionaryKeyPathAPI();
     testDictionaryOverRecursive();
     testDictionaryIterators();
+    testDictionaryInitializerList();
 
-    testDictionaryPyFormatting();
     testValue();
+    testValueHash();
 
     printf("Test SUCCEEDED\n");
 

@@ -21,14 +21,17 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file vt/types.h
-/// Defines all the types "TYPED" for which Vt creates a VtTYPEDArray typedef.
-/// 
 #ifndef VT_TYPES_H
 #define VT_TYPES_H
 
+/// \file vt/types.h
+/// Defines all the types "TYPED" for which Vt creates a VtTYPEDArray typedef.
+
+#include "pxr/pxr.h"
+#include "pxr/base/vt/api.h"
 #include "pxr/base/arch/inttypes.h"
 #include "pxr/base/gf/declare.h"
+#include "pxr/base/gf/half.h"
 #include "pxr/base/tf/token.h"
 
 #include <boost/preprocessor.hpp>
@@ -36,12 +39,14 @@
 #include <string>
 #include <cstddef>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Value types.
 
 #define VT_FLOATING_POINT_BUILTIN_VALUE_TYPES \
 ((      double,                Double )) \
 ((      float,                 Float  )) \
-((      half,                  Half   ))
+((      GfHalf,                Half   ))
 
 #define VT_INTEGRAL_BUILTIN_VALUE_TYPES     \
 ((      bool,                  Bool   ))    \
@@ -177,5 +182,7 @@ struct Vt_Reserved {
     Vt_Reserved() { data[0] = 0; }
     unsigned int data[NumWords];
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // VT_TYPES_H

@@ -21,25 +21,28 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/clipCache.h"
 
 #include "pxr/usd/usd/debugCodes.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/resolver.h"
 #include "pxr/usd/usd/tokens.h"
-
 #include "pxr/usd/pcp/layerStack.h"
 #include "pxr/usd/pcp/node.h"
+#include "pxr/usd/pcp/primIndex.h"
 #include "pxr/usd/sdf/assetPath.h"
 #include "pxr/usd/sdf/layer.h"
 #include "pxr/usd/sdf/path.h"
-#include "pxr/base/vt/array.h"
 
+#include "pxr/base/vt/array.h"
 #include "pxr/base/gf/vec2d.h"
 #include "pxr/base/tf/ostreamMethods.h"
 
-#include <boost/foreach.hpp>
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 Usd_ClipCache::Usd_ClipCache()
 {
@@ -74,24 +77,22 @@ _ValidateClipFields(
     const size_t numClips = clipAssetPaths.size();
 
     // Each entry in the 'clipAssetPaths' array is the asset path to a clip.
-    TF_FOR_ALL(it, clipAssetPaths) {
-        const std::string& assetPath = it->GetAssetPath();
-        if (assetPath.empty()) {
-            *errMsg = TfStringPrintf(
-                "Empty clip asset path in metadata '%s'",
-                UsdTokens->clipAssetPaths.GetText());
+    for (const auto& clipAssetPath : clipAssetPaths) {
+        if (clipAssetPath.GetAssetPath().empty()) {
+            *errMsg = TfStringPrintf("Empty clip asset path in metadata '%s'",
+                                     UsdTokens->clipAssetPaths.GetText());
             return false;
         }
     }
 
     // The 'clipPrimPath' field identifies a prim from which clip data
     // will be read.
-    if (not SdfPath::IsValidPathString(clipPrimPath, errMsg)) {
+    if (!SdfPath::IsValidPathString(clipPrimPath, errMsg)) {
         return false;
     }
     
     const SdfPath path(clipPrimPath);
-    if (not (path.IsAbsolutePath() and path.IsPrimPath())) {
+    if (!(path.IsAbsolutePath() && path.IsPrimPath())) {
         *errMsg = TfStringPrintf(
             "Path '%s' in metadata '%s' must be an absolute path to a prim",
             clipPrimPath.c_str(),
@@ -101,9 +102,8 @@ _ValidateClipFields(
 
     // Each Vec2d in the 'clipActive' array is a (start frame, clip index)
     // tuple. Ensure the clip index points to a valid clip.
-    TF_FOR_ALL(it, clipActive) {
-        const GfVec2d& startFrameAndClipIndex = *it;
-        if (startFrameAndClipIndex[1] < 0 or
+    for (const auto& startFrameAndClipIndex : clipActive) {
+        if (startFrameAndClipIndex[1] < 0 ||
             startFrameAndClipIndex[1] >= numClips) {
 
             *errMsg = TfStringPrintf(
@@ -118,13 +118,12 @@ _ValidateClipFields(
     // active at the same time.
     typedef std::map<double, int> _ActiveClipMap;
     _ActiveClipMap activeClipMap;
-    TF_FOR_ALL(it, clipActive) {
-        const GfVec2d& startFrameAndClipIndex = *it;
+    for (const auto& startFrameAndClipIndex : clipActive) {
         std::pair<_ActiveClipMap::iterator, bool> status = 
             activeClipMap.insert(std::make_pair(
                     startFrameAndClipIndex[0], startFrameAndClipIndex[1]));
         
-        if (not status.second) {
+        if (!status.second) {
             *errMsg = TfStringPrintf(
                 "Clip %d cannot be active at time %.3f in metadata '%s' "
                 "because clip %d was already specified as active at this time.",
@@ -140,45 +139,39 @@ _ValidateClipFields(
 }
 
 static void
-_AddClipsFromNode(
-    const PcpNodeRef& node,
-    Usd_ClipCache::Clips* clips)
+_AddClipsFromClipInfo(
+    const SdfPath& usdPrimPath, 
+    const Usd_ResolvedClipInfo& clipInfo, Usd_ClipCache::Clips* clips)
 {
-    Usd_ResolvedClipInfo clipInfo;
-    Usd_ResolveClipInfo(node, &clipInfo);
+    // If we haven't found all of the required clip metadata we can just 
+    // bail out. Note that clipTimes and clipManifestAssetPath are *not* 
+    // required.
+    if (!clipInfo.clipAssetPaths 
+        || !clipInfo.clipPrimPath 
+        || !clipInfo.clipActive) {
+        return;
+    }
 
     // The clip manifest is currently optional but can greatly improve
     // performance if specified. For debugging performance problems,
     // issue a message indicating if one hasn't been specified.
-    if (not clipInfo.clipManifestAssetPath) {
+    if (!clipInfo.clipManifestAssetPath) {
         TF_DEBUG(USD_CLIPS).Msg(
-            "No clip manifest specified for prim <%s> in LayerStack "
-            "%s at spec <%s>. Performance may be improved if a "
-            "manifest is specified.",
-            node.GetRootNode().GetPath().GetString().c_str(),
-            TfStringify(node.GetLayerStack()).c_str(),
-            node.GetPath().GetString().c_str());
-    }
-
-    // If we haven't found all of the required clip metadata we can just 
-    // bail out. Note that clipTimes and clipManifestAssetPath are *not* 
-    // required.
-    if (not clipInfo.clipAssetPaths or not clipInfo.clipPrimPath 
-        or not clipInfo.clipActive) {
-        return;
+            "No clip manifest specified for prim <%s>. " 
+            "Performance may be improved if a manifest is specified.\n",
+            usdPrimPath.GetText());
     }
 
     // XXX: Possibly want a better way to inform consumers of the error
     //      message..
     std::string error;
-    if (not _ValidateClipFields(
+    if (!_ValidateClipFields(
             *clipInfo.clipAssetPaths, *clipInfo.clipPrimPath, 
             *clipInfo.clipActive, &error)) {
 
         TF_WARN(
-            "Invalid clips specified for prim <%s> in LayerStack %s: %s",
-            node.GetPath().GetString().c_str(),
-            TfStringify(node.GetLayerStack()).c_str(),
+            "Invalid clips specified for prim <%s>: %s",
+            clipInfo.sourcePrimPath.GetString().c_str(),
             error.c_str());
         return;
     }
@@ -186,14 +179,15 @@ _AddClipsFromNode(
     // If a clip manifest has been specified, create a clip for it.
     if (clipInfo.clipManifestAssetPath) {
         const Usd_ClipRefPtr clip(new Usd_Clip(
-            /* clipSourceNode = */ node,
+            /* clipSourceLayerStack = */ clipInfo.sourceLayerStack,
+            /* clipSourcePrimPath   = */ clipInfo.sourcePrimPath,
             /* clipSourceLayerIndex = */ 
                 clipInfo.indexOfLayerWhereAssetPathsFound,
-            /* clipAssetPath = */ *clipInfo.clipManifestAssetPath,
-            /* clipPrimPath = */ SdfPath(*clipInfo.clipPrimPath),
-            /* clipStartTime = */ -std::numeric_limits<int>::max(),
-            /* clipEndTime = */ std::numeric_limits<int>::max(),
-            /* clipTimes = */ Usd_Clip::TimeMappings()));
+            /* clipAssetPath        = */ *clipInfo.clipManifestAssetPath,
+            /* clipPrimPath         = */ SdfPath(*clipInfo.clipPrimPath),
+            /* clipStartTime        = */ Usd_ClipTimesEarliest,
+            /* clipEndTime          = */ Usd_ClipTimesLatest,
+            /* clipTimes            = */ Usd_Clip::TimeMappings()));
         clips->manifestClip = clip;
     }
 
@@ -202,9 +196,9 @@ _AddClipsFromNode(
     typedef std::map<double, Usd_ClipEntry> _TimeToClipMap;
     _TimeToClipMap startTimeToClip;
 
-    TF_FOR_ALL(it, *clipInfo.clipActive) {
-        const double startFrame = (*it)[0];
-        const int clipIndex = (int)((*it)[1]);
+    for (const auto& startFrameAndClipIndex : *clipInfo.clipActive) {
+        const double startFrame = startFrameAndClipIndex[0];
+        const int clipIndex = (int)(startFrameAndClipIndex[1]);
         const SdfAssetPath& assetPath = (*clipInfo.clipAssetPaths)[clipIndex];
 
         Usd_ClipEntry entry;
@@ -227,19 +221,19 @@ _AddClipsFromNode(
         const Usd_ClipEntry clipEntry = it->second;
 
         const Usd_Clip::ExternalTime clipStartTime = 
-            (it == itBegin ? -std::numeric_limits<double>::max() : it->first);
+            (it == itBegin ? Usd_ClipTimesEarliest : it->first);
         ++it;
         const Usd_Clip::ExternalTime clipEndTime = 
-            (it == itEnd ? std::numeric_limits<double>::max() : it->first);
+            (it == itEnd ? Usd_ClipTimesLatest : it->first);
 
         // Generate the clip time mapping that applies to this clip.
         Usd_Clip::TimeMappings timeMapping;
         if (clipInfo.clipTimes) {
-            TF_FOR_ALL(it, *clipInfo.clipTimes) {
-                const Usd_Clip::ExternalTime extTime = (*it)[0];
-                const Usd_Clip::InternalTime intTime = (*it)[1];
+            for (const auto& clipTime : *clipInfo.clipTimes) {
+                const Usd_Clip::ExternalTime extTime = clipTime[0];
+                const Usd_Clip::InternalTime intTime = clipTime[1];
                 
-                if (clipStartTime <= extTime and extTime < clipEndTime) {
+                if (clipStartTime <= extTime && extTime < clipEndTime) {
                     timeMapping.push_back(
                         Usd_Clip::TimeMapping(extTime, intTime));
                 }
@@ -247,7 +241,8 @@ _AddClipsFromNode(
         }
 
         const Usd_ClipRefPtr clip(new Usd_Clip(
-            /* clipSourceNode = */ node,
+            /* clipSourceLayerStack = */ clipInfo.sourceLayerStack,
+            /* clipSourcePrimPath   = */ clipInfo.sourcePrimPath,
             /* clipSourceLayerIndex = */ 
                 clipInfo.indexOfLayerWhereAssetPathsFound,
             /* clipAssetPath = */ clipEntry.clipAssetPath,
@@ -259,8 +254,28 @@ _AddClipsFromNode(
         clips->valueClips.push_back(clip);
     }
 
-    clips->sourceNode = node;
+    clips->sourceLayerStack = clipInfo.sourceLayerStack;
+    clips->sourcePrimPath = clipInfo.sourcePrimPath;
     clips->sourceLayerIndex = clipInfo.indexOfLayerWhereAssetPathsFound;    
+}
+
+static void
+_AddClipsFromPrimIndex(
+    const PcpPrimIndex& primIndex, 
+    std::vector<Usd_ClipCache::Clips>* clips)
+{
+    std::vector<Usd_ResolvedClipInfo> clipInfo;
+    if (!Usd_ResolveClipInfo(primIndex, &clipInfo)) {
+        return;
+    }
+
+    for (const Usd_ResolvedClipInfo& entry : clipInfo) {
+        Usd_ClipCache::Clips entryClips;
+        _AddClipsFromClipInfo(primIndex.GetPath(), entry, &entryClips);
+        if (!entryClips.valueClips.empty()) {
+            clips->push_back(entryClips);
+        }
+    }
 }
 
 bool
@@ -270,15 +285,9 @@ Usd_ClipCache::PopulateClipsForPrim(
     TRACE_FUNCTION();
 
     std::vector<Clips> allClips;
-    for (Usd_Resolver res(&primIndex); res.IsValid(); res.NextNode()) {
-        Clips clipsFromNode;
-        _AddClipsFromNode(res.GetNode(), &clipsFromNode);
-        if (not clipsFromNode.valueClips.empty()) {
-            allClips.push_back(clipsFromNode);
-        }
-    };
+    _AddClipsFromPrimIndex(primIndex, &allClips);
 
-    const bool primHasClips = not allClips.empty();
+    const bool primHasClips = !allClips.empty();
     if (primHasClips) {
         tbb::mutex::scoped_lock lock(_mutex);
 
@@ -295,6 +304,30 @@ Usd_ClipCache::PopulateClipsForPrim(
     }
 
     return primHasClips;
+}
+
+SdfLayerHandleSet
+Usd_ClipCache::GetUsedLayers() const
+{
+    SdfLayerHandleSet layers;
+
+    tbb::mutex::scoped_lock lock(_mutex);
+
+    for (_ClipTable::iterator::value_type const &clipsListIter : _table){
+        for (Clips const &clipSet : clipsListIter.second){
+            if (SdfLayerHandle layer = clipSet.manifestClip ?
+                clipSet.manifestClip->GetLayerIfOpen() : SdfLayerHandle()){
+                layers.insert(layer);
+            }
+            for (Usd_ClipRefPtr const &clip : clipSet.valueClips){
+                if (SdfLayerHandle layer = clip->GetLayerIfOpen()){
+                    layers.insert(layer);
+                }
+            }
+        }
+    }
+
+    return layers;
 }
 
 const std::vector<Usd_ClipCache::Clips>&
@@ -325,12 +358,15 @@ Usd_ClipCache::InvalidateClipsForPrim(const SdfPath& path, Lifeboat* lifeboat)
 {
     tbb::mutex::scoped_lock lock(_mutex);
 
-    BOOST_FOREACH(const _ClipTable::value_type& entry,
-                  _table.FindSubtreeRange(path)) {
-
+    auto range = _table.FindSubtreeRange(path);
+    for (auto entryIter = range.first; entryIter != range.second; ++entryIter) {
+        const auto& entry = *entryIter;
         lifeboat->_clips.insert(
             lifeboat->_clips.end(), entry.second.begin(), entry.second.end());
     }
 
     _table.erase(path);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

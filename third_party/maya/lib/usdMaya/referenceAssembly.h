@@ -24,8 +24,17 @@
 #ifndef PXRUSDMAYA_REFERENCEASSEMBLY_H
 #define PXRUSDMAYA_REFERENCEASSEMBLY_H
 
+/// \file referenceAssembly.h
+
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
 #include "usdMaya/proxyShape.h"
 #include "usdMaya/usdPrimProvider.h"
+
+#include "pxr/base/tf/envSetting.h"
+#include "pxr/base/tf/staticTokens.h"
+#include "pxr/usd/sdf/layer.h"
+#include "pxr/usd/usd/stage.h"
 
 #include <maya/MDGModifier.h>
 #include <maya/MDagModifier.h>
@@ -34,24 +43,32 @@
 #include <maya/MString.h>
 #include <maya/MTypeId.h>
 
+#include <boost/shared_ptr.hpp>
+
 #include <map>
 #include <string>
 #include <vector>
 
-#include <boost/shared_ptr.hpp>
 
-#include "pxr/base/tf/envSetting.h"
+PXR_NAMESPACE_OPEN_SCOPE
 
-#include "pxr/usd/sdf/layer.h"
-#include "pxr/usd/usd/stage.h"
 
-extern TfEnvSetting<bool> PIXMAYA_USE_USD_ASSEM_NAMESPACE;
+#define PXRUSDMAYA_VARIANT_SET_TOKENS                  \
+    ((PlugNamePrefix, "usdVariantSet_"))
+
+TF_DECLARE_PUBLIC_TOKENS(
+    PxrUsdMayaVariantSetTokens, PXRUSDMAYA_API, PXRUSDMAYA_VARIANT_SET_TOKENS);
+
+/// Returns the PIXMAYA_USE_USD_ASSEM_NAMESPACE env setting.
+PXRUSDMAYA_API
+bool UsdMayaUseUsdAssemblyNamespace();
 
 
 class UsdMayaReferenceAssembly : public MPxAssembly, 
     public PxrUsdMayaUsdPrimProvider
 {
 public:
+    PXRUSDMAYA_API
     static const MString _classification;
 
     /// \brief Helper struct to hold MObjects for this class.
@@ -75,6 +92,7 @@ public:
         MObject tintColor;
         MObject kind;
         MObject initialRep;
+        MObject repNamespace;
         MObject inStageData;
         MObject inStageDataCached;
         MObject outStageData;
@@ -102,82 +120,114 @@ public:
     };
 
     // Static Member Functions ==
-    static void*   creator(
-            const PluginStaticData& psData);
-    static MStatus initialize(
-            PluginStaticData* psData);
+    PXRUSDMAYA_API
+    static void* creator(const PluginStaticData& psData);
+    PXRUSDMAYA_API
+    static MStatus initialize(PluginStaticData* psData);
 
     // == Base Class Virtuals ==
-    virtual MStatus    compute( const MPlug& plug,
-                                MDataBlock& dataBlock );
+    PXRUSDMAYA_API
+    virtual MStatus compute(const MPlug& plug, MDataBlock& dataBlock) override;
 
-    virtual bool       setInternalValueInContext( const MPlug& plug,
-                                         const MDataHandle& dataHandle,
-                                         MDGContext& ctx);
+    PXRUSDMAYA_API
+    virtual bool setInternalValueInContext(
+            const MPlug& plug,
+            const MDataHandle& dataHandle,
+            MDGContext& ctx) override;
 
     // Required overrides
+    PXRUSDMAYA_API
     virtual MString createRepresentation(
             const MString& input,
             const MString& type,
             const MString& representation,
-            MDagModifier*  undoRedo = NULL,
-            MStatus*       ReturnStatus = NULL);
+            MDagModifier* undoRedo = NULL,
+            MStatus* ReturnStatus = NULL) override;
     
-    virtual MString      getActive() const;
-    virtual MStringArray getRepresentations(MStatus* ReturnStatus = NULL) const;
-    virtual MString      getRepType(const MString& representation) const;
-    virtual MString      getRepLabel(const MString& representation) const;
-    virtual MStringArray repTypes() const;
-    virtual MStatus      deleteRepresentation(const MString& representation);
-    virtual MStatus      deleteAllRepresentations();
-    virtual MString      setRepName(const MString& representation,
-                                    const MString& newName,
-                                    MStatus*       ReturnStatus = NULL);
-    virtual MStatus      setRepLabel(const MString& representation,
-                                     const MString& label);
-    virtual bool         activateRep(const MString& representation);
+    PXRUSDMAYA_API
+    virtual MString getActive() const override;
+    PXRUSDMAYA_API
+    virtual MStringArray getRepresentations(
+            MStatus* ReturnStatus = NULL) const override;
+    PXRUSDMAYA_API
+    virtual MString getRepType(const MString& representation) const override;
+    PXRUSDMAYA_API
+    virtual MString getRepLabel(const MString& representation) const override;
+    PXRUSDMAYA_API
+    virtual MStringArray repTypes() const override;
+    PXRUSDMAYA_API
+    virtual MStatus deleteRepresentation(
+            const MString& representation) override;
+    PXRUSDMAYA_API
+    virtual MStatus deleteAllRepresentations() override;
+    PXRUSDMAYA_API
+    virtual MString setRepName(
+            const MString& representation,
+            const MString& newName,
+            MStatus* ReturnStatus = NULL) override;
+    PXRUSDMAYA_API
+    virtual MStatus setRepLabel(
+            const MString& representation,
+            const MString& label) override;
+    PXRUSDMAYA_API
+    virtual bool activateRep(const MString& representation) override;
 
     // Optional overrides
-    virtual bool         supportsEdits() const { return true;};
-    virtual bool         supportsMemberChanges() const { return false;};
-    virtual bool         canRepApplyEdits(const MString& rep) const {return (rep.length() > 0);};
+    PXRUSDMAYA_API
+    virtual bool supportsEdits() const override { return true; };
+    PXRUSDMAYA_API
+    virtual bool supportsMemberChanges() const override { return false; };
+    PXRUSDMAYA_API
+    virtual bool canRepApplyEdits(const MString& rep) const override {
+        return (rep.length() > 0);
+    };
 
-    virtual void         postLoad();
-    virtual bool         inactivateRep();
-    virtual MString      getRepNamespace() const;
-    //virtual bool         activate(const MString& representation);
-    //virtual bool         isActive(const MString& representation) const;
-    //virtual void         updateRepNamespace(const MString& repNamespace);
-    //virtual bool         handlesApplyEdits() const;
-    //virtual MStatus      applyEdits(MObject& target, MItEdits& edits);
-    //virtual bool         handlesAddEdits() const;
-    //virtual MStatus      addEdits();
-    //virtual void         beforeSave();
-    //virtual void         memberAdded(MObject& member);
-    //virtual void         memberRemoved(MObject& member);
+    PXRUSDMAYA_API
+    virtual void postLoad() override;
+    PXRUSDMAYA_API
+    virtual bool inactivateRep() override;
+    PXRUSDMAYA_API
+    virtual MString getRepNamespace() const override;
+    PXRUSDMAYA_API
+    virtual void updateRepNamespace(const MString& repNamespace) override;
 
-    //virtual void         preApplyEdits();
-    //virtual void         preUnapplyEdits();
-    //virtual MString      getInitialRep(const MObject &assembly,
-    //                                  bool& hasInitialRep,
-    //                                  MStatus* ReturnStatus=NULL) const;
-
-    virtual MStatus      setDependentsDirty( const MPlug& plug, MPlugArray& plugArray);
+    PXRUSDMAYA_API
+    virtual MStatus setDependentsDirty(
+            const MPlug& plug,
+            MPlugArray& plugArray) override;
 
     // PxrUsdMayaUsdPrimProvider overrides:
+    PXRUSDMAYA_API
     UsdPrim usdPrim() const override;
 
     // Additional public functions
     bool HasEdits() const { return _hasEdits; }
     void SetHasEdits(bool val) { _hasEdits = val; }
 
-    // This method returns a map of variantSet names to variant selections based
-    // on the variant selections specified on the Maya assembly node. The list
-    // of valid variantSets is retrieved from the referenced prim, so only
-    // Maya attributes with a selection that correspond to a valid variantSet
-    // are included in the returned map.
+    /// This method returns a map of variantSet names to variant selections based
+    /// on the variant selections specified on the Maya assembly node. The list
+    /// of valid variantSets is retrieved from the referenced prim, so only
+    /// Maya attributes with a selection that correspond to a valid variantSet
+    /// are included in the returned map.
+    PXRUSDMAYA_API
     std::map<std::string, std::string> GetVariantSetSelections() const;
 
+    /// Connect Maya's global time to the assembly's time attribute
+    ///
+    /// This function is called when the assembly's Playback representation is
+    /// activated to enable scrubbing through animation using the timeline,
+    /// since we also create a connection from the assembly to its proxies.
+    PXRUSDMAYA_API
+    void ConnectMayaTimeToAssemblyTime();
+
+    /// Disconnect the assembly's time attribute from Maya's global time
+    ///
+    /// This function is called when the assembly's Playback representation is
+    /// deactivated so that we do not incur the performance overhead of
+    /// propagating Maya's global time to the assembly and its proxies.
+    /// This also disables scrubbing through animation.
+    PXRUSDMAYA_API
+    void DisconnectAssemblyTimeFromMayaTime();
 
   private:
 
@@ -191,13 +241,38 @@ public:
     MStatus computeInStageDataCached(MDataBlock& dataBlock);
     MStatus computeOutStageData(MDataBlock& dataBlock);
 
-    // Class member variables
+    // After discussion with Autodesk, we've decided to adopt the namespace
+    // handling functionality from their sample assembly reference
+    // implementation here:
+    //
+    // http://help.autodesk.com/view/MAYAUL/2017/ENU/?guid=__cpp_ref_scene_assembly_2assembly_reference_8h_example_html
+    //
+    // This should really be implemented internally as built-in functionality
+    // of Maya assemblies rather than having to deal with it in plugin code,
+    // but there are currently no plans to make that happen, so we're forced to
+    // do it ourselves. This helps ensure that assembly edits do not fall off
+    // when assembly nodes are renamed/duplicated/etc.
+
+    /// UsdMayaReferenceAssembly objects use a slightly different scheme for
+    /// the representation namespace than the default behavior of
+    /// MPxAssembly::getRepNamespace(), but they use that as a starting point.
+    /// This function returns the "default" namespace for this assembly. This
+    /// may be different from the assembly's actual namespace if the
+    /// repNamespace attribute has been set to a different value.
+    MString getDefaultRepNamespace() const;
+
+    // This variable is used to tell if we're in the process of updating the
+    // repNamespace. It helps distinguish between cases when the namespace
+    // change was initiated by Maya or via the namespace editor (in which case
+    // _updatingRepNamespace == true) versus when the repNamespace attribute
+    // was edited directly (in which case _updatingRepNamespace == false).
+    bool _updatingRepNamespace;
+
     std::map<std::string, boost::shared_ptr<MPxRepresentation> > _representations;
     bool _activateRepOnFileLoad; 
     boost::shared_ptr<MPxRepresentation> _activeRep;
     bool _inSetInternalValue;
     bool _hasEdits;
-
 };
 
 
@@ -210,10 +285,13 @@ class UsdMayaRepresentationBase : public MPxRepresentation
 {
   public:
     // == Overrides for MPxRepresentation ==
+    PXRUSDMAYA_API
     UsdMayaRepresentationBase(MPxAssembly *assembly, const MString &name);
+    PXRUSDMAYA_API
     virtual ~UsdMayaRepresentationBase() {};
 
     virtual bool activate() = 0;
+    PXRUSDMAYA_API
     virtual bool inactivate();
 
     // == Required Virtual Overrides
@@ -234,13 +312,18 @@ class UsdMayaRepresentationBase : public MPxRepresentation
 class UsdMayaRepresentationProxyBase : public UsdMayaRepresentationBase 
 {
   public:
-    UsdMayaRepresentationProxyBase(MPxAssembly *assembly, const MString &name) : 
-        UsdMayaRepresentationBase(assembly, name) {};
+    UsdMayaRepresentationProxyBase(MPxAssembly *assembly, const MString &name, 
+            bool proxyIsSoftSelectable) : 
+        UsdMayaRepresentationBase(assembly, name),
+        _proxyIsSoftSelectable(proxyIsSoftSelectable) {};
 
+    PXRUSDMAYA_API
     virtual bool activate();
+    PXRUSDMAYA_API
     virtual bool inactivate();
 
   protected:
+    PXRUSDMAYA_API
     virtual void _OverrideProxyPlugs(MFnDependencyNode &shapeFn,
                                      MDGModifier &dgMod);
 
@@ -249,6 +332,7 @@ class UsdMayaRepresentationProxyBase : public UsdMayaRepresentationBase
 
   private:
     SdfLayerRefPtr _sessionSublayer;
+    bool _proxyIsSoftSelectable;
 };
 
 // ===========================================================
@@ -260,15 +344,22 @@ class UsdMayaRepresentationCollapsed : public UsdMayaRepresentationProxyBase
 {
   public:
     // == Statics
+    PXRUSDMAYA_API
     static const MString _assemblyType;
 
     // == Overrides for MPxRepresentation ==
+    PXRUSDMAYA_API
     UsdMayaRepresentationCollapsed(MPxAssembly *assembly, const MString &name) : 
-        UsdMayaRepresentationProxyBase(assembly, name) {};
+
+        // We only support soft selection on "collapsed" proxies.  While we may
+        // want to move proxies that are not root of the model, we suspect this
+        // is more likely to lead to undesired behavior.
+        UsdMayaRepresentationProxyBase(assembly, name, true) {};
 
     virtual MString getType () const { return UsdMayaRepresentationCollapsed::_assemblyType; };
 
   protected:
+    PXRUSDMAYA_API
     virtual void _OverrideProxyPlugs(MFnDependencyNode &shapeFn,
                                      MDGModifier &dgMod);
 };
@@ -282,15 +373,22 @@ class UsdMayaRepresentationPlayback : public UsdMayaRepresentationProxyBase
 {
   public:
     // == Statics
+    PXRUSDMAYA_API
     static const MString _assemblyType;
 
     // == Overrides for MPxRepresentation ==
     UsdMayaRepresentationPlayback(MPxAssembly *assembly, const MString &name) : 
-        UsdMayaRepresentationProxyBase(assembly, name) {};
+        UsdMayaRepresentationProxyBase(assembly, name, false) {};
 
     virtual MString getType () const { return UsdMayaRepresentationPlayback::_assemblyType; };
 
+    PXRUSDMAYA_API
+    virtual bool activate();
+    PXRUSDMAYA_API
+    virtual bool inactivate();
+
   protected:
+    PXRUSDMAYA_API
     virtual void _OverrideProxyPlugs(MFnDependencyNode &shapeFn,
                                      MDGModifier &dgMod);
 };
@@ -304,10 +402,14 @@ class UsdMayaRepresentationHierBase : public UsdMayaRepresentationBase
     UsdMayaRepresentationHierBase(MPxAssembly *assembly, const MString &name) : 
         UsdMayaRepresentationBase(assembly, name) {};
 
+    PXRUSDMAYA_API
     virtual bool activate();
 
   protected:
+    PXRUSDMAYA_API
     void _ConnectSubAssemblyPlugs();
+    PXRUSDMAYA_API
+    void _ConnectProxyPlugs();
 
     virtual bool _ShouldImportWithProxies() const { return false; };
 };
@@ -322,6 +424,7 @@ class UsdMayaRepresentationExpanded : public UsdMayaRepresentationHierBase
 {
   public:
     // == Statics
+    PXRUSDMAYA_API
     static const MString _assemblyType;
 
     // == Overrides for MPxRepresentation ==
@@ -343,6 +446,7 @@ class UsdMayaRepresentationFull : public UsdMayaRepresentationHierBase
 {
   public:
     // == Statics
+    PXRUSDMAYA_API
     static const MString _assemblyType;
 
     // == Overrides for MPxRepresentation ==
@@ -351,5 +455,8 @@ class UsdMayaRepresentationFull : public UsdMayaRepresentationHierBase
 
     virtual MString getType () const { return UsdMayaRepresentationFull::_assemblyType; };
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDMAYA_REFERENCEASSEMBLY_H

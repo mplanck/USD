@@ -23,6 +23,7 @@
 //
 /// \file alembicData.cpp
 
+#include "pxr/pxr.h"
 #include "pxr/usd/usdAbc/alembicData.h"
 #include "pxr/usd/usdAbc/alembicReader.h"
 #include "pxr/usd/usdAbc/alembicUtil.h"
@@ -31,6 +32,9 @@
 #include "pxr/base/tracelite/trace.h"
 #include "pxr/base/tf/envSetting.h"
 #include "pxr/base/tf/fileUtils.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // Note: The Alembic translator has a few major parts.  Here's a
 //       quick description.
@@ -79,10 +83,13 @@
 //
 //   UsdAbc_AlembicData
 //     Forwards most calls to UsdAbc_AlembicDataReader.  It has a static
-//     method for writing an Alembic file.
+//     method for writing an Alembic file.  The UsdAbc_AlembicDataReader
+//     exists between a successful Open() and Close().  When there is no
+//     reader the data acts as if there's a pseudo-root prim spec at the
+//     absolute root path.
 //
 
-using namespace ::UsdAbc_AlembicUtil;
+using namespace UsdAbc_AlembicUtil;
 
 TF_DEFINE_ENV_SETTING(USD_ABC_EXPAND_INSTANCES, false,
                       "Force Alembic instances to be expanded.");
@@ -168,7 +175,7 @@ UsdAbc_AlembicData::Write(
     TRACE_FUNCTION();
 
     std::string finalComment = comment;
-    if (data and finalComment.empty()) {
+    if (data && finalComment.empty()) {
         SdfAbstractDataSpecId id(&SdfPath::AbsoluteRootPath());
         VtValue value = data->Get(id, SdfFieldKeys->Comment);
         if (value.IsHolding<std::string>()) {
@@ -182,7 +189,7 @@ UsdAbc_AlembicData::Write(
 
     // Write the archive.
     if (writer.Open(filePath, finalComment)) {
-        if (writer.Write(data) and writer.Close()) {
+        if (writer.Write(data) && writer.Close()) {
             return true;
         }
         TfDeleteFile(filePath);
@@ -202,7 +209,8 @@ UsdAbc_AlembicData::CreateSpec(
 bool
 UsdAbc_AlembicData::HasSpec(const SdfAbstractDataSpecId& id) const
 {
-    return _reader->HasSpec(id);
+    return _reader ? _reader->HasSpec(id)
+                   : (id.GetFullSpecPath() == SdfPath::AbsoluteRootPath());
 }
 
 void
@@ -222,13 +230,21 @@ UsdAbc_AlembicData::MoveSpec(
 SdfSpecType
 UsdAbc_AlembicData::GetSpecType(const SdfAbstractDataSpecId& id) const
 {
-    return _reader->GetSpecType(id);
+    if (_reader) {
+        return _reader->GetSpecType(id);
+    }
+    if (id.GetFullSpecPath() == SdfPath::AbsoluteRootPath()) {
+        return SdfSpecTypePseudoRoot;
+    }
+    return SdfSpecTypeUnknown;
 }
 
 void
 UsdAbc_AlembicData::_VisitSpecs(SdfAbstractDataSpecVisitor* visitor) const
 {
-    _reader->VisitSpecs(*this, visitor);
+    if (_reader) {
+        _reader->VisitSpecs(*this, visitor);
+    }
 }
 
 bool
@@ -237,7 +253,7 @@ UsdAbc_AlembicData::Has(
     const TfToken& fieldName,
     SdfAbstractDataValue* value) const
 {
-    return _reader->HasField(id, fieldName, value);
+    return _reader ? _reader->HasField(id, fieldName, value) : false;
 }
 
 bool
@@ -246,7 +262,7 @@ UsdAbc_AlembicData::Has(
     const TfToken& fieldName,
     VtValue* value) const
 {
-    return _reader->HasField(id, fieldName, value);
+    return _reader ? _reader->HasField(id, fieldName, value) : false;
 }
 
 VtValue
@@ -255,7 +271,9 @@ UsdAbc_AlembicData::Get(
     const TfToken& fieldName) const
 {
     VtValue result;
-    _reader->HasField(id, fieldName, &result);
+    if (_reader) {
+        _reader->HasField(id, fieldName, &result);
+    }
     return result;
 }
 
@@ -288,19 +306,20 @@ UsdAbc_AlembicData::Erase(
 std::vector<TfToken>
 UsdAbc_AlembicData::List(const SdfAbstractDataSpecId& id) const
 {
-    return _reader->List(id);
+    return _reader ? _reader->List(id) : std::vector<TfToken>();
 }
 
 std::set<double>
 UsdAbc_AlembicData::ListAllTimeSamples() const
 {
-    return _reader->ListAllTimeSamples();
+    return _reader ? _reader->ListAllTimeSamples() : std::set<double>();
 }
 
 std::set<double>
 UsdAbc_AlembicData::ListTimeSamplesForPath(const SdfAbstractDataSpecId& id) const
 {
-    return _reader->ListTimeSamplesForPath(id).GetTimes();
+    return _reader ? _reader->ListTimeSamplesForPath(id).GetTimes()
+                   : std::set<double>();
 }
 
 bool
@@ -309,14 +328,14 @@ UsdAbc_AlembicData::GetBracketingTimeSamples(
 {
     const std::set<double>& samples = _reader->ListAllTimeSamples();
     return UsdAbc_AlembicDataReader::TimeSamples::Bracket(samples, time,
-                                                     tLower, tUpper);
+                                                          tLower, tUpper);
 }
 
 size_t
 UsdAbc_AlembicData::GetNumTimeSamplesForPath(
     const SdfAbstractDataSpecId& id) const
 {
-    return _reader->ListTimeSamplesForPath(id).GetSize();
+    return _reader ? _reader->ListTimeSamplesForPath(id).GetSize() : 0u;
 }
 
 bool
@@ -324,7 +343,8 @@ UsdAbc_AlembicData::GetBracketingTimeSamplesForPath(
     const SdfAbstractDataSpecId& id,
     double time, double* tLower, double* tUpper) const
 {
-    return _reader->ListTimeSamplesForPath(id).Bracket(time, tLower, tUpper);
+    return _reader &&
+           _reader->ListTimeSamplesForPath(id).Bracket(time, tLower, tUpper);
 }
 
 bool
@@ -334,7 +354,8 @@ UsdAbc_AlembicData::QueryTimeSample(
     SdfAbstractDataValue* value) const
 {
     UsdAbc_AlembicDataReader::Index index;
-    return _reader->ListTimeSamplesForPath(id).FindIndex(time, &index) and
+    return _reader &&
+           _reader->ListTimeSamplesForPath(id).FindIndex(time, &index) && 
            _reader->HasValue(id, index, value);
 }
 
@@ -345,7 +366,7 @@ UsdAbc_AlembicData::QueryTimeSample(
     VtValue* value) const
 {
     UsdAbc_AlembicDataReader::Index index;
-    return _reader->ListTimeSamplesForPath(id).FindIndex(time, &index) and
+    return _reader->ListTimeSamplesForPath(id).FindIndex(time, &index) && 
            _reader->HasValue(id, index, value);
 }
 
@@ -363,3 +384,6 @@ UsdAbc_AlembicData::EraseTimeSample(const SdfAbstractDataSpecId& id, double time
 {
     XXX_UNSUPPORTED(EraseTimeSample);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

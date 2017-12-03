@@ -24,30 +24,37 @@
 #ifndef GLF_UVTEXTURESTORAGE_DATA_H
 #define GLF_UVTEXTURESTORAGE_DATA_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/imaging/glf/baseTextureData.h"
 
 #include "pxr/base/vt/value.h"
 
 #include <boost/shared_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfUVTextureStorageData);
 
 class GlfUVTextureStorageData : public GlfBaseTextureData
 {
 public:
+    GLF_API
     static GlfUVTextureStorageDataRefPtr
     New(unsigned int width,
         unsigned int height, 
         const VtValue &storageData);
 
+    GLF_API
     virtual ~GlfUVTextureStorageData();
 
    // GlfBaseTextureData overrides
-    virtual int ResizedWidth() const {
+    virtual int ResizedWidth(int mipLevel = 0) const {
         return _resizedWidth;
     };
 
-    virtual int ResizedHeight() const {
+    virtual int ResizedHeight(int mipLevel = 0) const {
         return _resizedHeight;
     };
 
@@ -71,15 +78,27 @@ public:
         return _wrapInfo;
     };
 
-    virtual int ComputeBytesUsed() const;
+    GLF_API
+    virtual size_t ComputeBytesUsed() const;
 
-    virtual bool HasRawBuffer() const;
+    virtual size_t ComputeBytesUsedByMip(int mipLevel = 0) const {
+        return ComputeBytesUsed();
+    }
 
-    virtual unsigned char * GetRawBuffer() const;
+    GLF_API
+    virtual bool HasRawBuffer(int mipLevel = 0) const;
 
+    GLF_API
+    virtual unsigned char * GetRawBuffer(int mipLevel = 0) const;
+
+    GLF_API
     virtual bool Read(int degradeLevel, bool generateMipmap);
 
+    GLF_API
     virtual bool IsCompressed() const;
+
+    GLF_API
+    virtual int GetNumMipLevels() const;
 
 private:
 
@@ -104,6 +123,8 @@ private:
     int _size;
 
     unsigned char *_rawBuffer;
-
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // GLF_UVTEXTURESTORAGE_DATA_H

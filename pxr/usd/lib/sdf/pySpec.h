@@ -20,83 +20,91 @@
 // distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
-//
-#if !BOOST_PP_IS_ITERATING
 
 #ifndef SDF_PYSPEC_H
 #define SDF_PYSPEC_H
 
-///
 /// \file sdf/pySpec.h
 ///
-/// \brief SdfSpec Python wrapping utilities.
+/// SdfSpec Python wrapping utilities.
 ///
+/// An SdfSpec subclass is not the representation of scene data.  An SdfSpec
+/// simply provides an interface to data stored in some internal representation.
+/// SdfSpec subclasses are value types and their lifetimes don't reflect the 
+/// lifetime of the scene data.  However, clients still create scene data using 
+/// the New methods on SdfSpec subclasses.
+///
+/// When wrapping to Python we need to wrap the New methods as the constructors. 
+/// This used to look like this:
+///
+/// \code
+///   class_<MyClass, MyClassHandle>("MyClass", no_init)
+///       .def(TfPyRefAndWeakPtr())
+///       .def(TfMakePyConstructor(&MyClass::New))
+///       ...
+/// \endcode
+///
+/// But we can't use TfMakePyConstructor() because an SdfSpec handle is
+/// not a weak pointer.  Furthermore, we don't have the problem of needing
+/// to store a ref pointer in the Python object.  But we do still need
+/// conversion of spec types to yield the most-derived type in python.
+///
+/// This file introduces a few boost::python::class_ def visitors to make
+/// wrapping specs easy.  Spec wrapping should now look like:
+///
+/// \code
+///   class_<MyClass, SdfHandle<MyClass>, bases<SdfSpec>, boost::noncopyable>
+///       ("MyClass", no_init)
+///       .def(SdfPySpec())  // or SdfPyAbstractSpec()
+///       .def(SdfMakePySpecConstructor(&MyClass::New))
+///       ...
+/// \endcode
+///
+/// If you need a custom repr you can use SdfPySpecNoRepr() or
+/// SdfPyAbstractSpecNoRepr() and def("__repr__", ...).
 
-#include "pxr/usd/sdf/declareHandles.h"
-#include "pxr/base/tf/tf.h"
-#include "pxr/base/tf/diagnostic.h"
-#include "pxr/base/tf/pyError.h"
-#include "pxr/base/tf/pyUtils.h"
-#include "pxr/base/tf/stringUtils.h"
-#include "pxr/base/arch/demangle.h"
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 
-#include <boost/bind.hpp>
-#include <boost/preprocessor.hpp>
 #include <boost/python/def_visitor.hpp>
 #include <boost/python/dict.hpp>
 #include <boost/python/errors.hpp>
 #include <boost/python/raw_function.hpp>
+#include <boost/python/pointee.hpp>
 #include <boost/python/to_python_converter.hpp>
 #include <boost/python/tuple.hpp>
 
+#include "pxr/base/tf/pyError.h"
+#include "pxr/base/tf/pyUtils.h"
+
+#include "pxr/usd/sdf/declareHandles.h"
+#include "pxr/base/tf/tf.h"
+#include "pxr/base/tf/diagnostic.h"
+#include "pxr/base/tf/stringUtils.h"
+#include "pxr/base/arch/demangle.h"
+
 #include <string>
+#include <type_traits>
+
+namespace boost{
+namespace python {
+
+template <typename T>
+struct pointee<PXR_NS::SdfHandle<T> > {
+    typedef T type;
+};
+}
+}
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 class SdfSpec;
-
-//
-// Helper for wrapping SdfSpec subclasses.
-//
-// An SdfSpec subclass is not the representation of scene data.  An SdfSpec
-// simply provides an interface to data stored in some internal representation.
-// SdfSpec subclasses are value types and their lifetimes don't reflect the 
-// lifetime of the scene data.  However, clients still create scene data using 
-// the New methods on SdfSpec subclasses.
-//
-// When wrapping to Python we need to wrap the New methods as the constructors. 
-// This used to look like this:
-//
-// \code
-//   class_<MyClass, MyClassHandle>("MyClass", no_init)
-//       .def(TfPyRefAndWeakPtr())
-//       .def(TfMakePyConstructor(&MyClass::New))
-//       ...
-// \endcode
-//
-// But we can't use TfMakePyConstructor() because an SdfSpec handle is
-// not a weak pointer.  Furthermore, we don't have the problem of needing
-// to store a ref pointer in the Python object.  But we do still need
-// conversion of spec types to yield the most-derived type in python.
-//
-// This file introduces a few boost::python::class_ def visitors to make
-// wrapping specs easy.  Spec wrapping should now look like:
-//
-// \code
-//   class_<MyClass, SdfHandle<MyClass>, bases<SdfSpec>, boost::noncopyable>
-//       ("MyClass", no_init)
-//       .def(SdfPySpec())  // or SdfPyAbstractSpec()
-//       .def(SdfMakePySpecConstructor(&MyClass::New))
-//       ...
-// \endcode
-//
-// If you need a custom repr you can use SdfPySpecNoRepr() or
-// SdfPyAbstractSpecNoRepr() and def("__repr__", ...).
-//
 
 namespace Sdf_PySpecDetail {
 
 namespace bp = boost::python;
 
-bp::object _DummyInit(bp::tuple const & /* args */, bp::dict const & /* kw */);
+SDF_API bp::object _DummyInit(bp::tuple const & /* args */, bp::dict const & /* kw */);
 
 template <typename CTOR>
 struct NewVisitor : bp::def_visitor<NewVisitor<CTOR> > {
@@ -168,7 +176,7 @@ public:
 
     static void SetFunc(Sig *func)
     {
-        if (not _func) {
+        if (! _func) {
             _func = func;
         }
         else {
@@ -183,15 +191,7 @@ public:
 
 template <typename SIG> SIG *CtorBase<SIG>::_func = 0;
 
-// The following preprocessor code repeatedly includes this file to generate
-// specializations of Ctor taking 0 through TF_MAX_ARITY parameters.
 template <typename SIG> struct NewCtor;
-#define BOOST_PP_ITERATION_LIMITS (0, TF_MAX_ARITY)
-#define BOOST_PP_FILENAME_1 "pxr/usd/sdf/pySpec.h"
-#include BOOST_PP_ITERATE()
-/* comment needed for scons dependency scanner
-#include "pxr/usd/sdf/pySpec.h"
-*/
 
 } // namespace Sdf_PySpecDetail
 
@@ -207,13 +207,13 @@ SdfMakePySpecConstructor(T *func, const std::string &doc = std::string())
 namespace Sdf_PySpecDetail {
 
 // Create the repr for a spec using Sdf.Find().
-std::string _SpecRepr(const bp::object&, const SdfSpec*);
+SDF_API std::string _SpecRepr(const bp::object&, const SdfSpec*);
 
 // Registration for spec types to functions to create a holder with the spec
 // corresponding to the spec type.
 typedef PyObject* (*_HolderCreator)(const SdfSpec&);
-void _RegisterHolderCreator(const std::type_info&, _HolderCreator);
-PyObject* _CreateHolder(const std::type_info&, const SdfSpec&);
+SDF_API void _RegisterHolderCreator(const std::type_info&, _HolderCreator);
+SDF_API PyObject* _CreateHolder(const std::type_info&, const SdfSpec&);
 
 template <class _SpecType>
 struct _ConstHandleToPython {
@@ -352,12 +352,17 @@ struct SpecVisitor : bp::def_visitor<SpecVisitor<Abstract> > {
 
         static bool IsExpired(const HeldType& self)
         {
-            return not self;
+            return !self;
         }
 
         static bool NonZero(const HeldType& self)
         {
             return self;
+        }
+
+        static size_t __hash__(const HeldType& self)
+        {
+            return hash_value(self);
         }
 
         static bool __eq__(const HeldType& a, const HeldType& b)
@@ -402,14 +407,13 @@ public:
         typedef typename CLS::metadata::held_type_arg HeldArgType;
         typedef typename CLS::metadata::holder HolderType;
 
-        // HeldType must be SdfHandle<SpecType>.
-        BOOST_STATIC_ASSERT((boost::is_same<HeldType,\
-                                            SdfHandle<SpecType> >::value));
-
+        static_assert(std::is_same<HeldType, SdfHandle<SpecType> >::value,
+                      "HeldType must be SdfHandle<SpecType>.");
 
         // Add methods.
         c.add_property("expired", &_Helper<CLS>::IsExpired);
         c.def("__nonzero__", &_Helper<CLS>::NonZero);
+        c.def("__hash__", &_Helper<CLS>::__hash__);
         c.def("__eq__", &_Helper<CLS>::__eq__);
         c.def("__ne__", &_Helper<CLS>::__ne__);
         c.def("__lt__", &_Helper<CLS>::__lt__);
@@ -465,31 +469,23 @@ SdfPyAbstractSpecNoRepr()
     return Sdf_PySpecDetail::SpecVisitor<true>(false);
 }
 
-#endif // SDF_PYSPEC_H
 
-#else // BOOST_PP_IS_ITERATING
+namespace Sdf_PySpecDetail
+{
 
-#define N BOOST_PP_ITERATION()
+// This generates multi-argument specializations for NewCtor.
 
-#define SIGNATURE R (BOOST_PP_ENUM_PARAMS(N, A))
-#define PARAMLIST BOOST_PP_ENUM_TRAILING_BINARY_PARAMS(N, A, a)
-#define ARGLIST BOOST_PP_ENUM_PARAMS(N, a)
-
-// This generates multi-argument specializations for NewCtor.  One nice
-// thing about this style of PP repetition is that the debugger will
-// actually step you over these lines for any instantiation of Ctor.
-
-template <typename R BOOST_PP_ENUM_TRAILING_PARAMS(N, typename A)>
-struct NewCtor<SIGNATURE> : CtorBase<SIGNATURE> {
-    typedef CtorBase<SIGNATURE> Base;
+template <typename R, typename... Args>
+struct NewCtor<R(Args...)> : CtorBase<R(Args...)> {
+    typedef CtorBase<R(Args...)> Base;
     typedef typename Base::Sig Sig;
     NewCtor(Sig *func) { Base::SetFunc(func); }
 
     template <class CLS>
-    static bp::object __new__(bp::object &cls PARAMLIST) {
+    static bp::object __new__(bp::object &cls, Args... args) {
         typedef typename CLS::metadata::held_type HeldType;
         TfErrorMark m;
-        HeldType specHandle(Base::_func(ARGLIST));
+        HeldType specHandle(Base::_func(args...));
         if (TfPyConvertTfErrorsToPythonException(m))
             bp::throw_error_already_set();
         bp::object result = TfPyObject(specHandle);
@@ -505,9 +501,8 @@ struct NewCtor<SIGNATURE> : CtorBase<SIGNATURE> {
     }
 };
 
-#undef N
-#undef SIGNATURE
-#undef PARAMLIST
-#undef ARGLIST
+} // namespace Sdf_PySpecDetail
 
-#endif // BOOST_PP_IS_ITERATING
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_PYSPEC_H

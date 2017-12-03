@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usdGeom/metrics.h"
 #include "pxr/usd/usdGeom/tokens.h"
 
@@ -36,51 +37,18 @@
 #include "pxr/base/tf/staticTokens.h"
 #include "pxr/base/tf/token.h"
 
-// XXX Backwards-compatibility code for transitioning from customData["zUp"]
-// XXX encoding to newer, permanent upAxis metadata.
+PXR_NAMESPACE_OPEN_SCOPE
 
-TF_DEFINE_ENV_SETTING(
-    USD_READ_ZUP_FOR_UP_AXIS, true, 
-    "Whether UsdGeomGetStageUpAxis() will consult old-style customData[\"zUp\"]"
-    " if upAxis metadata is unauthored.  Will eventually be retired - provided"
-    " for backwards compatibility while transitioning.");
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
-    (zUp)
     (UsdGeomMetrics)
 );
-
-static
-TfToken
-_GetUpAxisFromZUp(const UsdStageWeakPtr &stage)
-{
-    TF_FOR_ALL(prim, stage->GetPseudoRoot().
-                            GetFilteredChildren(UsdPrimIsDefined and
-                                                not UsdPrimIsAbstract)){
-        VtValue isZup = prim->GetCustomDataByKey(_tokens->zUp);
-        if (isZup.IsEmpty()){
-            continue;
-        }
-        else if (isZup.IsHolding<bool>()){
-            return isZup.Get<bool>() ? UsdGeomTokens->z : UsdGeomTokens->y;
-        }
-        else {
-            TF_WARN("Found non-boolean 'zUp' customData in UsdStage root at "
-                    "layer '%s', primPath <%s>.",
-                    stage->GetRootLayer()->GetIdentifier().c_str(),
-                    prim->GetPath().GetText());
-            return TfToken();
-        }
-    }
-
-    return TfToken();
-}
 
 TfToken 
 UsdGeomGetStageUpAxis(const UsdStageWeakPtr &stage)
 {
-    if (not TF_VERIFY(stage)){
+    if (!TF_VERIFY(stage)){
         return TfToken();
     }
 
@@ -93,22 +61,16 @@ UsdGeomGetStageUpAxis(const UsdStageWeakPtr &stage)
         return axis;
     }
 
-    if (TfGetEnvSetting(USD_READ_ZUP_FOR_UP_AXIS)){
-        TfToken upAxis = _GetUpAxisFromZUp(stage);
-        if (not upAxis.IsEmpty())
-            return upAxis;
-    }
-    
     return UsdGeomGetFallbackUpAxis();
 }
 
 bool 
 UsdGeomSetStageUpAxis(const UsdStageWeakPtr &stage, const TfToken &axis)
 {
-    if (not TF_VERIFY(stage)){
+    if (!TF_VERIFY(stage)){
         return false;
     }
-    if (axis != UsdGeomTokens->y and axis != UsdGeomTokens->z){
+    if (axis != UsdGeomTokens->y && axis != UsdGeomTokens->z){
         TF_CODING_ERROR("UsdStage upAxis can only be set to \"Y\" or \"Z\", "
                         "not attempted \"%s\" on stage %s.",
                         axis.GetText(),
@@ -133,7 +95,7 @@ TF_MAKE_STATIC_DATA(TfToken, _fallbackUpAxis)
         JsObject metadata = plug->GetMetadata();
         JsValue metricsDictValue;
         if (TfMapLookup(metadata, _tokens->UsdGeomMetrics, &metricsDictValue)){
-            if (not metricsDictValue.Is<JsObject>()) {
+            if (!metricsDictValue.Is<JsObject>()) {
                 TF_CODING_ERROR(
                         "%s[%s] was not a dictionary in plugInfo.json file.",
                         plug->GetName().c_str(), 
@@ -147,7 +109,7 @@ TF_MAKE_STATIC_DATA(TfToken, _fallbackUpAxis)
             if (TfMapLookup(metricsDict, 
                             UsdGeomTokens->upAxis,
                             &upAxisValue)) {
-                if (not upAxisValue.Is<std::string>()) {
+                if (!upAxisValue.Is<std::string>()) {
                     TF_CODING_ERROR(
                         "%s[%s][%s] was not a string.",
                         plug->GetName().c_str(),
@@ -173,7 +135,7 @@ TF_MAKE_STATIC_DATA(TfToken, _fallbackUpAxis)
                     continue;
                 }
                 
-                if (not upAxis.IsEmpty() and upAxis != axisToken) {
+                if (!upAxis.IsEmpty() && upAxis != axisToken) {
                     TF_CODING_ERROR("Plugins %s and %s provided different"
                                     " fallback values for %s.  Ignoring all"
                                     " plugins and using schema fallback of"
@@ -201,4 +163,7 @@ UsdGeomGetFallbackUpAxis()
 {
     return *_fallbackUpAxis;
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

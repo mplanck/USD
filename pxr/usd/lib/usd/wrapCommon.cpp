@@ -21,20 +21,29 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/object.h"
 #include "pxr/usd/usd/stage.h"
 #include "pxr/usd/usd/stageCache.h"
+#include "pxr/base/tf/pyEnum.h"
 
 #include <boost/python/def.hpp>
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 void wrapUsdCommon()
 {
     def("IsRetireLumosEnabled", UsdIsRetireLumosEnabled);
+    def("UsesInverseLayerOffset", UsdUsesInverseLayerOffset);
+    def("PrepLayerOffset", UsdPrepLayerOffset);
 
     def("Describe", (std::string (*)(const UsdObject &)) UsdDescribe);
     def("Describe", (std::string (*)(const UsdStageWeakPtr &)) UsdDescribe);
     def("Describe", (std::string (*)(const UsdStageCache &)) UsdDescribe);
+
+    TfPyWrapEnum<UsdListPosition>();
+    TfPyWrapEnum<UsdLoadPolicy>();
 }

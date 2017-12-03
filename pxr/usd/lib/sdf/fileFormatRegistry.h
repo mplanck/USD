@@ -21,14 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file sdf/fileFormatRegistry.h
-///
-///
-
 #ifndef SDF_FILE_FORMAT_REGISTRY_H
 #define SDF_FILE_FORMAT_REGISTRY_H
 
+/// \file sdf/fileFormatRegistry.h
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/hash.h"
 #include "pxr/base/tf/hashmap.h"
@@ -40,6 +38,8 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_DECLARE_WEAK_AND_REF_PTRS(SdfFileFormat);
 TF_DECLARE_WEAK_PTRS(PlugPlugin);
@@ -71,13 +71,13 @@ public:
     TfToken GetPrimaryFormatForExtension(const std::string& ext);
 
 private:
-    // \struct _Info
-    //
-    // Information about a file format plugin. This structure initially holds
-    // the type, a pointer to a plugin that has not yet been loaded, and a
-    // null format ref ptr. After the file format is requested, the plugin is
-    // loaded, and the file format is instantiated.
-    //
+    /// \struct _Info
+    ///
+    /// Information about a file format plugin. This structure initially holds
+    /// the type, a pointer to a plugin that has not yet been loaded, and a
+    /// null format ref ptr. After the file format is requested, the plugin is
+    /// loaded, and the file format is instantiated.
+    ///
     class _Info {
     public:
         _Info(const TfToken& formatId,
@@ -140,5 +140,7 @@ private:
     std::atomic<bool> _registeredFormatPlugins;
     std::mutex _mutex;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_FILE_FORMAT_REGISTRY_H

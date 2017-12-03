@@ -24,14 +24,20 @@
 #ifndef GLF_GLCONTEXT_H
 #define GLF_GLCONTEXT_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/base/arch/threads.h"
 #include <boost/noncopyable.hpp>
 #include <boost/shared_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class GlfGLContext> GlfGLContextSharedPtr;
 
-/// \class GlfGLContext glContext.h "pxr/imaging/glf/glContext.h"
-/// \brief Provides window system independent access to GL contexts.
+/// \class GlfGLContext
+///
+/// Provides window system independent access to GL contexts.
 ///
 /// All OpenGL operation occurs within a current GL Context.  The GL
 /// contexts used by an application are allocated and managed by the window
@@ -45,58 +51,69 @@ typedef boost::shared_ptr<class GlfGLContext> GlfGLContextSharedPtr;
 ///
 class GlfGLContext : public boost::noncopyable {
 public:
+    GLF_API
     virtual ~GlfGLContext();
 
-    /// \brief Returns an instance for the current GL context.
+    /// Returns an instance for the current GL context.
+    GLF_API
     static GlfGLContextSharedPtr GetCurrentGLContext();
 
-    /// \brief Returns an instance for the shared GL context.
+    /// Returns an instance for the shared GL context.
+    GLF_API
     static GlfGLContextSharedPtr GetSharedGLContext();
 
     /// Makes \p context current if valid, otherwise makes no context current.
+    GLF_API
     static void MakeCurrent(const GlfGLContextSharedPtr& context);
 
-    /// \brief Returns \c true if \a context1 and \a context2 are sharing.
+    /// Returns \c true if \a context1 and \a context2 are sharing.
+    GLF_API
     static bool AreSharing(GlfGLContextSharedPtr const & context1,
                            GlfGLContextSharedPtr const & context2);
 
-    /// \brief Returns whether this interface has been initialized.
+    /// Returns whether this interface has been initialized.
+    GLF_API
     static bool IsInitialized();
 
-    /// \brief Returns \c true if this context is current.
+    /// Returns \c true if this context is current.
+    GLF_API
     bool IsCurrent() const;
 
 private:
-    /// \brief Makes this context current.
+    /// Makes this context current.
     ///
     /// If the context is not valid this does nothing.
     void MakeCurrent();
 
 public:
-    /// \brief Makes no context current.
+    /// Makes no context current.
+    GLF_API
     static void DoneCurrent();
 
-    /// \brief Returns \c true if this context is sharing with \a otherContext.
+    /// Returns \c true if this context is sharing with \a otherContext.
+    GLF_API
     bool IsSharing(GlfGLContextSharedPtr const & otherContext);
 
-    /// \brief Returns \c true if this context is valid.
+    /// Returns \c true if this context is valid.
     virtual bool IsValid() const = 0;
 
 protected:
+    GLF_API
     GlfGLContext();
 
-    /// \brief Makes this context current.
+    /// Makes this context current.
     virtual void _MakeCurrent() = 0;
 
-    /// \brief Returns \c true if this context is sharing with \a rhs.
+    /// Returns \c true if this context is sharing with \a rhs.
     virtual bool _IsSharing(const GlfGLContextSharedPtr& rhs) const = 0;
 
-    /// \brief Returns \c true if this context is equal to \p rhs.
+    /// Returns \c true if this context is equal to \p rhs.
     virtual bool _IsEqual(const GlfGLContextSharedPtr& rhs) const = 0;
 };
 
-/// \class GlfGLContextScopeHolder GLContext.h "pxr/imaging/glf/glContext.h"
-/// \brief Helper class to make a GL context current.
+/// \class GlfGLContextScopeHolder
+///
+/// Helper class to make a GL context current.
 ///
 /// It is often useful to wrap a dynamic GL resource with a class interface.
 ///
@@ -136,12 +153,16 @@ class GlfGLContextScopeHolder : boost::noncopyable {
 public:
     /// Make the given context current and restore the current context
     /// when this object is destroyed.
+    GLF_API
     explicit GlfGLContextScopeHolder(const GlfGLContextSharedPtr& newContext);
 
+    GLF_API
     ~GlfGLContextScopeHolder();
 
 protected:
+    GLF_API
     void _MakeNewContextCurrent();
+    GLF_API
     void _RestoreOldContext();
 
 private:
@@ -149,8 +170,9 @@ private:
     GlfGLContextSharedPtr _oldContext;
 };
 
-/// \class GlfSharedGLContextScopeHolder GLContext.h "pxr/imaging/glf/glContext.h"
-/// \brief Helper class to make the shared GL context current.
+/// \class GlfSharedGLContextScopeHolder
+///
+/// Helper class to make the shared GL context current.
 ///
 /// Example:
 ///
@@ -200,12 +222,7 @@ public:
 private:
     static GlfGLContextSharedPtr _GetSharedContext()
     {
-        if (GlfGLContext::IsInitialized()
-#ifdef MENV30
-            // XXX skip this test for globaltrees until shared_code lands
-            and ArchIsMainThread()
-#endif
-            ) {
+        if (GlfGLContext::IsInitialized() && ArchIsMainThread()) {
             return GlfGLContext::GetSharedGLContext();
         }
         return GlfGLContextSharedPtr();
@@ -213,13 +230,15 @@ private:
 };
 
 /// \class GlfGLContextRegistrationInterface
-/// \brief Interface for registering a GlfGLContext system.
+///
+/// Interface for registering a GlfGLContext system.
 ///
 /// If you subclass GlfGLContext you should subclass this type and
 /// instantiate an instance on the heap.  It will be cleaned up
 /// automatically.
 class GlfGLContextRegistrationInterface : boost::noncopyable {
 public:
+    GLF_API
     virtual ~GlfGLContextRegistrationInterface();
 
     /// If this GLContext system supports a shared context this should
@@ -234,7 +253,11 @@ public:
     virtual GlfGLContextSharedPtr GetCurrent() = 0;
 
 protected:
+    GLF_API
     GlfGLContextRegistrationInterface();
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

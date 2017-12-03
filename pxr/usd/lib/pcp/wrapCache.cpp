@@ -21,11 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/cache.h"
 #include "pxr/usd/pcp/changes.h"
 #include "pxr/usd/pcp/errors.h"
 #include "pxr/usd/pcp/layerStack.h"
 #include "pxr/usd/pcp/pyUtils.h"
+#include "pxr/usd/pcp/types.h"
 #include "pxr/usd/sdf/primSpec.h"
 #include "pxr/base/tf/makePyConstructor.h"
 #include "pxr/base/tf/pyEnum.h"
@@ -37,6 +40,10 @@
 
 using namespace boost::python;
 using std::string;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static std::auto_ptr<PcpCache>
 _New(const PcpLayerStackIdentifier& identifier,
@@ -200,26 +207,19 @@ _RequestLayerMuting( PcpCache & cache,
     cache.RequestLayerMuting(layersToMute, layersToUnmute);
 }
 
-static
-SdfPathVector
-_GetPathsUsingSite_1(const PcpCache& cache,
-                     const SdfLayerHandle& layer,
-                     const SdfPath& path,
-                     PcpCache::UsingSite usingSite,
-                     const SdfPath& fallbackAncestor)
+static PcpDependencyVector
+_FindSiteDependencies(const PcpCache& cache,
+                    const PcpLayerStackPtr& layerStack,
+                    const SdfPath& path,
+                    PcpDependencyFlags depMask,
+                    bool recurseOnSite,
+                    bool recurseOnIndex,
+                    bool filterForExistingCachesOnly)
 {
-    return cache.GetPathsUsingSite(layer, path, usingSite, 0, fallbackAncestor);
-}
-
-static
-SdfPathVector
-_GetPathsUsingSite_2(const PcpCache& cache,
-                     const PcpLayerStackPtr& layerStack,
-                     const SdfPath& path,
-                     unsigned int dependencyType,
-                     bool recursive)
-{
-    return cache.GetPathsUsingSite(layerStack, path, dependencyType, recursive);
+    return cache.FindSiteDependencies(layerStack, path, depMask,
+                                    recurseOnSite,
+                                    recurseOnIndex,
+                                    filterForExistingCachesOnly);
 }
 
 static void
@@ -230,21 +230,14 @@ _Reload( PcpCache & cache )
     changes.Apply();
 }
 
+} // anonymous namespace 
+
 void 
 wrapCache()
-{    
+{
     class_<PcpCache, std::auto_ptr<PcpCache>, boost::noncopyable> 
-        c("Cache", no_init);
+        ("Cache", no_init)
 
-    // Wrap PcpCache enums in the class' scope so they show up under
-    // Pcp.Cache. Need to do this here for enums that are default arguments
-    // to functions.
-    {
-        scope s = c;
-        TfPyWrapEnum<PcpCache::UsingSite>();
-    }
-
-    c
         .def("__init__", 
              make_constructor(_New, default_call_policies(),
                  (arg("layerStackIdentifier"),
@@ -297,26 +290,24 @@ wrapCache()
               args("stopProperty") = SdfSpecHandle(),
               args("includeStopProperty") = false))
 
-        .def("GetPathsUsingSite",
-             &_GetPathsUsingSite_1,
-             (args("layer"),
-              args("path"),
-              args("usingSite") = PcpCache::UsingSiteOnly,
-              args("fallbackAncestor") = SdfPath()))
-        .def("GetPathsUsingSite",
-             &_GetPathsUsingSite_2,
-             (args("layerStack"),
-              args("path"),
-              args("dependencyType"),
-              args("recursive") = false))
+        .def("FindSiteDependencies",
+             &_FindSiteDependencies,
+             (args("siteLayerStack"),
+              args("sitePath"),
+              args("dependencyType") = PcpDependencyTypeAnyNonVirtual,
+              args("recurseOnSite") = false,
+              args("recurseOnIndex") = false,
+              args("filterForExistingCachesOnly") = false),
+             return_value_policy<TfPySequenceToList>())
+        .def("FindAllLayerStacksUsingLayer",
+             &PcpCache::FindAllLayerStacksUsingLayer,
+             return_value_policy<TfPySequenceToList>())
 
         .def("IsInvalidAssetPath", &PcpCache::IsInvalidAssetPath)
         .def("IsInvalidSublayerIdentifier", 
              &PcpCache::IsInvalidSublayerIdentifier)
 
         .def("PrintStatistics", &PcpCache::PrintStatistics)
-        .def("PrintDependencies", &PcpCache::PrintDependencies)
-        .def("CheckDependencies", &PcpCache::CheckDependencies)
         .def("Reload", &_Reload)
         ;
 }

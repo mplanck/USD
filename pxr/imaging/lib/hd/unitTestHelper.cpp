@@ -24,14 +24,61 @@
 #include "pxr/imaging/hd/unitTestHelper.h"
 #include "pxr/imaging/hd/rprimCollection.h"
 #include "pxr/imaging/hd/tokens.h"
-
-#include "pxr/imaging/glf/diagnostic.h"
+#include "pxr/imaging/hd/unitTestNullRenderPass.h"
 
 #include "pxr/base/gf/matrix4d.h"
 #include "pxr/base/gf/frustum.h"
 #include "pxr/base/tf/getenv.h"
+#include "pxr/base/tf/staticTokens.h"
+
+#include <boost/functional/hash.hpp>
 
 #include <string>
+#include <sstream>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+TF_DEFINE_PRIVATE_TOKENS(
+    _tokens,
+    (l0dir)
+    (l0color)
+    (l1dir)
+    (l1color)
+    (sceneAmbient)
+    (vec3)
+);
+
+class Hd_DrawTask final : public HdTask
+{
+public:
+    Hd_DrawTask(HdRenderPassSharedPtr const &renderPass,
+                HdRenderPassStateSharedPtr const &renderPassState)
+    : HdTask()
+    , _renderPass(renderPass)
+    , _renderPassState(renderPassState)
+    {
+    }
+
+protected:
+    virtual void _Sync(HdTaskContext* ctx) override
+    {
+        _renderPass->Sync();
+        _renderPassState->Sync(
+            _renderPass->GetRenderIndex()->GetResourceRegistry());
+    }
+
+    virtual void _Execute(HdTaskContext* ctx) override
+    {
+        _renderPassState->Bind();
+        _renderPass->Execute(_renderPassState);
+        _renderPassState->Unbind();
+    }
+
+private:
+    HdRenderPassSharedPtr _renderPass;
+    HdRenderPassStateSharedPtr _renderPassState;
+};
 
 template <typename T>
 static VtArray<T>
@@ -43,10 +90,17 @@ _BuildArray(T values[], int numValues)
 }
 
 Hd_TestDriver::Hd_TestDriver()
-    : _renderPassState(new HdRenderPassState())
+ : _engine()
+ , _renderDelegate()
+ , _renderIndex(nullptr)
+ , _sceneDelegate(nullptr)
+ , _reprName()
+ , _geomPass()
+ , _geomAndGuidePass()
+ , _renderPassState(new HdRenderPassState())
 {
     TfToken reprName = HdTokens->hull;
-    if (TfGetenv("HD_ENABLE_SMOOTH_NORMALS", "CPU") == "CPU" or
+    if (TfGetenv("HD_ENABLE_SMOOTH_NORMALS", "CPU") == "CPU" ||
         TfGetenv("HD_ENABLE_SMOOTH_NORMALS", "CPU") == "GPU") {
         reprName = HdTokens->smoothHull;
     }
@@ -54,14 +108,33 @@ Hd_TestDriver::Hd_TestDriver()
 }
 
 Hd_TestDriver::Hd_TestDriver(TfToken const &reprName)
-    : _renderPassState(new HdRenderPassState())
+ : _engine()
+ , _renderDelegate()
+ , _renderIndex(nullptr)
+ , _sceneDelegate(nullptr)
+ , _reprName()
+ , _geomPass()
+ , _geomAndGuidePass()
+ , _renderPassState(new HdRenderPassState())
 {
     _Init(reprName);
+}
+
+Hd_TestDriver::~Hd_TestDriver()
+{
+    delete _sceneDelegate;
+    delete _renderIndex;
 }
 
 void
 Hd_TestDriver::_Init(TfToken const &reprName)
 {
+    _renderIndex = HdRenderIndex::New(&_renderDelegate);
+    TF_VERIFY(_renderIndex != nullptr);
+
+    _sceneDelegate = new Hd_UnitTestDelegate(_renderIndex,
+                                             SdfPath::AbsoluteRootPath());
+
     _reprName = reprName;
 
     GfMatrix4d viewMatrix = GfMatrix4d().SetIdentity();
@@ -87,9 +160,10 @@ Hd_TestDriver::Draw(bool withGuides)
 void
 Hd_TestDriver::Draw(HdRenderPassSharedPtr const &renderPass)
 {
-    _engine.Draw(_delegate.GetRenderIndex(), renderPass, _renderPassState);
-
-    GLF_POST_PENDING_GL_ERRORS();
+    HdTaskSharedPtrVector tasks = {
+        boost::make_shared<Hd_DrawTask>(renderPass, _renderPassState)
+    };
+    _engine.Execute(_sceneDelegate->GetRenderIndex(), tasks);
 }
 
 void
@@ -112,20 +186,31 @@ HdRenderPassSharedPtr const &
 Hd_TestDriver::GetRenderPass(bool withGuides)
 {
     if (withGuides) {
-        if (not _geomAndGuidePass) 
+        if (!_geomAndGuidePass) {
+            TfTokenVector renderTags;
+            renderTags.push_back(HdTokens->geometry);
+            renderTags.push_back(HdTokens->guide);
+            
+            HdRprimCollection col = HdRprimCollection(
+                                     HdTokens->geometry,
+                                     _reprName);
+            col.SetRenderTags(renderTags);
             _geomAndGuidePass = HdRenderPassSharedPtr(
-                new HdRenderPass(&_delegate.GetRenderIndex(),
-                                 HdRprimCollection(
-                                     Hd_UnitTestTokens->geometryAndGuides,
-                                     _reprName)));
+                new Hd_UnitTestNullRenderPass(&_sceneDelegate->GetRenderIndex(), col));
+        }
         return _geomAndGuidePass;
     } else {
-        if (not _geomPass)
+        if (!_geomPass) {
+            TfTokenVector renderTags;
+            renderTags.push_back(HdTokens->geometry);
+
+            HdRprimCollection col = HdRprimCollection(
+                                        HdTokens->geometry,
+                                        _reprName);
+            col.SetRenderTags(renderTags);
             _geomPass = HdRenderPassSharedPtr(
-                new HdRenderPass(&_delegate.GetRenderIndex(),
-                                 HdRprimCollection(
-                                     HdTokens->geometry,
-                                     _reprName)));
+                new Hd_UnitTestNullRenderPass(&_sceneDelegate->GetRenderIndex(), col));
+        }
         return _geomPass;
     }
 }
@@ -136,11 +221,27 @@ Hd_TestDriver::SetRepr(TfToken const &reprName)
     _reprName = reprName;
 
     if (_geomAndGuidePass) {
-        _geomAndGuidePass->SetRprimCollection(
-            HdRprimCollection(Hd_UnitTestTokens->geometryAndGuides, _reprName));
+        TfTokenVector renderTags;
+        renderTags.push_back(HdTokens->geometry);
+        renderTags.push_back(HdTokens->guide);
+        
+        HdRprimCollection col = HdRprimCollection(
+                                 HdTokens->geometry,
+                                 _reprName);
+        col.SetRenderTags(renderTags);
+        _geomAndGuidePass->SetRprimCollection(col);
     }
     if (_geomPass) {
-        _geomPass->SetRprimCollection(
-            HdRprimCollection(HdTokens->geometry, _reprName));
+        TfTokenVector renderTags;
+        renderTags.push_back(HdTokens->geometry);
+        
+        HdRprimCollection col = HdRprimCollection(
+                                 HdTokens->geometry,
+                                 _reprName);
+        col.SetRenderTags(renderTags);
+        _geomPass->SetRprimCollection(col);
     }
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

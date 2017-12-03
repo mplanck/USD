@@ -24,12 +24,16 @@
 #ifndef USD_EDITCONTEXT_H
 #define USD_EDITCONTEXT_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/usd/editTarget.h"
 #include "pxr/base/tf/declarePtrs.h"
 
-#include <boost/noncopyable.hpp>
-#include <boost/shared_ptr.hpp>
+#include <memory>
 #include <utility>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DECLARE_WEAK_PTRS(UsdStage);
 
@@ -60,11 +64,14 @@ TF_DECLARE_WEAK_PTRS(UsdStage);
 /// to either query or mutate it.  Using this class with a stage in such a way
 /// that it modifies the stage's EditTarget constitutes a mutation.
 ///
-class UsdEditContext : boost::noncopyable
+class UsdEditContext
 {
+    UsdEditContext(UsdEditContext const &) = delete;
+    UsdEditContext &operator=(UsdEditContext const &) = delete;
 public:
     /// Construct without modifying \a stage's current EditTarget.  Save
     /// \a stage's current EditTarget to restore on destruction.
+    USD_API
     explicit UsdEditContext(const UsdStagePtr &stage);
 
     /// Construct and save \a stage's current EditTarget to restore on
@@ -72,6 +79,7 @@ public:
     /// 
     /// If \a editTarget is invalid, a coding error will be issued by the
     /// \a stage, and its EditTarget will not be modified.
+    USD_API
     UsdEditContext(const UsdStagePtr &stage, const UsdEditTarget &editTarget);
 
     /// \overload
@@ -81,10 +89,12 @@ public:
     /// 
     /// If \a editTarget is invalid, a coding error will be issued by the
     /// \a stage, and its EditTarget will not be modified.
+    USD_API
     UsdEditContext(const std::pair<UsdStagePtr, UsdEditTarget > &stageTarget);
 
     /// Restore the stage's original EditTarget if this context's stage is
     /// valid.  Otherwise do nothing.
+    USD_API
     ~UsdEditContext();
 
 private:
@@ -95,20 +105,6 @@ private:
     UsdEditTarget _originalEditTarget;
 };
 
-// Utility class for returning UsdEditContexts to python.  For use in wrapping
-// code.
-struct UsdPyEditContext
-{
-    explicit UsdPyEditContext(
-        const std::pair<UsdStagePtr, UsdEditTarget> &stageTarget);
-    explicit UsdPyEditContext(const UsdStagePtr &stage,
-                              const UsdEditTarget &editTarget=UsdEditTarget());
-private:
-    friend struct Usd_PyEditContextAccess;
-
-    UsdStagePtr _stage;
-    UsdEditTarget _editTarget;
-    boost::shared_ptr<UsdEditContext> _editContext;
-};
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_EDITCONTEXT_H

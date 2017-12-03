@@ -23,32 +23,41 @@
 //
 // Some header #define's Bool as int, which breaks stuff in sdf/types.h.
 // Include it first to sidestep the problem. :-/
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/types.h"
 
 #include "pxr/imaging/glf/glew.h"
-#include "pxr/imaging/hd/camera.h"
-#include "pxr/imaging/hd/light.h"
+
+#include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hdx/renderTask.h"
 #include "pxr/imaging/hdx/selectionTask.h"
 #include "pxr/imaging/hdx/simpleLightTask.h"
+
+#include "pxr/imaging/hdSt/camera.h"
+#include "pxr/imaging/hdSt/light.h"
 
 #include "pxr/base/gf/gamma.h"
 #include "pxr/base/tf/staticTokens.h"
 #include "pxr/base/tf/registryManager.h"
 
 #include "px_vp20/utils.h"
+#include "px_vp20/utils_legacy.h"
 #include "pxrUsdMayaGL/batchRenderer.h"
 
-
 #include <maya/M3dView.h>
+#include <maya/MDrawContext.h>
+#include <maya/MDrawData.h>
+#include <maya/MFrameContext.h>
+#include <maya/MGlobal.h>
 #include <maya/MMatrix.h>
 #include <maya/MObjectHandle.h>
-#include <maya/MDrawData.h>
 #include <maya/MPxSurfaceShapeUI.h>
+#include <maya/MSceneMessage.h>
 
 #include <bitset>
 
-#include <GL/glut.h>
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
@@ -57,6 +66,9 @@ TF_DEFINE_PRIVATE_TOKENS(
     (selectionTask)
     (simpleLightTask)
     (camera)
+    (render)
+
+    ((MayaEndRenderNotificationName, "UsdMayaEndRenderNotification"))
 );
 
 TF_REGISTRY_FUNCTION(TfDebug)
@@ -70,13 +82,29 @@ void
 UsdMayaGLBatchRenderer::Init()
 {
     GlfGlewInit();
+
+    GetGlobalRenderer();
 }
 
-UsdMayaGLBatchRenderer UsdMayaGLBatchRenderer::_sGlobalRenderer;
+/* static */
+UsdMayaGLBatchRenderer&
+UsdMayaGLBatchRenderer::GetGlobalRenderer()
+{
+    if (!_sGlobalRendererPtr) {
+        Reset();
+    }
+    return *_sGlobalRendererPtr;
+}
+
+std::unique_ptr<UsdMayaGLBatchRenderer> UsdMayaGLBatchRenderer::_sGlobalRendererPtr;
 
 /// \brief struct to hold all the information needed for a 
 /// draw request in vp1 or vp2, without requiring shape querying at
-/// draw time. 
+/// draw time.
+///
+/// Note that we set deleteAfterUse=false when calling the MUserData
+/// constructor. This ensures that the draw data survives across multiple draw
+/// passes in vp2 (e.g. a shadow pass and a color pass).
 class _BatchDrawUserData : public MUserData
 {
 public:
@@ -86,18 +114,22 @@ public:
     boost::scoped_ptr<GfVec4f> _wireframeColor;
 
     // Constructor to use when shape is drawn but no bounding box.
-    _BatchDrawUserData()
-        : MUserData(true), _drawShape(true) {}
-    
+    _BatchDrawUserData() :
+        MUserData(/* deleteAfterUse = */ false),
+        _drawShape(true) {}
+
     // Constructor to use when shape may be drawn but there is a bounding box.
-    _BatchDrawUserData(bool drawShape, const MBoundingBox &bounds, const GfVec4f &wireFrameColor)
-        : MUserData( true )
-        , _drawShape( drawShape )
-        , _bounds( new MBoundingBox(bounds) )
-        ,  _wireframeColor( new GfVec4f(wireFrameColor) ) {}
+    _BatchDrawUserData(
+            const bool drawShape,
+            const MBoundingBox& bounds,
+            const GfVec4f& wireFrameColor) :
+        MUserData(/* deleteAfterUse = */ false),
+        _drawShape(drawShape),
+        _bounds(new MBoundingBox(bounds)),
+        _wireframeColor(new GfVec4f(wireFrameColor)) {}
 
     // Make sure everything gets freed!
-    ~_BatchDrawUserData() {}
+    virtual ~_BatchDrawUserData() {}
 };
 
 
@@ -110,7 +142,7 @@ UsdMayaGLBatchRenderer::ShapeRenderer::ShapeRenderer()
 
 void
 UsdMayaGLBatchRenderer::ShapeRenderer::Init(
-    HdRenderIndexSharedPtr const &renderIndex,
+    HdRenderIndex *renderIndex,
     const SdfPath& sharedId,
     const UsdPrim& rootPrim,
     const SdfPathVector& excludedPaths)
@@ -138,14 +170,17 @@ UsdMayaGLBatchRenderer::ShapeRenderer::PrepareForQueue(
     _baseParams.frame = time;
     _baseParams.refineLevel = refineLevel;
 
-    if( showGuides )
-        _baseParams.geometryCol =
-            showRenderGuides ? UsdImagingCollectionTokens->geometryAndGuides
-                             : UsdImagingCollectionTokens->geometryAndInteractiveGuides;
-    else
-        _baseParams.geometryCol =
-            showRenderGuides ? UsdImagingCollectionTokens->geometryAndRenderGuides
-                             : HdTokens->geometry;
+    // XXX Not yet adding ability to turn off display of proxy geometry, but
+    // we should at some point, as in usdview
+    _baseParams.renderTags.clear();
+    _baseParams.renderTags.push_back(HdTokens->geometry);
+    _baseParams.renderTags.push_back(HdTokens->proxy);
+    if (showGuides) {
+        _baseParams.renderTags.push_back(HdTokens->guide);
+    } 
+    if (showRenderGuides) {
+        _baseParams.renderTags.push_back(_tokens->render);
+    }
     
     if( tint )
         _baseParams.overrideColor = tintColor;
@@ -172,6 +207,52 @@ UsdMayaGLBatchRenderer::ShapeRenderer::PrepareForQueue(
     }
 }
 
+
+// Helper function that converts the M3dView::DisplayStatus (viewport 1.0)
+// into the MHWRender::DisplayStatus (viewport 2.0)
+static inline
+MHWRender::DisplayStatus
+_ToMHWRenderDisplayStatus(const M3dView::DisplayStatus& displayStatus)
+{
+    // these enums are equivalent, but statically checking just in case.
+    static_assert(((int)M3dView::kActive == (int)MHWRender::kActive) 
+            && ((int)M3dView::kLive == (int)MHWRender::kLive) 
+            && ((int)M3dView::kDormant == (int)MHWRender::kDormant)
+            && ((int)M3dView::kInvisible == (int)MHWRender::kInvisible)
+            && ((int)M3dView::kHilite == (int)MHWRender::kHilite)
+            && ((int)M3dView::kTemplate == (int)MHWRender::kTemplate)
+            && ((int)M3dView::kActiveTemplate == (int)MHWRender::kActiveTemplate)
+            && ((int)M3dView::kActiveComponent == (int)MHWRender::kActiveComponent)
+            && ((int)M3dView::kLead == (int)MHWRender::kLead)
+            && ((int)M3dView::kIntermediateObject == (int)MHWRender::kIntermediateObject)
+            && ((int)M3dView::kActiveAffected == (int)MHWRender::kActiveAffected)
+            && ((int)M3dView::kNoStatus == (int)MHWRender::kNoStatus),
+            "M3dView::DisplayStatus == MHWRender::DisplayStatus");
+    return MHWRender::DisplayStatus((int)displayStatus);
+}
+
+static
+bool
+_GetWireframeColor(
+        const UsdMayaGLSoftSelectHelper& softSelectHelper,
+        const MDagPath& objPath,
+        const MHWRender::DisplayStatus& displayStatus,
+        MColor* mayaWireColor)
+{
+    // dormant objects may be included in soft selection.
+    if (displayStatus == MHWRender::kDormant) {
+        return softSelectHelper.GetFalloffColor(objPath, mayaWireColor);
+    }
+    else if ((displayStatus == MHWRender::kActive) ||
+            (displayStatus == MHWRender::kLead)    || 
+            (displayStatus == MHWRender::kHilite)) {
+        *mayaWireColor = MHWRender::MGeometryUtilities::wireframeColor(objPath);
+        return true;
+    }
+
+    return false;
+}
+
 UsdMayaGLBatchRenderer::RenderParams
 UsdMayaGLBatchRenderer::ShapeRenderer::GetRenderParams(
     const MDagPath& objPath,
@@ -194,16 +275,15 @@ UsdMayaGLBatchRenderer::ShapeRenderer::GetRenderParams(
     // QueueShapeForDraw(...) will later break this single param set into
     // two, to perform a two-pass render.
     //
-    bool selected =
-            (displayStatus == M3dView::kActive) ||
-            (displayStatus == M3dView::kLead)   ||
-            (displayStatus == M3dView::kHilite);
-    
-    if( selected )
+    MColor mayaWireframeColor;
+    bool needsWire = _GetWireframeColor(
+            _batchRenderer->GetSoftSelectHelper(),
+            objPath, 
+            _ToMHWRenderDisplayStatus(displayStatus), 
+            &mayaWireframeColor);
+
+    if( needsWire )
     {
-        const MColor mayaWireframeColor =
-            MHWRender::MGeometryUtilities::wireframeColor(objPath);
-        
         // The legacy viewport does not support color management,
         // so we roll our own gamma correction via framebuffer effect.
         // But that means we need to pre-linearize the wireframe color
@@ -227,7 +307,7 @@ UsdMayaGLBatchRenderer::ShapeRenderer::GetRenderParams(
         }
         case M3dView::kGouraudShaded:
         {
-            if( selected )
+            if( needsWire )
                 params.drawRepr = HdTokens->refinedWireOnSurf;
             else
                 params.drawRepr = HdTokens->refined;
@@ -235,7 +315,7 @@ UsdMayaGLBatchRenderer::ShapeRenderer::GetRenderParams(
         }
         case M3dView::kFlatShaded:
         {
-            if( selected )
+            if( needsWire )
                 params.drawRepr = HdTokens->wireOnSurf;
             else
                 params.drawRepr = HdTokens->hull;
@@ -274,15 +354,14 @@ UsdMayaGLBatchRenderer::ShapeRenderer::GetRenderParams(
     // QueueShapeForDraw(...) will later break this single param set into
     // two, to perform a two-pass render.
     //
-    bool selected =
-            (displayStatus == MHWRender::kActive) ||
-            (displayStatus == MHWRender::kLead)   ||
-            (displayStatus == MHWRender::kHilite);
+    MColor mayaWireframeColor;
+    bool needsWire = _GetWireframeColor(
+            _batchRenderer->GetSoftSelectHelper(),
+            objPath, displayStatus,
+            &mayaWireframeColor);
     
-    if( selected )
+    if( needsWire )
     {
-        const MColor mayaWireframeColor =
-            MHWRender::MGeometryUtilities::wireframeColor(objPath);
         params.wireframeColor =
                     GfVec4f(
                         mayaWireframeColor.r,
@@ -301,14 +380,14 @@ UsdMayaGLBatchRenderer::ShapeRenderer::GetRenderParams(
     
     if( flatShaded )
     {
-        if( selected )
+        if( needsWire )
             params.drawRepr = HdTokens->wireOnSurf;
         else
             params.drawRepr = HdTokens->hull;
     }
     else if( displayStyle & MHWRender::MFrameContext::DisplayStyle::kGouraudShaded )
     {
-        if( selected || (displayStyle & MHWRender::MFrameContext::DisplayStyle::kWireFrame) )
+        if( needsWire || (displayStyle & MHWRender::MFrameContext::DisplayStyle::kWireFrame) )
             params.drawRepr = HdTokens->refinedWireOnSurf;
         else
             params.drawRepr = HdTokens->refined;
@@ -420,10 +499,10 @@ UsdMayaGLBatchRenderer::ShapeRenderer::TestIntersection(
 }
 
 UsdMayaGLBatchRenderer::TaskDelegate::TaskDelegate(
-    HdRenderIndexSharedPtr const& renderIndex, SdfPath const& delegateID)
+    HdRenderIndex *renderIndex, SdfPath const& delegateID)
     : HdSceneDelegate(renderIndex, delegateID)
 {
-    _lightingContextForOpenGLState = GlfSimpleLightingContext::New();
+    _lightingContext = GlfSimpleLightingContext::New();
 
     // populate tasks in renderindex
 
@@ -436,12 +515,15 @@ UsdMayaGLBatchRenderer::TaskDelegate::TaskDelegate(
 
     // camera
     {
-        renderIndex->InsertCamera<HdCamera>(this, _cameraId);
+        // Since we're hardcoded to use HdStRenderDelegate, we expect to
+        // have camera Sprims.
+        TF_VERIFY(renderIndex->IsSprimTypeSupported(HdPrimTypeTokens->camera));
+
+        renderIndex->InsertSprim(HdPrimTypeTokens->camera, this, _cameraId);
         _ValueCache &cache = _valueCacheMap[_cameraId];
-        cache[HdShaderTokens->worldToViewMatrix] = VtValue(GfMatrix4d(1));
-        cache[HdShaderTokens->projectionMatrix]  = VtValue(GfMatrix4d(1));
-        cache[HdTokens->cameraFrustum] = VtValue(); // we don't use GfFrustum.
-        cache[HdTokens->windowPolicy] = VtValue();  // we don't use window policy.
+        cache[HdStCameraTokens->worldToViewMatrix] = VtValue(GfMatrix4d(1.0));
+        cache[HdStCameraTokens->projectionMatrix] = VtValue(GfMatrix4d(1.0));
+        cache[HdStCameraTokens->windowPolicy] = VtValue();  // no window policy.
     }
 
     // simple lighting task (for Hydra native)
@@ -450,6 +532,7 @@ UsdMayaGLBatchRenderer::TaskDelegate::TaskDelegate(
         _ValueCache &cache = _valueCacheMap[_simpleLightTaskId];
         HdxSimpleLightTaskParams taskParams;
         taskParams.cameraPath = _cameraId;
+        taskParams.viewport = GfVec4f(_viewport);
         cache[HdTokens->params] = VtValue(taskParams);
         cache[HdTokens->children] = VtValue(SdfPathVector());
     }
@@ -479,7 +562,7 @@ UsdMayaGLBatchRenderer::TaskDelegate::Get(
 {
     _ValueCache *vcache = TfMapLookupPtr(_valueCacheMap, id);
     VtValue ret;
-    if( vcache and TfMapLookup(*vcache, key, &ret) )
+    if( vcache && TfMapLookup(*vcache, key, &ret) )
         return ret;
 
     TF_CODING_ERROR("%s:%s doesn't exist in the value cache\n",
@@ -489,105 +572,138 @@ UsdMayaGLBatchRenderer::TaskDelegate::Get(
 
 void
 UsdMayaGLBatchRenderer::TaskDelegate::SetCameraState(
-    const GfMatrix4d& viewMatrix,
+    const GfMatrix4d& worldToViewMatrix,
     const GfMatrix4d& projectionMatrix,
     const GfVec4d& viewport)
 {
     // cache the camera matrices
     _ValueCache &cache = _valueCacheMap[_cameraId];
-    cache[HdShaderTokens->worldToViewMatrix] = VtValue(viewMatrix);
-    cache[HdShaderTokens->projectionMatrix]  = VtValue(projectionMatrix);
-    cache[HdTokens->cameraFrustum] = VtValue(); // we don't use GfFrustum.
-    cache[HdTokens->windowPolicy]  = VtValue(); // we don't use window policy.
+    cache[HdStCameraTokens->worldToViewMatrix] = VtValue(worldToViewMatrix);
+    cache[HdStCameraTokens->projectionMatrix] = VtValue(projectionMatrix);
+    cache[HdStCameraTokens->windowPolicy] = VtValue(); // no window policy.
 
     // invalidate the camera to be synced
-    GetRenderIndex().GetChangeTracker().MarkCameraDirty(_cameraId);
+    GetRenderIndex().GetChangeTracker().MarkSprimDirty(_cameraId,
+                                                       HdStCamera::AllDirty);
 
-    if( _viewport != viewport )
-    {
-        // viewport is also read by HdxRenderTaskParam. invalidate it.
+    if (_viewport != viewport) {
         _viewport = viewport;
 
-        // update all render tasks
-        for( const auto &it : _renderTaskIdMap )
-        {
-            SdfPath const &taskId = it.second;
-            HdxRenderTaskParams taskParams
-                = _GetValue<HdxRenderTaskParams>(taskId, HdTokens->params);
+        // Update the simple light task.
+        HdxSimpleLightTaskParams simpleLightTaskParams =
+            _GetValue<HdxSimpleLightTaskParams>(_simpleLightTaskId,
+                                                HdTokens->params);
 
-            // update viewport in HdxRenderTaskParams
-            taskParams.viewport = viewport;
-            _SetValue(taskId, HdTokens->params, taskParams);
+        simpleLightTaskParams.viewport = GfVec4f(_viewport);
+        _SetValue(_simpleLightTaskId, HdTokens->params, simpleLightTaskParams);
 
-            // invalidate
+        GetRenderIndex().GetChangeTracker().MarkTaskDirty(
+            _simpleLightTaskId,
+            HdChangeTracker::DirtyParams);
+
+        // Update all render tasks.
+        for (const auto& it : _renderTaskIdMap) {
+            const SdfPath& renderTaskId = it.second;
+
+            HdxRenderTaskParams renderTaskParams =
+                _GetValue<HdxRenderTaskParams>(renderTaskId, HdTokens->params);
+
+            renderTaskParams.viewport = _viewport;
+            _SetValue(renderTaskId, HdTokens->params, renderTaskParams);
+
             GetRenderIndex().GetChangeTracker().MarkTaskDirty(
-                taskId, HdChangeTracker::DirtyParams);
+                renderTaskId,
+                HdChangeTracker::DirtyParams);
         }
     }
 }
 
 void
-UsdMayaGLBatchRenderer::TaskDelegate::SetLightingStateFromOpenGL()
+UsdMayaGLBatchRenderer::TaskDelegate::SetLightingStateFromVP1(
+        const GfMatrix4d& worldToViewMatrix,
+        const GfMatrix4d& projectionMatrix)
 {
-    // XXX: this is a dumb copy of UsdImaging::HdEngine
-    // ideally we should directly suck the lightint parameter from
-    // maya API and put them into HdLight.
+    // This function should only be called in a VP1.0 context. In VP2.0, we can
+    // translate the lighting state from the MDrawContext directly into Glf,
+    // but there is no draw context in VP1.0, so we have to transfer the state
+    // through OpenGL.
 
-    _lightingContextForOpenGLState->SetStateFromOpenGL();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadMatrixd(worldToViewMatrix.GetArray());
+    _lightingContext->SetStateFromOpenGL();
+    glPopMatrix();
 
-    // cache the GlfSimpleLight vector
-    GlfSimpleLightVector const &lights
-        = _lightingContextForOpenGLState->GetLights();
+    _lightingContext->SetCamera(worldToViewMatrix, projectionMatrix);
+
+    _SetLightingStateFromLightingContext();
+}
+
+void
+UsdMayaGLBatchRenderer::TaskDelegate::SetLightingStateFromMayaDrawContext(
+        const MHWRender::MDrawContext& context)
+{
+    _lightingContext = px_vp20Utils::GetLightingContextFromDrawContext(context);
+
+    _SetLightingStateFromLightingContext();
+}
+
+void
+UsdMayaGLBatchRenderer::TaskDelegate::_SetLightingStateFromLightingContext()
+{
+    const GlfSimpleLightVector& lights = _lightingContext->GetLights();
 
     bool hasNumLightsChanged = false;
 
-    // Insert the light Ids into HdRenderIndex for those not yet exist.
-    while( _lightIds.size() < lights.size() )
-    {
+    // Insert light Ids into the render index for those that do not yet exist.
+    while (_lightIds.size() < lights.size()) {
         SdfPath lightId(
-            TfStringPrintf("%s/light%d", _rootId.GetText(),
+            TfStringPrintf("%s/light%d",
+                           _rootId.GetText(),
                            (int)_lightIds.size()));
         _lightIds.push_back(lightId);
 
-        GetRenderIndex().InsertLight<HdLight>(this, lightId);
+        // Since we're hardcoded to use HdStRenderDelegate, we expect to have
+        // light Sprims.
+        TF_VERIFY(GetRenderIndex().IsSprimTypeSupported(HdPrimTypeTokens->light));
+
+        GetRenderIndex().InsertSprim(HdPrimTypeTokens->light, this, lightId);
         hasNumLightsChanged = true;
     }
+
     // Remove unused light Ids from HdRenderIndex
-    while( _lightIds.size() > lights.size() )
-    {
-        GetRenderIndex().RemoveLight(_lightIds.back());
+    while (_lightIds.size() > lights.size()) {
+        GetRenderIndex().RemoveSprim(HdPrimTypeTokens->light, _lightIds.back());
         _lightIds.pop_back();
         hasNumLightsChanged = true;
     }
 
     // invalidate HdLights
-    for( size_t i = 0; i < lights.size(); ++i )
-    {
+    for (size_t i = 0; i < lights.size(); ++i) {
         _ValueCache &cache = _valueCacheMap[_lightIds[i]];
         // store GlfSimpleLight directly.
-        cache[HdTokens->lightParams] = VtValue(lights[i]);
-        cache[HdTokens->lightTransform] = VtValue();
-        cache[HdTokens->lightShadowParams] = VtValue(HdxShadowParams());
-        cache[HdTokens->lightShadowCollection] = VtValue();
+        cache[HdStLightTokens->params] = VtValue(lights[i]);
+        cache[HdStLightTokens->transform] = VtValue();
+        cache[HdStLightTokens->shadowParams] = VtValue(HdxShadowParams());
+        cache[HdStLightTokens->shadowCollection] = VtValue();
 
         // Only mark as dirty the parameters to avoid unnecessary invalidation
         // specially marking as dirty lightShadowCollection will trigger
         // a collection dirty on geometry and we don't want that to happen
         // always
-        GetRenderIndex().GetChangeTracker().MarkLightDirty(
-            _lightIds[i], HdChangeTracker::DirtyParams);
+        GetRenderIndex().GetChangeTracker().MarkSprimDirty(
+            _lightIds[i], HdStLight::AllDirty);
     }
 
     // sadly the material also comes from lighting context right now...
     HdxSimpleLightTaskParams taskParams
         = _GetValue<HdxSimpleLightTaskParams>(_simpleLightTaskId,
                                               HdTokens->params);
-    taskParams.sceneAmbient = _lightingContextForOpenGLState->GetSceneAmbient();
-    taskParams.material = _lightingContextForOpenGLState->GetMaterial();
+    taskParams.sceneAmbient = _lightingContext->GetSceneAmbient();
+    taskParams.material = _lightingContext->GetMaterial();
 
     // invalidate HdxSimpleLightTask too
-    if( hasNumLightsChanged )
-    {
+    if (hasNumLightsChanged) {
         _SetValue(_simpleLightTaskId, HdTokens->params, taskParams);
 
         GetRenderIndex().GetChangeTracker().MarkTaskDirty(
@@ -600,8 +716,8 @@ UsdMayaGLBatchRenderer::TaskDelegate::GetSetupTasks()
 {
     HdTaskSharedPtrVector tasks;
 
-    // lighting
     tasks.push_back(GetRenderIndex().GetTask(_simpleLightTaskId));
+
     return tasks;
 }
 
@@ -613,7 +729,7 @@ UsdMayaGLBatchRenderer::TaskDelegate::GetRenderTask(
 {
     // select bucket
     SdfPath renderTaskId;
-    if( not TfMapLookup(_renderTaskIdMap, hash, &renderTaskId) )
+    if( !TfMapLookup(_renderTaskIdMap, hash, &renderTaskId) )
     {
         // create new render task if not exists
         renderTaskId = _rootId.AppendChild(
@@ -622,10 +738,41 @@ UsdMayaGLBatchRenderer::TaskDelegate::GetRenderTask(
         _renderTaskIdMap[hash] = renderTaskId;
     }
 
-    // Update collection in the value cache
+
+    //
+    // XXX: The Maya-Hydra plugin needs refactoring such that the plugin is
+    // creating a different collection name for each collection it is trying to
+    // manage. (i.e. Each collection within a frame that has different content
+    // should have a different collection name)
+    //
+    // With Hydra, changing the contents of a collection can be
+    // an expensive operation as it causes draw batches to be rebuilt.
+    //
+    // The Maya-Hydra Plugin is currently reusing the same collection
+    // name for all collections within a frame.
+    // (This stems from a time when collection name had a significant meaning
+    // rather than id'ing a collection).
+    //
+    // The plugin should also track deltas to the contents of a collection
+    // and set Hydra's dirty state when prims get added and removed from
+    // the collection.
+    //
+    // Another possible change that can be made to this code is HdxRenderTask
+    // now takes an array of collections, so it is possible to support different
+    // reprs using the same task.  Therefore, this code should be modified to
+    // only add one task that is provided with the active set of collections.
+    //
+    // However, a further improvement to the code could be made using
+    // UsdDelegate's fallback repr feature instead of using multiple
+    // collections as it would avoid modifying the collection as a Maya shape
+    // object display state changes.  This would result in a much cheaper state
+    // transition within Hydra itself.
+    //
     TfToken colName = renderParams.geometryCol;
     HdRprimCollection rprims(colName, renderParams.drawRepr);
     rprims.SetRootPaths(roots);
+    rprims.SetRenderTags(renderParams.renderTags);
+    GetRenderIndex().GetChangeTracker().MarkCollectionDirty(colName);
 
     // update value cache
     _SetValue(renderTaskId, HdTokens->collection, rprims);
@@ -687,7 +834,7 @@ UsdMayaGLBatchRenderer::GetShapeRenderer(
         //
         std::string idString = TfStringPrintf("/x%zx", hash);
         
-        toReturn->Init(_renderIndex,
+        toReturn->Init(_renderIndex.get(),
                        SdfPath(idString),
                        usdPrim,
                        excludePrimPaths);
@@ -698,97 +845,199 @@ UsdMayaGLBatchRenderer::GetShapeRenderer(
     return toReturn;
 }
 
-UsdMayaGLBatchRenderer::UsdMayaGLBatchRenderer()
-    : _renderIndex(new HdRenderIndex())
-    , _taskDelegate(new TaskDelegate(_renderIndex, SdfPath("/mayaTask")))
-    , _intersector(new HdxIntersector(_renderIndex))
+const UsdMayaGLSoftSelectHelper& 
+UsdMayaGLBatchRenderer::GetSoftSelectHelper() 
 {
+    _softSelectHelper.Populate();
+    return _softSelectHelper;
+}
+
+// Since we're using a static singleton UsdMayaGLBatchRenderer object, we need
+// to make sure that we reset its state when switching to a new Maya scene.
+static
+void
+_OnMayaSceneUpdateCallback(void* clientData)
+{
+    UsdMayaGLBatchRenderer::Reset();
+}
+
+// For Viewport 2.0, we listen for a notification from Maya's rendering
+// pipeline that all render passes have completed and then we do some cleanup.
+/* static */
+void
+UsdMayaGLBatchRenderer::_OnMayaEndRenderCallback(
+        MHWRender::MDrawContext& context,
+        void* clientData)
+{
+    if (_sGlobalRendererPtr) {
+        _sGlobalRendererPtr->_MayaRenderDidEnd();
+    }
+}
+
+UsdMayaGLBatchRenderer::UsdMayaGLBatchRenderer()
+{
+    _renderIndex.reset(HdRenderIndex::New(&_renderDelegate));
+    if (!TF_VERIFY(_renderIndex)) {
+        return;
+    }
+    _taskDelegate.reset(new TaskDelegate(_renderIndex.get(), SdfPath("/mayaTask")));
+    _intersector.reset(new HdxIntersector(_renderIndex.get()));
+
+
+    static MCallbackId sceneUpdateCallbackId = 0;
+    if (sceneUpdateCallbackId == 0) {
+        sceneUpdateCallbackId =
+            MSceneMessage::addCallback(MSceneMessage::kSceneUpdate,
+                                       _OnMayaSceneUpdateCallback);
+    }
+
+    MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer();
+    if (!renderer) {
+        MGlobal::displayError("Viewport 2.0 renderer not initialized.");
+    } else {
+        // Note that we do not ever remove this notification handler. Maya
+        // ensures that only one handler will be registered for a given name
+        // and semantic location.
+        renderer->addNotification(
+            UsdMayaGLBatchRenderer::_OnMayaEndRenderCallback,
+            _tokens->MayaEndRenderNotificationName.GetText(),
+            MHWRender::MPassContext::kEndRenderSemantic,
+            nullptr);
+    }
+}
+
+UsdMayaGLBatchRenderer::~UsdMayaGLBatchRenderer()
+{
+    _intersector.reset();
+    _taskDelegate.reset();
+
+    // the _shapeRendererMap has UsdImagingDelegate objects which need to be
+    // deleted before _renderIndex is deleted.
+    _shapeRendererMap.clear();
+}
+
+/* static */
+void UsdMayaGLBatchRenderer::Reset()
+{
+    if (_sGlobalRendererPtr) {
+        MGlobal::displayInfo("Resetting USD Batch Renderer");
+    }
+    _sGlobalRendererPtr.reset(new UsdMayaGLBatchRenderer());
 }
 
 void
-UsdMayaGLBatchRenderer::Draw(
-    const MDrawRequest& request,
-    M3dView &view )
+UsdMayaGLBatchRenderer::Draw(const MDrawRequest& request, M3dView& view)
 {
     // VP 1.0 Implementation
     //
     MDrawData drawData = request.drawData();
-    
+
     _BatchDrawUserData* batchData =
-                static_cast<_BatchDrawUserData*>(drawData.geometry());
-    if( !batchData )
+        static_cast<_BatchDrawUserData*>(drawData.geometry());
+    if (!batchData) {
         return;
-    
+    }
+
     MMatrix projectionMat;
     view.projectionMatrix(projectionMat);
-    
-    MMatrix modelViewMat;
-    view.modelViewMatrix(modelViewMat);
+    const GfMatrix4d projectionMatrix(projectionMat.matrix);
 
-    if( batchData->_bounds )
-    {
-        _RenderBounds(
-            *(batchData->_bounds), *(batchData->_wireframeColor), modelViewMat, projectionMat );
+    if (batchData->_bounds) {
+        MMatrix modelViewMat;
+        view.modelViewMatrix(modelViewMat);
+
+        px_vp20Utils::RenderBoundingBox(*(batchData->_bounds),
+                                        *(batchData->_wireframeColor),
+                                        modelViewMat,
+                                        projectionMat);
     }
-    
-    if( batchData->_drawShape && !_renderQueue.empty() )
-    {
-        MMatrix viewMat( request.matrix().inverse() * modelViewMat );
+
+    if (batchData->_drawShape && !_renderQueue.empty()) {
+        // Note that we use GfMatrix4d's GetInverse() method to get the
+        // world-to-view matrix from the camera matrix and NOT MMatrix's
+        // inverse(). The latter was introducing very small bits of floating
+        // point error that would sometimes result in the positions of lights
+        // being computed downstream as having w coordinate values that were
+        // very close to but not exactly 1.0 or 0.0. When drawn, the light
+        // would then flip between being a directional light (w = 0.0) and a
+        // non-directional light (w = 1.0).
+        MDagPath cameraDagPath;
+        view.getCamera(cameraDagPath);
+        const GfMatrix4d cameraMatrix(cameraDagPath.inclusiveMatrix().matrix);
+        const GfMatrix4d worldToViewMatrix(cameraMatrix.GetInverse());
 
         unsigned int viewX, viewY, viewWidth, viewHeight;
         view.viewport(viewX, viewY, viewWidth, viewHeight);
-        GfVec4d viewport(viewX, viewY, viewWidth, viewHeight);
+        const GfVec4d viewport(viewX, viewY, viewWidth, viewHeight);
 
         // Only the first call to this will do anything... After that the batch
         // queue is cleared.
         //
-        _RenderBatches( NULL, viewMat, projectionMat, viewport );
+        _RenderBatches(nullptr, worldToViewMatrix, projectionMatrix, viewport);
     }
-    
+
     // Clean up the _BatchDrawUserData!
     delete batchData;
 }
 
 void
 UsdMayaGLBatchRenderer::Draw(
-    const MHWRender::MDrawContext& context,
-    const MUserData *userData)
+        const MHWRender::MDrawContext& context,
+        const MUserData *userData)
 {
     // VP 2.0 Implementation
     //
     MHWRender::MRenderer* theRenderer = MHWRender::MRenderer::theRenderer();
-    if( !theRenderer || !theRenderer->drawAPIIsOpenGL() )
+    if (!theRenderer || !theRenderer->drawAPIIsOpenGL()) {
         return;
+    }
 
-    const _BatchDrawUserData* batchData = static_cast<const _BatchDrawUserData*>(userData);
-    if( !batchData )
+    const _BatchDrawUserData* batchData =
+        static_cast<const _BatchDrawUserData*>(userData);
+    if (!batchData) {
         return;
-    
+    }
+
     MStatus status;
 
-    MMatrix projectionMat = context.getMatrix(MHWRender::MDrawContext::kProjectionMtx, &status);
-    
-    if( batchData->_bounds )
-    {
-        MMatrix worldViewMat = context.getMatrix(MHWRender::MDrawContext::kWorldViewMtx, &status);
-        
-        _RenderBounds(
-            *(batchData->_bounds), *(batchData->_wireframeColor), worldViewMat, projectionMat );
+    const MMatrix projectionMat =
+        context.getMatrix(MHWRender::MFrameContext::kProjectionMtx, &status);
+    const GfMatrix4d projectionMatrix(projectionMat.matrix);
+
+    if (batchData->_bounds) {
+        const MMatrix worldViewMat =
+            context.getMatrix(MHWRender::MFrameContext::kWorldViewMtx, &status);
+
+        px_vp20Utils::RenderBoundingBox(*(batchData->_bounds),
+                                        *(batchData->_wireframeColor),
+                                        worldViewMat,
+                                        projectionMat);
     }
-    
-    if( batchData->_drawShape && !_renderQueue.empty() )
-    {
-        MMatrix viewMat = context.getMatrix(MHWRender::MDrawContext::kViewMtx, &status);
+
+    const MHWRender::MPassContext& passContext = context.getPassContext();
+    const MString& passId = passContext.passIdentifier();
+
+    const auto inserted = _drawnMayaRenderPasses.insert(passId.asChar());
+    if (!inserted.second) {
+        // We've already done a Hydra draw for this Maya render pass, so we
+        // don't do another one.
+        return;
+    }
+
+    if (batchData->_drawShape && !_renderQueue.empty()) {
+        const MMatrix viewMat =
+            context.getMatrix(MHWRender::MFrameContext::kViewMtx, &status);
+        const GfMatrix4d worldToViewMatrix(viewMat.matrix);
 
         // Extract camera settings from maya view
         int viewX, viewY, viewWidth, viewHeight;
         context.getViewportDimensions(viewX, viewY, viewWidth, viewHeight);
-        GfVec4d viewport(viewX, viewY, viewWidth, viewHeight);
+        const GfVec4d viewport(viewX, viewY, viewWidth, viewHeight);
 
         // Only the first call to this will do anything... After that the batch
         // queue is cleared.
         //
-        _RenderBatches( &context, viewMat, projectionMat, viewport );
+        _RenderBatches(&context, worldToViewMatrix, projectionMatrix, viewport);
     }
 }
 
@@ -818,22 +1067,18 @@ UsdMayaGLBatchRenderer::_QueuePathForDraw(
     const SdfPath& sharedId,
     const RenderParams &params )
 {
-    size_t paramKey = params.Hash();
+    const size_t paramKey = params.Hash();
     
     auto renderSetIter = _renderQueue.find( paramKey );
-    if( renderSetIter == _renderQueue.end() )
-    {
+    if (renderSetIter == _renderQueue.end()) {
         // If we had no _SdfPathSet for this particular RenderParam combination,
         // create a new one.
         _renderQueue[paramKey] = _RenderParamSet( params, _SdfPathSet( {sharedId} ) );
-    }
-    else
-    {
+    } else {
         _SdfPathSet &renderPaths = renderSetIter->second.second;
         renderPaths.insert( sharedId );
     }
 }
-
 
 const HdxIntersector::Hit * 
 UsdMayaGLBatchRenderer::_GetHitInfo(
@@ -844,8 +1089,9 @@ UsdMayaGLBatchRenderer::_GetHitInfo(
     const GfMatrix4d &localToWorldSpace)
 {
     // Guard against user clicking in viewer before renderer is setup
-    if( not _renderIndex )
+    if (!_renderIndex) {
         return NULL;
+    }
 
     // Selection only occurs once per display refresh, with all usd objects
     // simulataneously. If the selectQueue is not empty, that means that
@@ -856,37 +1102,20 @@ UsdMayaGLBatchRenderer::_GetHitInfo(
         TF_DEBUG(PXRUSDMAYAGL_QUEUE_INFO).Msg(
             "____________ SELECTION STAGE START ______________ (singleSelect = %d)\n",
             singleSelection );
-        
-        // We need to get the view and projection matrices for the
-        // area of the view that the user has clicked or dragged.
-        // Unfortunately the view does not give us that in an easy way..
-        // If we extract the view and projection matrices from the view object,
-        // it is just for the regular camera. The selectInfo also gives us the
-        // selection box, so we could use that to construct the correct view
-        // and projection matrixes, but if we call beginSelect on the view as
-        // if we were going to use the selection buffer, maya will do all the
-        // work for us and we can just extract the matrices from opengl.
-        
+
         GfMatrix4d viewMatrix;
         GfMatrix4d projectionMatrix;
-        GLuint glHitRecord;
-        
+        px_LegacyViewportUtils::GetViewSelectionMatrices(view,
+                                                         &viewMatrix,
+                                                         &projectionMatrix);
+
         // As Maya doesn't support batched selection, intersection testing is
         // actually performed in the first selection query that happens after a
         // render. This query occurs in the local space of SOME object, but
         // we need results in world space so that we have results for every
         // node available. worldToLocalSpace removes the local space we
         // happen to be in for the initial query.
-        
         GfMatrix4d worldToLocalSpace(localToWorldSpace.GetInverse());
-        
-        // Hit record can just be one because we are not going to draw
-        // anything anyway. We only want the matrices :)
-        
-        view.beginSelect(&glHitRecord, 1);
-        glGetDoublev(GL_MODELVIEW_MATRIX, viewMatrix.GetArray());
-        glGetDoublev(GL_PROJECTION_MATRIX, projectionMatrix.GetArray());
-        view.endSelect();
 
         _intersector->SetResolution(GfVec2i(pickResolution, pickResolution));
         
@@ -910,22 +1139,34 @@ UsdMayaGLBatchRenderer::_GetHitInfo(
             TfToken colName = renderParams.geometryCol;
             HdRprimCollection rprims(colName, renderParams.drawRepr);
             rprims.SetRootPaths(roots);
+            rprims.SetRenderTags(renderParams.renderTags);
 
             qparams.cullStyle = renderParams.cullStyle;
-            
+            qparams.renderTags = renderParams.renderTags;
+
             HdxIntersector::Result result;
             HdxIntersector::HitVector hits;
 
-            if( not _intersector->Query(qparams, rprims, &_hdEngine, &result) )
+            glPushAttrib(GL_VIEWPORT_BIT |
+                         GL_ENABLE_BIT |
+                         GL_COLOR_BUFFER_BIT |
+                         GL_DEPTH_BUFFER_BIT |
+                         GL_STENCIL_BUFFER_BIT |
+                         GL_TEXTURE_BIT |
+                         GL_POLYGON_BIT);
+            bool r = _intersector->Query(qparams, rprims, &_hdEngine, &result);
+            glPopAttrib();
+            if( !r ) {
                 continue;
+            }
             
             if( singleSelection )
             {
                 hits.resize(1);
-                if( not result.ResolveNearest(&hits.front()) )
+                if( !result.ResolveNearest(&hits.front()) )
                     continue;
             }
-            else if( not result.ResolveAll(&hits) )
+            else if( !result.ResolveAll(&hits) )
             {
                 continue;
             }
@@ -1003,19 +1244,18 @@ UsdMayaGLBatchRenderer::_GetHitInfo(
     return TfMapLookupPtr( _selectResults, sharedId );
 }
 
-
 void
-UsdMayaGLBatchRenderer::_RenderBatches( 
-    const MHWRender::MDrawContext* vp2Context,
-    const MMatrix& viewMat,
-    const MMatrix& projectionMat,
-    const GfVec4d& viewport )
+UsdMayaGLBatchRenderer::_RenderBatches(
+        const MHWRender::MDrawContext* vp2Context,
+        const GfMatrix4d& worldToViewMatrix,
+        const GfMatrix4d& projectionMatrix,
+        const GfVec4d& viewport)
 {
-    if( _renderQueue.empty() )
+    if (_renderQueue.empty()) {
         return;
-    
-    if( !_populateQueue.empty() )
-    {
+    }
+
+    if (!_populateQueue.empty()) {
         TF_DEBUG(PXRUSDMAYAGL_QUEUE_INFO).Msg(
             "____________ POPULATE STAGE START ______________ (%zu)\n",_populateQueue.size());
 
@@ -1023,28 +1263,28 @@ UsdMayaGLBatchRenderer::_RenderBatches(
         UsdPrimVector rootPrims;
         std::vector<SdfPathVector> excludedPrimPaths;
         std::vector<SdfPathVector> invisedPrimPaths;
-        
+
         for( ShapeRenderer *shapeRenderer : _populateQueue )
         {
             delegates.push_back(shapeRenderer->_delegate.get());
             rootPrims.push_back(shapeRenderer->_rootPrim);
             excludedPrimPaths.push_back(shapeRenderer->_excludedPaths);
             invisedPrimPaths.push_back(SdfPathVector());
-            
+
             shapeRenderer->_isPopulated = true;
         }
-        
+
         UsdImagingDelegate::Populate( delegates,
                                       rootPrims,
                                       excludedPrimPaths,
                                       invisedPrimPaths );
-        
+
         _populateQueue.clear();
-                
+
         TF_DEBUG(PXRUSDMAYAGL_QUEUE_INFO).Msg(
             "^^^^^^^^^^^^ POPULATE STAGE FINISH ^^^^^^^^^^^^^ (%zu)\n",_populateQueue.size());
     }
-    
+
     TF_DEBUG(PXRUSDMAYAGL_QUEUE_INFO).Msg(
         "____________ RENDER STAGE START ______________ (%zu)\n",_renderQueue.size());
 
@@ -1052,14 +1292,23 @@ UsdMayaGLBatchRenderer::_RenderBatches(
     // longer valid.
     _selectQueue.clear();
     _selectResults.clear();
-    
-    GfMatrix4d modelViewMatrix(viewMat.matrix);
-    GfMatrix4d projectionMatrix(projectionMat.matrix);
 
-    _taskDelegate->SetCameraState(modelViewMatrix, projectionMatrix, viewport);
+    // We've already populated with all the selection info we need.  We Reset
+    // and the first call to GetSoftSelectHelper in the next render pass will
+    // re-populate it.
+    _softSelectHelper.Reset();
 
-    glPushAttrib(GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_POLYGON_BIT);
-    
+    _taskDelegate->SetCameraState(worldToViewMatrix,
+                                  projectionMatrix,
+                                  viewport);
+
+    // save the current GL states which hydra may reset to default
+    glPushAttrib(GL_LIGHTING_BIT |
+                 GL_ENABLE_BIT |
+                 GL_POLYGON_BIT |
+                 GL_DEPTH_BUFFER_BIT |
+                 GL_VIEWPORT_BIT);
+
     // hydra orients all geometry during topological processing so that
     // front faces have ccw winding. We disable culling because culling
     // is handled by fragment shader discard.
@@ -1071,11 +1320,13 @@ UsdMayaGLBatchRenderer::_RenderBatches(
     glDisable(GL_BLEND);
     glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 
-    if( vp2Context )
-        px_vp20Utils::setupLightingGL(*vp2Context);
+    if (vp2Context) {
+        _taskDelegate->SetLightingStateFromMayaDrawContext(*vp2Context);
+    } else {
+        _taskDelegate->SetLightingStateFromVP1(worldToViewMatrix,
+                                               projectionMatrix);
+    }
 
-    _taskDelegate->SetLightingStateFromOpenGL();
-    
     // The legacy viewport does not support color management,
     // so we roll our own gamma correction by GL means (only in
     // non-highlight mode)
@@ -1091,7 +1342,7 @@ UsdMayaGLBatchRenderer::_RenderBatches(
 
     for( const auto &renderSetIter : _renderQueue )
     {
-        size_t hash = renderSetIter.first;
+        const size_t hash = renderSetIter.first;
         const RenderParams &params = renderSetIter.second.first;
         const _SdfPathSet &renderPaths = renderSetIter.second.second;
 
@@ -1104,53 +1355,38 @@ UsdMayaGLBatchRenderer::_RenderBatches(
     }
 
     _hdEngine.Execute(*_renderIndex, tasks);
-    
+
     if( gammaCorrect )
         glDisable(GL_FRAMEBUFFER_SRGB_EXT);
-    
-    if( vp2Context )
-        px_vp20Utils::unsetLightingGL(*vp2Context);
-    
+
     glPopAttrib(); // GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_POLYGON_BIT
-    
-    // Selection is based on what we have last rendered to the display. The
-    // selection queue is cleared above, so this has the effect of resetting
-    // the render queue and prepping the selection queue without any
-    // significant memory hit.
-    _renderQueue.swap( _selectQueue );
-    
+
+    // Viewport 2 may be rendering in multiple passes, and we want to make sure
+    // we draw once (and only once) for each of those passes, so we delay
+    // swapping the render queue into the select queue until we receive a
+    // notification that all rendering has ended.
+    // For the legacy viewport, rendering is done in a single pass and we will
+    // not receive a notification at the end of rendering, so we do the swap
+    // now.
+    if (!vp2Context) {
+        _MayaRenderDidEnd();
+    }
+
     TF_DEBUG(PXRUSDMAYAGL_QUEUE_INFO).Msg(
         "^^^^^^^^^^^^ RENDER STAGE FINISH ^^^^^^^^^^^^^ (%zu)\n",_renderQueue.size());
 }
 
 void
-UsdMayaGLBatchRenderer::_RenderBounds(
-    const MBoundingBox &bounds,
-    const GfVec4f &wireframeColor,
-    const MMatrix& worldViewMat,
-    const MMatrix& projectionMat )
+UsdMayaGLBatchRenderer::_MayaRenderDidEnd()
 {
-    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT);
-    glDisable(GL_LIGHTING);
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadMatrixd(projectionMat.matrix[0]);
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadMatrixd(worldViewMat.matrix[0]);
+    // Selection is based on what we have last rendered to the display. The
+    // selection queue is cleared during drawing, so this has the effect of
+    // resetting the render queue and prepping the selection queue without any
+    // significant memory hit.
+    _renderQueue.swap(_selectQueue);
 
-    glColor4fv((float*)&wireframeColor);
-    glTranslated( bounds.center()[0],
-                  bounds.center()[1],
-                  bounds.center()[2] );
-    glScaled( bounds.width(),
-              bounds.height(),
-              bounds.depth() );
-    glutWireCube(1.0);
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
-    glPopAttrib(); // GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT
+    _drawnMayaRenderPasses.clear();
 }
 
+
+PXR_NAMESPACE_CLOSE_SCOPE

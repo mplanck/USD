@@ -21,11 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glContextRegistry.h
-
 #ifndef GLF_GLCONTEXTREGISTRY_H
 #define GLF_GLCONTEXTREGISTRY_H
 
+/// \file glf/glContextRegistry.h
+
+#include "pxr/pxr.h"
 #include "pxr/imaging/glf/glContext.h"
 #include "pxr/base/tf/singleton.h"
 #include <boost/noncopyable.hpp>
@@ -34,12 +35,17 @@
 #include <boost/scoped_ptr.hpp>
 #include <boost/shared_ptr.hpp>
 
-class GlfGLContextRegistry_Data;
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+struct GlfGLContextRegistry_Data;
 
 typedef boost::shared_ptr<class GlfGLContext> GlfGLContextSharedPtr;
 
 /// \class GlfGLContextRegistry
-/// \brief Registry of GlfGLContexts.
+///
+/// Registry of GlfGLContexts.
+///
 class GlfGLContextRegistry : boost::noncopyable {
 public:
     static GlfGLContextRegistry& GetInstance()
@@ -47,7 +53,7 @@ public:
         return TfSingleton<GlfGLContextRegistry>::GetInstance();
     }
 
-    /// \brief Returns whether the registry has any registered interfaces.
+    /// Returns whether the registry has any registered interfaces.
     bool IsInitialized() const;
 
     /// Add a registration object to the registry.  This takes ownership
@@ -77,5 +83,8 @@ private:
     boost::optional<GlfGLContextSharedPtr> _shared;
     boost::scoped_ptr<GlfGLContextRegistry_Data> _data;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // GLF_GLCONTEXTREGISTRY_H

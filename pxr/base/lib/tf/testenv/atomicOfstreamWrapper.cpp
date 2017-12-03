@@ -24,6 +24,7 @@
 ///
 /// \file test/atomicOfstreamWrapper.cpp
 
+#include "pxr/pxr.h"
 #include "pxr/base/tf/atomicOfstreamWrapper.h"
 
 #include "pxr/base/tf/fileUtils.h"
@@ -39,6 +40,7 @@
 #include <fcntl.h>
 
 using namespace std;
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static size_t
 Tf_CountFileMatches(const string& pattern)
@@ -53,35 +55,35 @@ static void
 TestErrorCases()
 {
     // Empty file path.
-    TF_AXIOM(not TfAtomicOfstreamWrapper("").Open());
+    TF_AXIOM(!TfAtomicOfstreamWrapper("").Open());
     // Can't create destination directory.
-    TF_AXIOM(not TfAtomicOfstreamWrapper("/var/run/a/testTf_file_").Open());
+    TF_AXIOM(!TfAtomicOfstreamWrapper("/var/run/a/testTf_file_").Open());
     // Insufficient permission to create destination file.
-    TF_AXIOM(not TfAtomicOfstreamWrapper("/var/run/testTf_file_").Open());
+    TF_AXIOM(!TfAtomicOfstreamWrapper("/var/run/testTf_file_").Open());
     // Unwritable file.
-    TF_AXIOM(not TfAtomicOfstreamWrapper("/etc/passwd").Open());
+    TF_AXIOM(!TfAtomicOfstreamWrapper("/etc/passwd").Open());
     // wrapper not open.
-    TF_AXIOM(not TfAtomicOfstreamWrapper("").Commit());
-    TF_AXIOM(not TfAtomicOfstreamWrapper("").Cancel());
+    TF_AXIOM(!TfAtomicOfstreamWrapper("").Commit());
+    TF_AXIOM(!TfAtomicOfstreamWrapper("").Cancel());
 
     {
         TfAtomicOfstreamWrapper wrapper("");
-        TF_AXIOM(not wrapper.GetStream().is_open());
+        TF_AXIOM(!wrapper.GetStream().is_open());
         TF_AXIOM(wrapper.GetStream().good());
         wrapper.GetStream() << "Into the bit bucket..." << endl;
-        TF_AXIOM(not wrapper.GetStream().good());
+        TF_AXIOM(!wrapper.GetStream().good());
     }
 }
 
 static void
 TestCommitToNewFile()
 {
-    unlink("testTf_NewFileCommit.txt");
+    ArchUnlinkFile("testTf_NewFileCommit.txt");
     TfAtomicOfstreamWrapper wrapper("testTf_NewFileCommit.txt");
     TF_AXIOM(wrapper.Open());
 
     // Destination file doesn't exist yet.
-    TF_AXIOM(not TfIsFile("testTf_NewFileCommit.txt"));
+    TF_AXIOM(!TfIsFile("testTf_NewFileCommit.txt"));
 
     // Temporary file exists.
     TF_AXIOM(Tf_CountFileMatches("testTf_NewFileCommit.*") == 1);
@@ -92,7 +94,7 @@ TestCommitToNewFile()
 
     // Commit.
     TF_AXIOM(wrapper.Commit());
-    TF_AXIOM(not wrapper.GetStream().is_open());
+    TF_AXIOM(!wrapper.GetStream().is_open());
 
     // Temporary file is gone.
     TF_AXIOM(Tf_CountFileMatches("testTf_NewFileCommit.*") == 1);
@@ -127,7 +129,7 @@ TestCommitToExistingFile()
 
     // Commit.
     TF_AXIOM(wrapper.Commit());
-    TF_AXIOM(not wrapper.GetStream().is_open());
+    TF_AXIOM(!wrapper.GetStream().is_open());
 
     // Temporary file is gone.
     TF_AXIOM(Tf_CountFileMatches("testTf_ExFileCommit.*") == 1);
@@ -143,14 +145,14 @@ static void
 TestCommitSymlink()
 {
     // Create destination directory.
-    if (not TfIsDir("a/b/c/d")) {
+    if (!TfIsDir("a/b/c/d")) {
         TF_AXIOM(TfMakeDirs("a/b/c/d"));
     }
 
     // Create destination file.
     string filePath = TfAbsPath("a/b/c/d/testTf_File.txt");
     {
-        unlink(filePath.c_str());
+        ArchUnlinkFile(filePath.c_str());
         ofstream ofs(filePath.c_str());
         TF_AXIOM(ofs.good());
         ofs << "Existing Content" << endl;
@@ -159,7 +161,7 @@ TestCommitSymlink()
 
     // Create a symlink to the destination file.
     TF_AXIOM(TfIsFile(filePath.c_str()));
-    unlink("testTf_Symlink.txt");
+    ArchUnlinkFile("testTf_Symlink.txt");
     TF_AXIOM(TfSymlink(filePath, "testTf_Symlink.txt"));
     TF_AXIOM(TfIsLink("testTf_Symlink.txt"));
 
@@ -176,7 +178,7 @@ TestCommitSymlink()
 
     // Commit the wrapper.
     TF_AXIOM(wrapper.Commit());
-    TF_AXIOM(not wrapper.GetStream().is_open());
+    TF_AXIOM(!wrapper.GetStream().is_open());
 
     // Temporary file is removed.
     TF_AXIOM(Tf_CountFileMatches("a/b/c/d/testTf_File.*") == 1);
@@ -192,12 +194,12 @@ TestCommitSymlink()
 static void
 TestCancel()
 {
-    unlink("testTf_Cancel.txt");
+    ArchUnlinkFile("testTf_Cancel.txt");
     TfAtomicOfstreamWrapper wrapper("testTf_Cancel.txt");
     TF_AXIOM(wrapper.Open());
 
     // Destination file not there yet.
-    TF_AXIOM(not TfIsFile("testTf_Cancel.txt"));
+    TF_AXIOM(!TfIsFile("testTf_Cancel.txt"));
 
     // Temporary file exists.
     TF_AXIOM(Tf_CountFileMatches("testTf_Cancel.*") == 1);
@@ -206,7 +208,7 @@ TestCancel()
     TF_AXIOM(wrapper.Cancel());
 
     // Destination and temporary files are not on disk.
-    TF_AXIOM(not TfIsFile("testTf_Cancel.txt"));
+    TF_AXIOM(!TfIsFile("testTf_Cancel.txt"));
     TF_AXIOM(Tf_CountFileMatches("testTf_Cancel.*") == 0);
 }
 
@@ -214,12 +216,12 @@ static void
 TestAutoCancel()
 {
     {
-        unlink("testTf_AutoCancel.txt");
+        ArchUnlinkFile("testTf_AutoCancel.txt");
         TfAtomicOfstreamWrapper wrapper("testTf_AutoCancel.txt");
         TF_AXIOM(wrapper.Open());
 
         // Destination file not there yet.
-        TF_AXIOM(not TfIsFile("testTf_AutoCancel.txt"));
+        TF_AXIOM(!TfIsFile("testTf_AutoCancel.txt"));
 
         // Temporary file exists.
         TF_AXIOM(Tf_CountFileMatches("testTf_AutoCancel.*") == 1);
@@ -228,45 +230,62 @@ TestAutoCancel()
     }
 
     // Destination and temporary files are not on disk.
-    TF_AXIOM(not TfIsFile("testTf_AutoCancel.txt"));
+    TF_AXIOM(!TfIsFile("testTf_AutoCancel.txt"));
     TF_AXIOM(Tf_CountFileMatches("testTf_AutoCancel.*") == 0);
 }
 
 static void
 TestFilePermissions()
 {
+    // Set the umask for this duration of this test to a predictable value.
+#if !defined(ARCH_OS_WINDOWS)
+    const mode_t testUmask = 00002;
+    const mode_t mask = umask(testUmask);
+#endif
+
     {
-        unlink("testTf_NewFilePerm.txt");
+        ArchUnlinkFile("testTf_NewFilePerm.txt");
         TfAtomicOfstreamWrapper wrapper("testTf_NewFilePerm.txt");
         TF_AXIOM(wrapper.Open());
         TF_AXIOM(wrapper.Commit());
 
+#if !defined(ARCH_OS_WINDOWS)
         struct stat st;
         TF_AXIOM(stat("testTf_NewFilePerm.txt", &st) != -1);
-        mode_t fileMode = st.st_mode & 0777;
-        fprintf(stderr, "testTf_NewFilePerm: fileMode = %03o\n", fileMode);
-        TF_AXIOM(fileMode == (S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP));
+        mode_t perms = st.st_mode & ACCESSPERMS;
+        fprintf(stderr, "testTf_NewFilePerm: fileMode = 0%03o\n", perms);
+        TF_AXIOM(perms == (DEFFILEMODE - testUmask));
+#endif
     }
 
     {
-        unlink("testTf_ExistingFilePerm.txt");
+        ArchUnlinkFile("testTf_ExistingFilePerm.txt");
+#if !defined(ARCH_OS_WINDOWS)
         int fd = open("testTf_ExistingFilePerm.txt", O_CREAT, S_IRUSR|S_IWUSR);
         struct stat est;
         TF_AXIOM(fstat(fd, &est) != -1);
-        TF_AXIOM((est.st_mode & 0777) == 0600);
+        TF_AXIOM((est.st_mode & ACCESSPERMS) == (S_IRUSR|S_IWUSR));
         close(fd);
+#endif
 
         TfAtomicOfstreamWrapper wrapper("testTf_ExistingFilePerm.txt");
         TF_AXIOM(wrapper.Open());
         wrapper.GetStream() << "testTf_ExistingFilePerm.txt" << endl;
         TF_AXIOM(wrapper.Commit());
 
+#if !defined(ARCH_OS_WINDOWS)
         struct stat st;
         TF_AXIOM(stat("testTf_ExistingFilePerm.txt", &st) != -1);
-        mode_t fileMode = st.st_mode & 0777;
-        fprintf(stderr, "testTf_ExistingFilePerm: fileMode = %03o\n", fileMode);
-        TF_AXIOM(not (fileMode & (S_IRGRP|S_IWGRP)));
+        mode_t fileMode = st.st_mode & ACCESSPERMS;
+        fprintf(stderr, "testTf_ExistingFilePerm: fileMode = 0%03o\n", fileMode);
+        TF_AXIOM(!(fileMode & (S_IRGRP|S_IWGRP)));
+#endif
     }
+
+#if !defined(ARCH_OS_WINDOWS)
+    // Restore umask to whatever it was.
+    umask(mask);
+#endif
 }
 
 static bool
@@ -275,7 +294,10 @@ Test_TfAtomicOfstreamWrapper()
     TestErrorCases();
     TestCommitToNewFile();
     TestCommitToExistingFile();
+#if !defined(ARCH_OS_WINDOWS)
+    // Windows has issues with the create symlink privilege.
     TestCommitSymlink();
+#endif
     TestCancel();
     TestAutoCancel();
     TestFilePermissions();

@@ -21,11 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/stage.h"
-#include "pxr/usd/usd/conversions.h"
-#include "pxr/usd/usd/treeIterator.h"
+#include "pxr/usd/usd/primRange.h"
 
 #include "pxr/usd/ar/resolverContext.h"
+
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/usd/pcp/pyUtils.h"
 #include "pxr/usd/sdf/pyUtils.h"
 
@@ -38,10 +40,26 @@
 #include "pxr/base/tf/makePyConstructor.h"
 
 #include <boost/python/class.hpp>
+#include <boost/python/tuple.hpp>
 
 using std::string;
 
 using namespace boost::python;
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+class Usd_PcpCacheAccess
+{
+public:
+    static const PcpCache* GetPcpCache(const UsdStage& stage)
+    { return stage._GetPcpCache(); }
+};
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static bool
 _Export(const UsdStagePtr &self, const std::string& filename, 
@@ -49,8 +67,8 @@ _Export(const UsdStagePtr &self, const std::string& filename,
 {
     SdfLayer::FileFormatArguments args;
     std::string errMsg;
-    if (not SdfFileFormatArgumentsFromPython(dict, &args, &errMsg)) {
-        TF_CODING_ERROR(errMsg.c_str());
+    if (!SdfFileFormatArgumentsFromPython(dict, &args, &errMsg)) {
+        TF_CODING_ERROR("%s", errMsg.c_str());
         return false;
     }
 
@@ -73,7 +91,7 @@ __repr__(const UsdStagePtr &self)
         TfPyRepr(self->GetRootLayer()).c_str(),
         TfPyRepr(self->GetSessionLayer()).c_str());
         
-    if (not self->GetPathResolverContext().IsEmpty()) {
+    if (!self->GetPathResolverContext().IsEmpty()) {
         result += TfStringPrintf(
             ", pathResolverContext=%s",
             TfPyRepr(self->GetPathResolverContext()).c_str());
@@ -95,7 +113,7 @@ _GetMetadata(const UsdStagePtr &self, const TfToken &key)
 static bool _SetMetadata(const UsdStagePtr &self, const TfToken& key,
                          object obj) {
     VtValue value;
-    return UsdPythonToMetadataValue(key, /*keyPath*/TfToken(), obj, &value) and
+    return UsdPythonToMetadataValue(key, /*keyPath*/TfToken(), obj, &value) &&
         self->SetMetadata(key, value);
 }
 
@@ -113,7 +131,7 @@ _GetMetadataByDictKey(const UsdStagePtr &self,
 static bool _SetMetadataByDictKey(const UsdStagePtr &self, const TfToken& key,
                                   const TfToken &keyPath, object obj) {
     VtValue value;
-    return UsdPythonToMetadataValue(key, keyPath, obj, &value) and
+    return UsdPythonToMetadataValue(key, keyPath, obj, &value) &&
         self->SetMetadataByDictKey(key, keyPath, value);
 }
 
@@ -125,6 +143,41 @@ _SetGlobalVariantFallbacks(const dict& d)
         UsdStage::SetGlobalVariantFallbacks(fallbacks);
     }
 }
+
+static UsdEditTarget
+_GetEditTargetForLocalLayerIndex(const UsdStagePtr &self, size_t index)
+{
+    return self->GetEditTargetForLocalLayer(index);
+}
+
+static UsdEditTarget
+_GetEditTargetForLocalLayer(const UsdStagePtr &self,
+                            const SdfLayerHandle &layer)
+{
+    return self->GetEditTargetForLocalLayer(layer);
+}
+
+static void
+_ExpandPopulationMask(UsdStage &self, boost::python::object pypred)
+{
+    using Predicate = std::function<bool (UsdRelationship const &)>;
+    Predicate pred;
+    if (pypred != boost::python::object())
+        pred = boost::python::extract<Predicate>(pypred);
+    return self.ExpandPopulationMask(pred);
+}
+
+static object 
+_GetColorConfigFallbacks()
+{
+    SdfAssetPath colorConfiguration;
+    TfToken colorManagementSystem;
+    UsdStage::GetColorConfigFallbacks(&colorConfiguration, 
+                                      &colorManagementSystem);
+    return boost::python::make_tuple(colorConfiguration, colorManagementSystem);
+}
+
+} // anonymous namespace 
 
 void wrapUsdStage()
 {
@@ -246,8 +299,70 @@ void wrapUsdStage()
              return_value_policy<TfPyRefPtrFactory<> >())
         .staticmethod("Open")
 
-        .def("Close", &UsdStage::Close)
+        .def("OpenMasked", (UsdStageRefPtr (*)(const string &, 
+                                               const UsdStagePopulationMask &,
+                                               UsdStage::InitialLoadSet))
+             &UsdStage::OpenMasked,
+             (arg("filePath"),
+              arg("mask"),
+              arg("load")=UsdStage::LoadAll),
+             return_value_policy<TfPyRefPtrFactory<> >())
+        .def("OpenMasked", (UsdStageRefPtr (*)(const string &,
+                                               const ArResolverContext &, 
+                                               const UsdStagePopulationMask &,
+                                               UsdStage::InitialLoadSet))
+             &UsdStage::OpenMasked,
+             (arg("filePath"),
+              arg("pathResolverContext"),
+              arg("mask"),
+              arg("load")=UsdStage::LoadAll),
+             return_value_policy<TfPyRefPtrFactory<> >())
+        .def("OpenMasked", (UsdStageRefPtr (*)(const SdfLayerHandle &,
+                                               const UsdStagePopulationMask &,
+                                               UsdStage::InitialLoadSet))
+             &UsdStage::OpenMasked,
+             (arg("rootLayer"),
+              arg("mask"),
+              arg("load")=UsdStage::LoadAll),
+             return_value_policy<TfPyRefPtrFactory<> >())
+        .def("OpenMasked", (UsdStageRefPtr (*)(const SdfLayerHandle &,
+                                               const SdfLayerHandle &, 
+                                               const UsdStagePopulationMask &,
+                                               UsdStage::InitialLoadSet))
+             &UsdStage::OpenMasked,
+             (arg("rootLayer"),
+              arg("sessionLayer"),
+              arg("mask"),
+              arg("load")=UsdStage::LoadAll),
+             return_value_policy<TfPyRefPtrFactory<> >())
+        .def("OpenMasked", (UsdStageRefPtr (*)(const SdfLayerHandle &,
+                                               const ArResolverContext &, 
+                                               const UsdStagePopulationMask &,
+                                               UsdStage::InitialLoadSet))
+             &UsdStage::OpenMasked,
+             (arg("rootLayer"),
+              arg("pathResolverContext"),
+              arg("mask"),
+              arg("load")=UsdStage::LoadAll),
+             return_value_policy<TfPyRefPtrFactory<> >())
+        .def("OpenMasked", (UsdStageRefPtr (*)(const SdfLayerHandle &,
+                                               const SdfLayerHandle &,
+                                               const ArResolverContext &, 
+                                               const UsdStagePopulationMask &,
+                                               UsdStage::InitialLoadSet))
+             &UsdStage::OpenMasked,
+             (arg("rootLayer"),
+              arg("sessionLayer"),
+              arg("pathResolverContext"),
+              arg("mask"),
+              arg("load")=UsdStage::LoadAll),
+             return_value_policy<TfPyRefPtrFactory<> >())
+        .staticmethod("OpenMasked")
+        
         .def("Reload", &UsdStage::Reload)
+
+        .def("Save", &UsdStage::Save)
+        .def("SaveSessionLayers", &UsdStage::SaveSessionLayers)
 
         .def("GetGlobalVariantFallbacks",
              &UsdStage::GetGlobalVariantFallbacks,
@@ -257,13 +372,15 @@ void wrapUsdStage()
         .staticmethod("SetGlobalVariantFallbacks")
 
         .def("Load", &UsdStage::Load,
-             arg("path")=SdfPath::AbsoluteRootPath())
+             (arg("path")=SdfPath::AbsoluteRootPath(),
+              arg("policy")=UsdLoadWithDescendants))
 
         .def("Unload", &UsdStage::Unload,
              arg("path")=SdfPath::AbsoluteRootPath())
 
         .def("LoadAndUnload", &UsdStage::LoadAndUnload,
-             (arg("loadSet"), arg("unloadSet")))
+             (arg("loadSet"), arg("unloadSet"),
+              arg("policy")=UsdLoadWithDescendants))
 
         .def("GetLoadSet", &UsdStage::GetLoadSet,
              return_value_policy<TfPySequenceToList>())
@@ -271,6 +388,11 @@ void wrapUsdStage()
         .def("FindLoadable", &UsdStage::FindLoadable,
              arg("rootPath")=SdfPath::AbsoluteRootPath(),
              return_value_policy<TfPySequenceToList>())
+
+        .def("GetPopulationMask", &UsdStage::GetPopulationMask)
+        .def("SetPopulationMask", &UsdStage::SetPopulationMask, arg("mask"))
+        .def("ExpandPopulationMask", &_ExpandPopulationMask,
+             arg("predicate")=object())
 
         .def("GetPseudoRoot", &UsdStage::GetPseudoRoot)
 
@@ -280,10 +402,10 @@ void wrapUsdStage()
         .def("HasDefaultPrim", &UsdStage::HasDefaultPrim)
 
         .def("GetPrimAtPath", &UsdStage::GetPrimAtPath, arg("path"))
-        .def("Traverse", (UsdTreeIterator (UsdStage::*)())
+        .def("Traverse", (UsdPrimRange (UsdStage::*)())
              &UsdStage::Traverse)
         .def("Traverse",
-             (UsdTreeIterator (UsdStage::*)(const Usd_PrimFlagsPredicate &))
+             (UsdPrimRange (UsdStage::*)(const Usd_PrimFlagsPredicate &))
              &UsdStage::Traverse, arg("predicate"))
         .def("TraverseAll", &UsdStage::TraverseAll)
 
@@ -303,13 +425,17 @@ void wrapUsdStage()
              arg("includeSessionLayers")=true,
              return_value_policy<TfPySequenceToList>())
         .def("GetUsedLayers", &UsdStage::GetUsedLayers,
+             arg("includeClipLayers")=true,
              return_value_policy<TfPySequenceToList>())
 
         .def("HasLocalLayer", &UsdStage::HasLocalLayer, arg("layer"))
 
         .def("GetEditTarget", &UsdStage::GetEditTarget,
              return_value_policy<return_by_value>())
-
+        .def("GetEditTargetForLocalLayer", &_GetEditTargetForLocalLayerIndex,
+             return_value_policy<return_by_value>())
+        .def("GetEditTargetForLocalLayer", &_GetEditTargetForLocalLayer,
+             return_value_policy<return_by_value>())
         .def("SetEditTarget", &UsdStage::SetEditTarget, arg("editTarget"))
 
         .def("MuteLayer", &UsdStage::MuteLayer,
@@ -362,6 +488,20 @@ void wrapUsdStage()
         .def("GetFramesPerSecond", &UsdStage::GetFramesPerSecond)
         .def("SetFramesPerSecond", &UsdStage::SetFramesPerSecond)
 
+        .def("GetColorConfiguration", &UsdStage::GetColorConfiguration)
+        .def("SetColorConfiguration", &UsdStage::SetColorConfiguration)
+
+        .def("GetColorManagementSystem", &UsdStage::GetColorManagementSystem)
+        .def("SetColorManagementSystem", &UsdStage::SetColorManagementSystem)
+
+        .def("GetColorConfigFallbacks", &_GetColorConfigFallbacks)
+        .staticmethod("GetColorConfigFallbacks")
+
+        .def("SetColorConfigFallbacks", &UsdStage::SetColorConfigFallbacks,
+            (arg("colorConfiguration")=SdfAssetPath(), 
+             arg("colorManagementSystem")=TfToken()))
+        .staticmethod("SetColorConfigFallbacks")        
+            
         .def("GetInterpolationType", &UsdStage::GetInterpolationType)
         .def("SetInterpolationType", &UsdStage::SetInterpolationType)
         .def("IsSupportedFile", &UsdStage::IsSupportedFile, arg("filePath"))
@@ -369,5 +509,10 @@ void wrapUsdStage()
 
         .def("GetMasters", &UsdStage::GetMasters,
              return_value_policy<TfPySequenceToList>())
+
+        .def("_GetPcpCache", &Usd_PcpCacheAccess::GetPcpCache,
+             return_internal_reference<>())
         ;
 }
+
+TF_REFPTR_CONST_VOLATILE_GET(UsdStage)

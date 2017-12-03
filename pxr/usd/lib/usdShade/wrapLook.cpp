@@ -22,12 +22,11 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/usd/usdShade/look.h"
-
 #include "pxr/usd/usd/schemaBase.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/usd/sdf/primSpec.h"
 
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -39,6 +38,10 @@
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
+
 #define WRAP_CUSTOM                                                     \
     template <class Cls> static void _CustomWrapCode(Cls &_class)
 
@@ -46,11 +49,13 @@ using namespace boost::python;
 WRAP_CUSTOM;
 
 
+} // anonymous namespace
+
 void wrapUsdShadeLook()
 {
     typedef UsdShadeLook This;
 
-    class_<This, bases<UsdShadeSubgraph> >
+    class_<This, bases<UsdShadeMaterial> >
         cls("Look");
 
     cls
@@ -63,6 +68,14 @@ void wrapUsdShadeLook()
 
         .def("Define", &This::Define, (arg("stage"), arg("path")))
         .staticmethod("Define")
+
+        .def("IsConcrete",
+            static_cast<bool (*)(void)>( [](){ return This::IsConcrete; }))
+        .staticmethod("IsConcrete")
+
+        .def("IsTyped",
+            static_cast<bool (*)(void)>( [](){ return This::IsTyped; } ))
+        .staticmethod("IsTyped")
 
         .def("GetSchemaAttributeNames",
              &This::GetSchemaAttributeNames,
@@ -94,10 +107,17 @@ void wrapUsdShadeLook()
 // }
 //
 // Of course any other ancillary or support code may be provided.
+// 
+// Just remember to wrap code in the appropriate delimiters:
+// 'namespace {', '}'.
+//
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
 #include "pxr/usd/usd/editContext.h"
+#include "pxr/usd/usd/pyEditContext.h"
+
+namespace {
 
 static UsdPyEditContext
 _GetEditContextForVariant(const UsdShadeLook &self,
@@ -149,16 +169,7 @@ WRAP_CUSTOM {
         .def("HasLookFaceSet", &UsdShadeLook::HasLookFaceSet)
             .staticmethod("HasLookFaceSet")
 
-        .def("CreateSurfaceTerminal", 
-             &UsdShadeLook::CreateSurfaceTerminal,
-             (arg("targetPath")))
-        .def("GetSurfaceTerminal",
-             &UsdShadeLook::GetSurfaceTerminal)
-
-        .def("CreateDisplacementTerminal", 
-             &UsdShadeLook::CreateDisplacementTerminal,
-             (arg("targetPath")))
-        .def("GetDisplacementTerminal",
-             &UsdShadeLook::GetDisplacementTerminal)
         ;
 }
+
+} // anonymous namespace

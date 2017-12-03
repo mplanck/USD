@@ -41,6 +41,9 @@
 #include "pxr/imaging/hd/tokens.h"
 #include "pxr/base/vt/array.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 template <typename T>
 VtValue
 _CreateVtArray(int numElements, int arraySize, int stride,
@@ -168,7 +171,7 @@ bool
 HdGLUtils::GetShaderCompileStatus(GLuint shader, std::string * reason)
 {
     // glew has to be initialized
-    if (not glGetShaderiv) return true;
+    if (!glGetShaderiv) return true;
 
     GLint status = 0;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
@@ -189,7 +192,7 @@ bool
 HdGLUtils::GetProgramLinkStatus(GLuint program, std::string * reason)
 {
     // glew has to be initialized
-    if (not glGetProgramiv) return true;
+    if (!glGetProgramiv) return true;
 
     GLint status = 0;
     glGetProgramiv(program, GL_LINK_STATUS, &status);
@@ -214,7 +217,7 @@ HdGLBufferRelocator::AddRange(GLintptr readOffset,
                               GLsizeiptr copySize)
 {
     _CopyUnit unit(readOffset, writeOffset, copySize);
-    if (_queue.empty() or (not _queue.back().Concat(unit))) {
+    if (_queue.empty() || (!_queue.back().Concat(unit))) {
         _queue.push_back(unit);
     }
 }
@@ -224,33 +227,52 @@ HdGLBufferRelocator::Commit()
 {
     HdRenderContextCaps const &caps = HdRenderContextCaps::GetInstance();
 
-    if (not caps.directStateAccessEnabled) {
-        glBindBuffer(GL_COPY_READ_BUFFER, _srcBuffer);
-        glBindBuffer(GL_COPY_WRITE_BUFFER, _dstBuffer);
-    }
-
-    TF_FOR_ALL (it, _queue) {
-        if (ARCH_LIKELY(caps.directStateAccessEnabled)) {
-            glNamedCopyBufferSubDataEXT(_srcBuffer,
-                                        _dstBuffer,
-                                        it->readOffset,
-                                        it->writeOffset,
-                                        it->copySize);
-        } else {
-            glCopyBufferSubData(GL_COPY_READ_BUFFER,
-                                GL_COPY_WRITE_BUFFER,
-                                it->readOffset,
-                                it->writeOffset,
-                                it->copySize);
+    if (caps.copyBufferEnabled) {
+        // glCopyBuffer
+        if (!caps.directStateAccessEnabled) {
+            glBindBuffer(GL_COPY_READ_BUFFER, _srcBuffer);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, _dstBuffer);
         }
-    }
-    HD_PERF_COUNTER_ADD(HdPerfTokens->glCopyBufferSubData,
-                        (double)_queue.size());
 
-    if (not caps.directStateAccessEnabled) {
-        glBindBuffer(GL_COPY_READ_BUFFER, 0);
-        glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+        TF_FOR_ALL (it, _queue) {
+            if (ARCH_LIKELY(caps.directStateAccessEnabled)) {
+                glNamedCopyBufferSubDataEXT(_srcBuffer,
+                                            _dstBuffer,
+                                            it->readOffset,
+                                            it->writeOffset,
+                                            it->copySize);
+            } else {
+                glCopyBufferSubData(GL_COPY_READ_BUFFER,
+                                    GL_COPY_WRITE_BUFFER,
+                                    it->readOffset,
+                                    it->writeOffset,
+                                    it->copySize);
+            }
+        }
+        HD_PERF_COUNTER_ADD(HdPerfTokens->glCopyBufferSubData,
+                            (double)_queue.size());
+
+        if (!caps.directStateAccessEnabled) {
+            glBindBuffer(GL_COPY_READ_BUFFER, 0);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+        }
+    } else {
+        // read back to CPU and send it to GPU again
+        // (workaround for a driver crash)
+        TF_FOR_ALL (it, _queue) {
+            std::vector<char> data(it->copySize);
+            glBindBuffer(GL_ARRAY_BUFFER, _srcBuffer);
+            glGetBufferSubData(GL_ARRAY_BUFFER, it->readOffset, it->copySize,
+                               &data[0]);
+            glBindBuffer(GL_ARRAY_BUFFER, _dstBuffer);
+            glBufferSubData(GL_ARRAY_BUFFER, it->writeOffset, it->copySize,
+                            &data[0]);
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
     _queue.clear();
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

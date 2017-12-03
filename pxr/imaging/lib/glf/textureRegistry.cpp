@@ -30,15 +30,15 @@
 #include "pxr/imaging/glf/textureHandle.h"
 
 #include "pxr/base/arch/fileSystem.h"
-#include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/instantiateSingleton.h"
 #include "pxr/base/tf/stl.h"
 
 #include "pxr/base/tracelite/trace.h"
 
 #include <cstdint>
-#include <sys/types.h>
-#include <sys/stat.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_INSTANTIATE_SINGLETON( GlfTextureRegistry );
 
@@ -69,7 +69,7 @@ GlfTextureRegistry::GetTextureHandle(const TfToken &texture)
     std::map<TfToken, _TextureMetadata>::iterator it =
         _textureRegistry.find(texture);
 
-    if (it != _textureRegistry.end() and it->second.IsMetadataEqual(md)) {
+    if (it != _textureRegistry.end() && it->second.IsMetadataEqual(md)) {
         textureHandle = it->second.GetHandle();
     } else {
         // if not exists, create it
@@ -101,7 +101,7 @@ GlfTextureRegistry::GetTextureHandle(const TfTokenVector &textures)
     std::map<TfToken, _TextureMetadata>::iterator it =
         _textureRegistry.find(texture);
     
-    if (it != _textureRegistry.end() and it->second.IsMetadataEqual(md)) {
+    if (it != _textureRegistry.end() && it->second.IsMetadataEqual(md)) {
         textureHandle = it->second.GetHandle();
     } else {
         // if not exists, create it
@@ -127,7 +127,7 @@ GlfTextureRegistry::GetTextureHandle(GlfTextureRefPtr texture)
         }
 
         // if not exists or it has expired, create a handle
-        if (not textureHandle)
+        if (!textureHandle)
         {
             textureHandle = GlfTextureHandle::New(texture);
             _textureRegistryNonShared[texture] = textureHandle;
@@ -153,7 +153,7 @@ GlfTextureRegistry::_CreateTexture(const TfToken &texture)
     GlfTextureRefPtr result;
     if (GlfTextureFactoryBase* factory = _GetTextureFactory(texture)) {
         result = factory->New(texture);
-        if (not result) {
+        if (!result) {
             TF_CODING_ERROR("[PluginLoad] Cannot construct texture for "
                             "type '%s'\n",
                             TfStringGetSuffix(texture).c_str());
@@ -170,7 +170,7 @@ GlfTextureRegistry::_CreateTexture(const TfTokenVector &textures,
     TfToken filename = textures.empty() ? TfToken() : textures.front();
     if (GlfTextureFactoryBase* factory = _GetTextureFactory(filename)) {
         result = factory->New(textures);
-        if (not result) {
+        if (!result) {
             TF_CODING_ERROR("[PluginLoad] Cannot construct texture for "
                             "type '%s'\n",
                             TfStringGetSuffix(filename).c_str());
@@ -186,10 +186,10 @@ GlfTextureRegistry::_GetTextureFactory(const TfToken &filename)
     TfToken fileExtension(TfStringGetSuffix(filename));
 
     TfType pluginType = _typeMap->Find(fileExtension);
-    if (not pluginType) {
+    if (!pluginType) {
         // Unknown type.  Try the wildcard.
         pluginType = _typeMap->Find(TfToken("*"));
-        if (not pluginType) {
+        if (!pluginType) {
             TF_DEBUG(GLF_DEBUG_TEXTURE_PLUGINS).Msg(
                     "[PluginLoad] Unknown texture type '%s'\n",
                     fileExtension.GetText());
@@ -199,7 +199,7 @@ GlfTextureRegistry::_GetTextureFactory(const TfToken &filename)
 
     PlugRegistry& plugReg = PlugRegistry::GetInstance();
     PlugPluginPtr plugin = plugReg.GetPluginForType(pluginType);
-    if (not plugin or not plugin->Load()) {
+    if (!plugin || !plugin->Load()) {
         TF_CODING_ERROR("[PluginLoad] PlugPlugin could not be loaded for "
                         "TfType '%s'\n",
                         pluginType.GetTypeName().c_str());
@@ -237,7 +237,7 @@ GlfTextureRegistry::GarbageCollectIfNeeded()
     // Even if we hold the list of texture handles to be deleted, we have to
     // traverse entire map to remove the entry for them. So simple flag works
     // enough to avoid unnecessary process.
-    if (not _requiresGarbageCollection) return;
+    if (!_requiresGarbageCollection) return;
 
     // XXX:
     // Frequent garbage collection causing slow UI when reading textures.
@@ -287,19 +287,19 @@ GlfTextureRegistry::GetTextureInfos() const
 {
     std::vector<VtDictionary> result;
 
-    TF_FOR_ALL (it, _textureRegistry) {
-        GlfTextureHandlePtr texture = it->second.GetHandle();
+    for (TextureRegistryMap::value_type const& p : _textureRegistry) {
+        GlfTextureHandlePtr texture = p.second.GetHandle();
         VtDictionary info = texture->GetTexture()->GetTextureInfo();
         info["uniqueIdentifier"] = (uint64_t)texture.GetUniqueIdentifier();
         result.push_back(info);
     }
 
-    TF_FOR_ALL (it, _textureRegistryNonShared) {
+    for (TextureRegistryNonSharedMap::value_type const& p : _textureRegistryNonShared) {
         // note: Since textureRegistryNonShared stores weak ptr, we have to 
         // check whether it still exists here.
-        if (not it->second.IsExpired()) {
-            VtDictionary info = it->second->GetTexture()->GetTextureInfo();
-            info["uniqueIdentifier"] = (uint64_t)it->second->GetUniqueIdentifier();
+        if (!p.second.IsExpired()) {
+            VtDictionary info = p.second->GetTexture()->GetTextureInfo();
+            info["uniqueIdentifier"] = (uint64_t)p.second->GetUniqueIdentifier();
             result.push_back(info);
         }
     }
@@ -337,24 +337,27 @@ GlfTextureRegistry::_TextureMetadata::_TextureMetadata(
 {
     TRACE_FUNCTION();
 
-    for (std::uint32_t i=0; i<numTextures; ++i) {
-        const TfToken &tex = textures[i];
-
-        struct stat st;
-        if (stat(tex.GetText(), &st) == -1)
+    for (std::uint32_t i = 0; i < numTextures; ++i) {
+        const TfToken& tex = textures[i];
+        double time;
+        if (!ArchGetModificationTime(tex.GetText(), &time)) {
             continue;
+        }
+        int64_t size = ArchGetFileLength(tex.GetText());
+        if (size == -1) {
+            continue;
+        }
 
         // The file size is not a particularly good indicator that the texture
         // has changed (i.e. uncompressed images with the same dimensions,
         // depth, etc are very likely to have the same size even if they are
-        // different.)  However, as we've already paid for the stat call, we
-        // might as well use as much of the information as we can.
+        // different.)
         //
         // We aggregate the size of every file in the texture array, but use
         // the most recent mtime of any file so that we reload the array if any
         // file is modified.
-        _fileSize += st.st_size;
-        _mtime = std::max(_mtime, ArchGetModificationTime(st));
+        _fileSize += size;
+        _mtime = std::max(_mtime, time);
     }
 }
 
@@ -362,8 +365,8 @@ inline bool
 GlfTextureRegistry::_TextureMetadata::IsMetadataEqual(
     const _TextureMetadata &other) const
 {
-    return _numTextures == other._numTextures and
-        _fileSize == other._fileSize and
+    return _numTextures == other._numTextures && 
+        _fileSize == other._fileSize && 
         _mtime == other._mtime;
 }
 
@@ -379,3 +382,6 @@ GlfTextureRegistry::_TextureMetadata::SetHandle(
 {
     _handle = handle;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

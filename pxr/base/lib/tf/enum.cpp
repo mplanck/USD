@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/enum.h"
 
 #include "pxr/base/tf/diagnostic.h"
@@ -35,8 +37,6 @@
 
 #include "pxr/base/arch/demangle.h"
 
-#include <boost/bind.hpp>
-#include <boost/function.hpp>
 #include <boost/noncopyable.hpp>
 #include "pxr/base/tf/hashmap.h"
 
@@ -48,6 +48,8 @@
 using std::string;
 using std::vector;
 using std::type_info;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_REGISTRY_FUNCTION(TfType)
 {
@@ -137,9 +139,8 @@ TfEnum::_AddName(TfEnum val, const string &valName, const string &displayName)
     r._typeNameToNameVector[val.GetType().name()].push_back(shortName);
     r._typeNameToType[typeName] = &val.GetType();
 
-    boost::function<void ()> fn =
-        boost::bind(&Tf_EnumRegistry::_Remove, &r, val);
-    TfRegistryManager::GetInstance().AddFunctionForUnload(fn);
+    TfRegistryManager::GetInstance().AddFunctionForUnload(
+        [&r, val]() { r._Remove(val); });
 }
 
 string
@@ -268,3 +269,5 @@ operator<<(std::ostream& out, const TfEnum& e)
 {
     return out << TfEnum::GetFullName(e);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

@@ -24,6 +24,10 @@
 #ifndef USDGEOM_GENERATED_NURBSCURVES_H
 #define USDGEOM_GENERATED_NURBSCURVES_H
 
+/// \file usdGeom/nurbsCurves.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdGeom/api.h"
 #include "pxr/usd/usdGeom/curves.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -38,29 +42,37 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // NURBSCURVES                                                                //
 // -------------------------------------------------------------------------- //
 
-/// Nurbs curves are analagous to Maya Nurbs Curves,  used for 
-/// interchange of rigging and modeling curves.  Unlike Maya Curves, this 
-/// curve spec supports batching of multiple curves into a single prim and 
-/// widths in the schema.  Unlike maya, we require 
+/// \class UsdGeomNurbsCurves
+///
+/// This schema is analagous to NURBS Curves in packages like Maya
+/// and Houdini, often used for interchange of rigging and modeling curves.  
+/// Unlike Maya, this curve spec supports batching of multiple curves into a 
+/// single prim, widths, and normals in the schema.  Additionally, we require 
 /// 'numSegments + 2 * degree + 1' knots (2 more than maya does).  This is to
-/// be more consistent with renderman's NURBS specification.  
+/// be more consistent with RenderMan's NURBS patch specification.  
 /// 
 /// To express a periodic curve:
-/// knot[0] = knot[1] - (knots[-2] - knots[-3]; 
-/// knot[-1] = knot[-2] + (knot[2] - knots[1]);
+/// - knot[0] = knot[1] - (knots[-2] - knots[-3]; 
+/// - knot[-1] = knot[-2] + (knot[2] - knots[1]);
 /// 
 /// To express a nonperiodic curve:
-/// knot[0] = knot[1];
-/// knot[-1] = knot[-2];
+/// - knot[0] = knot[1];
+/// - knot[-1] = knot[-2];
 /// 
 /// In spite of these slight differences in the spec, curves generated in Maya
 /// should be preserved when roundtripping.
+/// 
+/// 'order' and 'range', when representing a batched NurbsCurve should be
+/// authored one value per curve.  'knots' should be the concatentation of
+/// all batched curves.
 ///
 class UsdGeomNurbsCurves : public UsdGeomCurves
 {
@@ -70,6 +82,11 @@ public:
     /// true, GetStaticPrimDefinition() will return a valid prim definition with
     /// a non-empty typeName.
     static const bool IsConcrete = true;
+
+    /// Compile-time constant indicating whether or not this class inherits from
+    /// UsdTyped. Types which inherit from UsdTyped can impart a typename on a
+    /// UsdPrim.
+    static const bool IsTyped = true;
 
     /// Construct a UsdGeomNurbsCurves on UsdPrim \p prim .
     /// Equivalent to UsdGeomNurbsCurves::Get(prim.GetStage(), prim.GetPath())
@@ -89,15 +106,17 @@ public:
     }
 
     /// Destructor.
+    USDGEOM_API
     virtual ~UsdGeomNurbsCurves();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDGEOM_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdGeomNurbsCurves holding the prim adhering to this
+    /// Return a UsdGeomNurbsCurves holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -106,10 +125,11 @@ public:
     /// UsdGeomNurbsCurves(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDGEOM_API
     static UsdGeomNurbsCurves
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
-    /// \brief Attempt to ensure a \a UsdPrim adhering to this schema at \p path
+    /// Attempt to ensure a \a UsdPrim adhering to this schema at \p path
     /// is defined (according to UsdPrim::IsDefined()) on this stage.
     ///
     /// If a prim adhering to this schema at \p path is already defined on this
@@ -131,30 +151,36 @@ public:
     /// specify this schema class, in case a stronger typeName opinion overrides
     /// the opinion at the current EditTarget.
     ///
+    USDGEOM_API
     static UsdGeomNurbsCurves
     Define(const UsdStagePtr &stage, const SdfPath &path);
 
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDGEOM_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDGEOM_API
     virtual const TfType &_GetTfType() const;
 
 public:
     // --------------------------------------------------------------------- //
     // ORDER 
     // --------------------------------------------------------------------- //
-    /// Order is degree + 1.  It must be less than or equal to the 
-    /// number of cvsPerCurve
+    /// Order of the curve.  Order must be positive and is
+    /// equal to the degree of the polynomial basis to be evaluated, plus 1.
+    /// Its value for the 'i'th curve must be less than or equal to the 
+    /// number of cvs in the curveVertexCount[i]
     ///
     /// \n  C++ Type: VtArray<int>
     /// \n  Usd Type: SdfValueTypeNames->IntArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: []
+    USDGEOM_API
     UsdAttribute GetOrderAttr() const;
 
     /// See GetOrderAttr(), and also 
@@ -162,18 +188,23 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateOrderAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
     // --------------------------------------------------------------------- //
     // KNOTS 
     // --------------------------------------------------------------------- //
-    /// Knot vectors are batched together and define how to interpolate curve segments.
+    /// Knot vector providing curve parameterization.
+    /// The length of the slice of the array for the ith curve 
+    /// must be ( curveVertexCount[i] + order[i] ), and its
+    /// entries must take on monotonically increasing values.
     ///
     /// \n  C++ Type: VtArray<double>
     /// \n  Usd Type: SdfValueTypeNames->DoubleArray
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetKnotsAttr() const;
 
     /// See GetKnotsAttr(), and also 
@@ -181,18 +212,25 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateKnotsAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
     // --------------------------------------------------------------------- //
     // RANGES 
     // --------------------------------------------------------------------- //
-    /// Specifies the parametric range used to evaluate the curve.
+    /// Provides the minimum and maximum parametric values (as defined
+    /// by knots) over which the curve is actually defined.  The minimum must 
+    /// be less than the maximum, and greater than or equal to the value of the 
+    /// knots['i'th curve slice][order[i]-1]. The maxium must be less 
+    /// than or equal to the last element's value in knots['i'th curve slice].
+    /// Range maps to (vmin, vmax) in the RenderMan spec.
     ///
     /// \n  C++ Type: VtArray<GfVec2d>
     /// \n  Usd Type: SdfValueTypeNames->Double2Array
     /// \n  Variability: SdfVariabilityVarying
     /// \n  Fallback Value: No Fallback
+    USDGEOM_API
     UsdAttribute GetRangesAttr() const;
 
     /// See GetRangesAttr(), and also 
@@ -200,6 +238,7 @@ public:
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
+    USDGEOM_API
     UsdAttribute CreateRangesAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
@@ -207,10 +246,14 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -24,19 +24,26 @@
 #ifndef PCP_ARC_H
 #define PCP_ARC_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/pcp/api.h"
 #include "pxr/usd/pcp/mapExpression.h"
 #include "pxr/usd/pcp/node.h"
 #include "pxr/usd/pcp/types.h"
 #include "pxr/usd/sdf/path.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class PcpPrimIndex_Graph;
 
-/// \struct PcpArc
+/// \class PcpArc
+///
 /// Represents an arc connecting two nodes in the prim index. 
 /// The arc is owned by a node (source) and points to its parent node (target) 
 /// in the index.
-struct PcpArc 
+///
+class PcpArc 
 {
+public:
     PcpArc()
         : type(PcpArcTypeRoot)
         , siblingNumAtOrigin(0)
@@ -69,5 +76,7 @@ struct PcpArc
     // Note that this does *not* count any variant selections.
     int namespaceDepth;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PCP_ARC_H

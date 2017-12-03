@@ -59,17 +59,16 @@ class GfQuaternion;
     /// This explicit constructor initializes the matrix to \p s times
     /// the identity matrix.
     explicit {{ MAT }}(int s) {
-	SetDiagonal(s);
+        SetDiagonal(s);
     }
 
 {% endblock customDiagonalConstructors %}
 
 {% block customConstructors %}
-{% if SCL == 'double' %}
     /// Constructor. Initialize matrix from rotation.
+    GF_API
     {{ MAT }}(const GfRotation& rot);
 
-{% endif %}
 {% endblock customConstructors %}
 
 {% block customFunctions %}
@@ -81,14 +80,17 @@ class GfQuaternion;
     /// translation part of the matrix unchanged.  If \a issueWarning is true,
     /// this method will issue a warning if the iteration does not converge,
     /// otherwise it will be silent.
+    GF_API
     bool Orthonormalize(bool issueWarning=true);
 
     /// Returns an orthonormalized copy of the matrix.
+    GF_API
     {{ MAT }} GetOrthonormalized(bool issueWarning=true) const;
 
     /// Returns the sign of the determinant of the matrix, i.e. 1 for a
     /// right-handed matrix, -1 for a left-handed matrix, and 0 for a
     /// singular matrix.
+    GF_API
     double GetHandedness() const;
 
     /// Returns true if the vectors in the matrix form a right-handed
@@ -106,24 +108,27 @@ class GfQuaternion;
 
 {% block customXformFunctions %}
     /// Sets matrix to specify a uniform scaling by \e scaleFactor.
+    GF_API
     {{ MAT }}& SetScale({{ SCL }} scaleFactor);
-{% if SCL == 'double' %}
 
     /// \name 3D Transformation Utilities
     /// @{
 
     /// Sets the matrix to specify a rotation equivalent to \e rot.
+    GF_API
     {{ MAT }}& SetRotate(const GfRotation &rot);
 
     /// Sets the matrix to specify a nonuniform scaling in x, y, and z by
     /// the factors in vector \e scaleFactors.
-    {{ MAT }}& SetScale(const GfVec3d &scaleFactors);
+    GF_API
+    {{ MAT }}& SetScale(const GfVec3{{ SCL[0] }} &scaleFactors);
 
     /// Returns the rotation corresponding to this matrix. This works
     /// well only if the matrix represents a rotation.
     ///
     /// For good results, consider calling Orthonormalize() before calling
     /// this method.
+    GF_API
     GfRotation ExtractRotation() const;
 
     /// Decompose the rotation corresponding to this matrix about 3
@@ -132,19 +137,20 @@ class GfQuaternion;
     ///
     /// This is a convenience method that is equivalent to calling
     /// ExtractRotation().Decompose().
-    GfVec3d DecomposeRotation(const GfVec3d &axis0,
-                              const GfVec3d &axis1,
-                              const GfVec3d &axis2 ) const;
+    GF_API
+    GfVec3{{ SCL[0] }} DecomposeRotation(const GfVec3{{ SCL[0] }} &axis0,
+                              const GfVec3{{ SCL[0] }} &axis1,
+                              const GfVec3{{ SCL[0] }} &axis2 ) const;
 
     /// Returns the quaternion corresponding to this matrix. This works
     /// well only if the matrix represents a rotation.
     ///
     /// For good results, consider calling Orthonormalize() before calling
     /// this method.
+    GF_API
     GfQuaternion ExtractRotationQuaternion() const;
 
     /// @}
-{% endif %}
 {% endblock customXformFunctions %}
 
 /* #endif */

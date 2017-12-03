@@ -21,10 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readPrim.h"
 #include "usdKatana/readXformable.h"
 #include "usdKatana/usdInPrivateData.h"
+#include "usdKatana/utils.h"
 
 #include "pxr/usd/usdGeom/xform.h"
 
@@ -34,29 +36,32 @@
 
 #include <sstream>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 FnLogSetup("PxrUsdKatanaReadXformable");
 
-void
+bool
 PxrUsdKatanaReadXformable(
         const UsdGeomXformable& xformable,
         const PxrUsdKatanaUsdInPrivateData& data,
-        PxrUsdKatanaAttrMap& attrs)
+        FnAttribute::GroupAttribute& attr)
 {
-    PxrUsdKatanaReadPrim(xformable.GetPrim(), data, attrs);
-
     //
     // Calculate and set the xform attribute.
     //
 
-    double currentTime = data.GetUsdInArgs()->GetCurrentTime();
+    double currentTime = data.GetCurrentTime();
 
     // Get the ordered xform ops for the prim.
     //
-    bool resetsXformStack;
+    bool resetsXformStack = false;
     std::vector<UsdGeomXformOp> orderedXformOps =
         xformable.GetOrderedXformOps(&resetsXformStack);
 
     FnKat::GroupBuilder gb;
+
+    const bool isMotionBackward = data.IsMotionBackward();
 
     // For each xform op, construct a matrix containing the 
     // transformation data for each time sample it has.
@@ -80,7 +85,9 @@ PxrUsdKatanaReadXformable(
 
             // Convert to vector.
             const double *matArray = mat.GetArray();
-            std::vector<double> &matVec = matBuilder.get(fabs(relSampleTime));
+            std::vector<double> &matVec = matBuilder.get(isMotionBackward ?
+                PxrUsdKatanaUtils::ReverseTimeSample(relSampleTime) : relSampleTime);
+
             matVec.resize(16);
             for (int i = 0; i < 16; ++i)
             {
@@ -96,7 +103,7 @@ PxrUsdKatanaReadXformable(
 
     // Only set an 'xform' attribute if xform ops were found.
     //
-    if (not orderedXformOps.empty())
+    if (!orderedXformOps.empty())
     {
         FnKat::GroupBuilder xformGb;
         xformGb.setGroupInherit(false);
@@ -114,6 +121,33 @@ PxrUsdKatanaReadXformable(
 
         xformGb.set("matrix", matrixAttr);
 
-        attrs.set("xform", xformGb.build());
+        attr = xformGb.build();
+        return true;
+    }
+    else if (resetsXformStack) {
+        FnKat::GroupBuilder xformGb;
+        xformGb.setGroupInherit(false);
+        xformGb.set("origin", FnKat::DoubleAttribute(1));
+        attr = xformGb.build();
+        return true;
+    }
+
+    return false;
+}
+
+void
+PxrUsdKatanaReadXformable(
+        const UsdGeomXformable& xformable,
+        const PxrUsdKatanaUsdInPrivateData& data,
+        PxrUsdKatanaAttrMap& attrs)
+{
+    PxrUsdKatanaReadPrim(xformable.GetPrim(), data, attrs);
+
+    FnAttribute::GroupAttribute attr;
+    if (PxrUsdKatanaReadXformable(xformable, data, attr)) {
+        attrs.set("xform", attr);
     }
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

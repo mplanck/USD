@@ -23,20 +23,25 @@
 //
 #include "pxr/imaging/hdx/simpleLightBypassTask.h"
 
+#include "pxr/imaging/hdx/simpleLightingShader.h"
 #include "pxr/imaging/hdx/tokens.h"
 
-#include "pxr/imaging/hd/camera.h"
+#include "pxr/imaging/hdSt/camera.h"
+
+
 #include "pxr/imaging/hd/perfLog.h"
 #include "pxr/imaging/hd/renderIndex.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
-#include "pxr/imaging/hd/simpleLightingShader.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // -------------------------------------------------------------------------- //
 
 HdxSimpleLightBypassTask::HdxSimpleLightBypassTask(HdSceneDelegate* delegate,
                                                    SdfPath const& id)
     : HdSceneTask(delegate, id)
-    , _lightingShader(new HdSimpleLightingShader())
+    , _lightingShader(new HdxSimpleLightingShader())
     , _simpleLightingContext()
 {
 }
@@ -45,7 +50,7 @@ void
 HdxSimpleLightBypassTask::_Execute(HdTaskContext* ctx)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 }
 
 void
@@ -53,27 +58,30 @@ HdxSimpleLightBypassTask::_Sync(HdTaskContext* ctx)
 {
     HD_TRACE_FUNCTION();
 
-    HdChangeTracker::DirtyBits bits = _GetTaskDirtyBits();
+    HdDirtyBits bits = _GetTaskDirtyBits();
 
     if (bits & HdChangeTracker::DirtyParams) {
         HdxSimpleLightBypassTaskParams params;
-        if (not _GetSceneDelegateValue(HdTokens->params, &params)) {
+        if (!_GetSceneDelegateValue(HdTokens->params, &params)) {
             return;
         }
 
         _simpleLightingContext = params.simpleLightingContext;
-        _camera = GetDelegate()->GetRenderIndex().GetCamera(params.cameraPath);
+        const HdRenderIndex &renderIndex = GetDelegate()->GetRenderIndex();
+        _camera = static_cast<const HdStCamera *>(
+                    renderIndex.GetSprim(HdPrimTypeTokens->camera,
+                                         params.cameraPath));
     }
 
     if (_simpleLightingContext) {
-        if (not TF_VERIFY(_camera)) {
+        if (!TF_VERIFY(_camera)) {
             return;
         }
 
         VtValue modelViewMatrix = _camera->Get(HdShaderTokens->worldToViewMatrix);
-        if (not TF_VERIFY(modelViewMatrix.IsHolding<GfMatrix4d>())) return;
+        if (!TF_VERIFY(modelViewMatrix.IsHolding<GfMatrix4d>())) return;
         VtValue projectionMatrix = _camera->Get(HdShaderTokens->projectionMatrix);
-        if (not TF_VERIFY(projectionMatrix.IsHolding<GfMatrix4d>())) return;
+        if (!TF_VERIFY(projectionMatrix.IsHolding<GfMatrix4d>())) return;
 
         // need camera matrices to compute lighting paramters in the eye-space.
         //
@@ -92,8 +100,8 @@ HdxSimpleLightBypassTask::_Sync(HdTaskContext* ctx)
     // Done at end, because the lighting context can be changed above.
     // Also we want the context in the shader as it's only a partial copy
     // of the context we own.
-    (*ctx)[HdTokens->lightingShader]  = boost::dynamic_pointer_cast<HdLightingShader>(_lightingShader);
-    (*ctx)[HdTokens->lightingContext] = _lightingShader->GetLightingContext();
+    (*ctx)[HdxTokens->lightingShader]  = boost::dynamic_pointer_cast<HdLightingShader>(_lightingShader);
+    (*ctx)[HdxTokens->lightingContext] = _lightingShader->GetLightingContext();
 
 }
 
@@ -110,10 +118,13 @@ std::ostream& operator<<(std::ostream& out,
 bool operator==(const HdxSimpleLightBypassTaskParams& lhs,
                 const HdxSimpleLightBypassTaskParams& rhs) {
     return lhs.cameraPath == rhs.cameraPath 
-        and lhs.simpleLightingContext == rhs.simpleLightingContext;
+        && lhs.simpleLightingContext == rhs.simpleLightingContext;
 }
 
 bool operator!=(const HdxSimpleLightBypassTaskParams& lhs,
                 const HdxSimpleLightBypassTaskParams& rhs) {
-    return not(lhs == rhs);
+    return !(lhs == rhs);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

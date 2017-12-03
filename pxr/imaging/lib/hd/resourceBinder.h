@@ -24,24 +24,34 @@
 #ifndef HD_RESOURCE_BINDER_H
 #define HD_RESOURCE_BINDER_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 
 #include "pxr/imaging/hd/binding.h"
-#include "pxr/imaging/hd/bufferArrayRange.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/stl.h"
 
 #include "pxr/base/tf/hashmap.h"
 
-class HdDrawItem;
-class HdShader;
+PXR_NAMESPACE_OPEN_SCOPE
 
-typedef boost::shared_ptr<class HdShader> HdShaderSharedPtr;
-typedef std::vector<HdShaderSharedPtr> HdShaderSharedPtrVector;
+
+class HdDrawItem;
+class HdShaderCode;
+class HdResourceGL;
+
+typedef boost::shared_ptr<class HdBufferResourceGL> HdBufferResourceGLSharedPtr;
+typedef boost::shared_ptr<class HdBufferArrayRangeGL> HdBufferArrayRangeGLSharedPtr;
+
+typedef boost::shared_ptr<class HdShaderCode> HdShaderCodeSharedPtr;
+typedef std::vector<HdShaderCodeSharedPtr> HdShaderCodeSharedPtrVector;
 typedef std::vector<class HdBindingRequest> HdBindingRequestVector;
 
-/// HdResourceBinder is a helper class to maintain all vertex/buffer/uniform
-/// binding points to be used for both codegen time and rendering time.
+/// \class Hd_ResourceBinder
+/// 
+/// A helper class to maintain all vertex/buffer/uniform binding points to be
+/// used for both codegen time and rendering time.
 ///
 /// Hydra uses 6 different types of coherent buffers.
 ///
@@ -128,6 +138,7 @@ public:
 
         typedef size_t ID;
         /// Returns the hash value of this metadata.
+        HD_API
         ID ComputeHash() const;
 
         // -------------------------------------------------------------------
@@ -217,6 +228,8 @@ public:
         PrimVarBinding elementData;
         PrimVarBinding vertexData;
         PrimVarBinding fvarData;
+        PrimVarBinding computeReadWriteData;
+        PrimVarBinding computeReadOnlyData;
         NestedPrimVarBinding instanceData;
         int instancerNumLevels;
 
@@ -235,67 +248,95 @@ public:
     };
 
     /// Constructor.
+    HD_API
     Hd_ResourceBinder();
 
     /// Assign all binding points used in drawitem and custom bindings.
     /// Returns metadata to be used for codegen.
+    HD_API
     void ResolveBindings(HdDrawItem const *drawItem,
-                         HdShaderSharedPtrVector const &shaders,
+                         HdShaderCodeSharedPtrVector const &shaders,
                          MetaData *metaDataOut,
                          bool indirect,
                          bool instanceDraw,
                          HdBindingRequestVector const &customBindings);
 
+    /// Assign all binding points used in computation.
+    /// Returns metadata to be used for codegen.
+    HD_API
+    void ResolveComputeBindings(HdBufferSpecVector const &readWriteBufferSpecs,
+                                HdBufferSpecVector const &readOnlyBufferSpecs,
+                                HdShaderCodeSharedPtrVector const &shaders,
+                                MetaData *metaDataOut);
+    
     /// call GL introspection APIs and fix up binding locations,
     /// in case if explicit resource location qualifier is not available
     /// (GL 4.2 or before)
-    void IntrospectBindings(GLuint program);
+    HD_API
+    void IntrospectBindings(HdResourceGL const & programResource);
 
+    HD_API
     void Bind(HdBindingRequest const& req) const;
+    HD_API
     void Unbind(HdBindingRequest const& req) const;
 
     /// bind/unbind BufferArray
-    void BindBufferArray(HdBufferArrayRangeSharedPtr const &bar) const;
-    void UnbindBufferArray(HdBufferArrayRangeSharedPtr const &bar) const;
+    HD_API
+    void BindBufferArray(HdBufferArrayRangeGLSharedPtr const &bar) const;
+    HD_API
+    void UnbindBufferArray(HdBufferArrayRangeGLSharedPtr const &bar) const;
 
     /// bind/unbind interleaved constant buffer
+    HD_API
     void BindConstantBuffer(
-        HdBufferArrayRangeSharedPtr const & constantBar) const;
+        HdBufferArrayRangeGLSharedPtr const & constantBar) const;
+    HD_API
     void UnbindConstantBuffer(
-        HdBufferArrayRangeSharedPtr const &constantBar) const;
+        HdBufferArrayRangeGLSharedPtr const &constantBar) const;
 
     /// bind/unbind nested instance BufferArray
+    HD_API
     void BindInstanceBufferArray(
-        HdBufferArrayRangeSharedPtr const &bar, int level) const;
+        HdBufferArrayRangeGLSharedPtr const &bar, int level) const;
+    HD_API
     void UnbindInstanceBufferArray(
-        HdBufferArrayRangeSharedPtr const &bar, int level) const;
+        HdBufferArrayRangeGLSharedPtr const &bar, int level) const;
 
     /// bind/unbind shader parameters and textures
-    void BindShaderResources(HdShader const *shader) const;
-    void UnbindShaderResources(HdShader const *shader) const;
+    HD_API
+    void BindShaderResources(HdShaderCode const *shader) const;
+    HD_API
+    void UnbindShaderResources(HdShaderCode const *shader) const;
 
     /// piecewise buffer binding utility
     /// (to be used for frustum culling, draw indirect result)
+    HD_API
     void BindBuffer(TfToken const &name,
-                    HdBufferResourceSharedPtr const &resource) const;
+                    HdBufferResourceGLSharedPtr const &resource) const;
+    HD_API
     void BindBuffer(TfToken const &name,
-                    HdBufferResourceSharedPtr const &resource,
+                    HdBufferResourceGLSharedPtr const &resource,
                     int offset, int level=-1) const;
+    HD_API
     void UnbindBuffer(TfToken const &name,
-                      HdBufferResourceSharedPtr const &resource,
+                      HdBufferResourceGLSharedPtr const &resource,
                       int level=-1) const;
 
     /// bind(update) a standalone uniform (unsigned int)
+    HD_API
     void BindUniformui(TfToken const &name, int count,
                        const unsigned int *value) const;
 
     /// bind a standalone uniform (signed int, ivec2, ivec3, ivec4)
+    HD_API
     void BindUniformi(TfToken const &name, int count, const int *value) const;
 
     /// bind a standalone uniform array (int[N])
+    HD_API
     void BindUniformArrayi(TfToken const &name, int count, const int *value) const;
 
     /// bind a standalone uniform (float, vec2, vec3, vec4, mat4)
+    HD_API
     void BindUniformf(TfToken const &name, int count, const float *value) const;
 
     /// Returns binding point.
@@ -328,5 +369,8 @@ private:
     _BindingMap _bindingMap;
     int _numReservedTextureUnits;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_RESOURCE_BINDER_H

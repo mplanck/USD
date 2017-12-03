@@ -21,52 +21,143 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/tf/pathUtils.h"
 
+#include "pxr/pxr.h"
+#include "pxr/base/tf/pathUtils.h"
+#include "pxr/base/tf/diagnostic.h"
+#include "pxr/base/tf/fileUtils.h"
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/arch/systemInfo.h"
-
-#include <boost/bind.hpp>
-#include <boost/scoped_array.hpp>
+#include "pxr/base/arch/fileSystem.h"
+#include "pxr/base/arch/errno.h"
 
 #include <algorithm>
+#include <cctype>
 #include <errno.h>
-#include <glob.h>
 #include <limits.h>
 #include <string>
 #include <sys/stat.h>
 #include <utility>
 #include <vector>
 
+#if defined(ARCH_OS_WINDOWS)
+#include <Windows.h>
+#include <Shlwapi.h>
+#else
+#include <glob.h>
+#endif
+
 using std::pair;
 using std::string;
 using std::vector;
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+namespace {
+
+// Expands symlinks in path.  Used on Windows as a partial replacement
+// for realpath(), partial because is doesn't handle /./, /../ and
+// duplicate slashes.
+std::string
+_ExpandSymlinks(const std::string& path)
+{
+    // Find the first directory in path that's a symbolic link, if any,
+    // and the remaining part of the path.
+    std::string::size_type i = path.find_first_of("/\\");
+    while (i != std::string::npos) {
+        const std::string prefix = path.substr(0, i);
+        if (TfIsLink(prefix)) {
+            // Expand the link and repeat with the new path.
+            return _ExpandSymlinks(TfReadLink(prefix) + path.substr(i));
+        }
+        else {
+            i = path.find_first_of("/\\", i + 1);
+        }
+    }
+
+    // No ancestral symlinks.
+    if (TfIsLink(path)) {
+        return _ExpandSymlinks(TfReadLink(path));
+    }
+
+    // No links at all.
+    return path;
+}
+
+void
+_ClearError()
+{
+#if defined(ARCH_OS_WINDOWS)
+    SetLastError(ERROR_SUCCESS);
+#else
+    errno = 0;
+#endif
+}
+
+void
+_GetError(std::string* err)
+{
+    if (err->empty()) {
+#if defined(ARCH_OS_WINDOWS)
+        *err = ArchStrSysError(GetLastError());
+#else
+        *err = errno ? ArchStrerror() : std::string();
+#endif
+    }
+}
+
+} // anonymous namespace
+
 string
 TfRealPath(string const& path, bool allowInaccessibleSuffix, string* error)
 {
-    if (path.empty())
-        return string();
-
     string localError;
-    if (not error)
+    if (!error)
         error = &localError;
     else
         error->clear();
+
+    if (path.empty())
+        return string();
 
     string suffix, prefix = path;
 
     if (allowInaccessibleSuffix) {
         string::size_type split = TfFindLongestAccessiblePrefix(path, error);
-        if (not error->empty())
+        if (!error->empty())
             return string();
 
         prefix = string(path, 0, split);
         suffix = string(path, split);
     }
 
-    char resolved[PATH_MAX];
-    return TfAbsPath(TfSafeString(realpath(prefix.c_str(), resolved)) + suffix);
+    if (prefix.empty()) {
+        return TfAbsPath(suffix);
+    }
+
+#if defined(ARCH_OS_WINDOWS)
+    // Expand all symbolic links.
+    if (!TfPathExists(prefix)) {
+        *error = "the named file does not exist";
+        return string();
+    }
+    std::string resolved = _ExpandSymlinks(prefix);
+
+    // Make sure drive letters are always lower-case out of TfRealPath on
+    // Windows -- this is so that we can be sure we can reliably use the
+    // paths as keys in tables, etc.
+    if (resolved[0] && resolved[1] == ':') {
+        resolved[0] = tolower(resolved[0]);
+    }
+    return TfAbsPath(resolved + suffix);
+#else
+    char resolved[ARCH_PATH_MAX];
+    if (!realpath(prefix.c_str(), resolved)) {
+        *error = ArchStrerror(errno);
+        return string();
+    }
+    return TfAbsPath(resolved + suffix);
+#endif
 }
 
 string::size_type
@@ -82,7 +173,7 @@ TfFindLongestAccessiblePrefix(string const &path, string* error)
             if (lhs == rhs)
                 return false;
             if (lhs == npos)
-                return not Accessible(str, rhs, err);
+                return !Accessible(str, rhs, err);
             if (rhs == npos)
                 return Accessible(str, lhs, err);
             return lhs < rhs;
@@ -90,43 +181,46 @@ TfFindLongestAccessiblePrefix(string const &path, string* error)
 
         static bool Accessible(string const &str, size_type index, string *err) {
             string checkPath(str, 0, index);
-            struct stat st;
-            if (lstat(checkPath.c_str(), &st) == -1) {
-                if (errno != ENOENT and err->empty())
-                    *err = strerror(errno);
+
+            // False if non-existent or if a symlink and the target is
+            // non-existent.  Also false on any error.
+            _ClearError();
+            if (!TfPathExists(checkPath)) {
+                _GetError(err);
                 return false;
             }
-
-            // If the lstat succeeds and the target is a symbolic link, do
-            // an extra stat to see if the link is dangling.
-            if (S_ISLNK(st.st_mode)) {
-                if (stat(checkPath.c_str(), &st) == -1) {
-                    if (err->empty()) {
-                        if (errno == ENOENT)
-                            *err = "encountered dangling symbolic link";
-                        else
-                            *err = strerror(errno);
-                    }
-                    return false;
+            if (TfIsLink(checkPath) &&
+                !TfPathExists(checkPath, /* resolveSymlinks = */ true)) {
+                _GetError(err);
+                if (err->empty()) {
+                    *err = "encountered dangling symbolic link";
                 }
             }
-
-            // Path exists, no errors occurred.
-            return true;
+            else {
+                _GetError(err);
+            }
+            return err->empty();
         }
     };
 
     // Build a vector of split point indexes.
     vector<size_type> splitPoints;
+#if defined(ARCH_OS_WINDOWS)
+    for (size_type p = path.find_first_of("/\\", path.find_first_not_of("/\\"));
+         p != npos; p = path.find_first_of("/\\", p+1))
+#else
     for (size_type p = path.find('/', path.find_first_not_of('/'));
          p != npos; p = path.find('/', p+1))
+#endif
         splitPoints.push_back(p);
     splitPoints.push_back(path.size());
 
     // Lower-bound to find first non-existent path.
     vector<size_type>::iterator result =
         std::lower_bound(splitPoints.begin(), splitPoints.end(), npos,
-                         boost::bind(_Local::Compare, path, _1, _2, error));
+                         std::bind(_Local::Compare, path,
+                                   std::placeholders::_1,
+                                   std::placeholders::_2, error));
 
     // begin means nothing existed, end means everything did, else prior is last
     // existing path.
@@ -157,9 +251,9 @@ _NextToken(Iter i, Iter end)
 {
     pair<Iter, Iter> t;
     for (t.first = i;
-         t.first != end and *t.first == '/'; ++t.first) {}
+         t.first != end && *t.first == '/'; ++t.first) {}
     for (t.second = t.first;
-         t.second != end and *t.second != '/'; ++t.second) {}
+         t.second != end && *t.second != '/'; ++t.second) {}
     return t;
 }
 
@@ -167,17 +261,15 @@ template <class Iter>
 inline TokenType
 _GetTokenType(pair<Iter, Iter> t) {
     size_t len = distance(t.first, t.second);
-    if (len == 1 and t.first[0] == '.')
+    if (len == 1 && t.first[0] == '.')
         return Dot;
-    if (len == 2 and t.first[0] == '.' and t.first[1] == '.')
+    if (len == 2 && t.first[0] == '.' && t.first[1] == '.')
         return DotDot;
     return Elem;
 }
 
-} // anon
-
 string
-TfNormPath(string const &inPath)
+_NormPath(string const &inPath)
 {
     // We take one pass through the string, transforming it into a normalized
     // path in-place.  This works since the normalized path never grows, except
@@ -272,7 +364,7 @@ TfNormPath(string const &inPath)
             // If there are no more Elems to consume with DotDots and this is a
             // relative path, or this token is already a DotDot, then copy it to
             // the output.
-            if ((rstart == path.rend() and backToken.first == rstart) or
+            if ((rstart == path.rend() && backToken.first == rstart) ||
                 _GetTokenType(backToken) == DotDot) {
                 path[writeIdx++] = '.';
                 path[writeIdx++] = '.';
@@ -291,7 +383,7 @@ TfNormPath(string const &inPath)
     // Remove a trailing slash if we wrote one.  We're careful to use const
     // iterators here to avoid incurring a string copy if it's not necessary (in
     // the case of libstdc++'s copy-on-write basic_string)
-    if (writeIdx > firstWriteIdx and cbegin(path)[writeIdx-1] == '/')
+    if (writeIdx > firstWriteIdx && cbegin(path)[writeIdx-1] == '/')
         --writeIdx;
 
     // Trim the string to length if necessary.
@@ -305,19 +397,58 @@ TfNormPath(string const &inPath)
     return path;
 }
 
+} // anon
+
+string
+TfNormPath(string const &inPath)
+{
+#if defined(ARCH_OS_WINDOWS)
+    // Convert backslashes to forward slashes.
+    string path = TfStringReplace(inPath, "\\", "/");
+
+    // Extract the drive specifier.  Note that we don't correctly handle
+    // UNC paths or paths that start with \\? (which allow longer paths).
+    //
+    // Also make sure drive letters are always lower-case out of TfNormPath
+    // on Windows -- this is so that we can be sure we can reliably use the
+    // paths as keys in tables, etc.
+    string prefix;
+    if (path.size() >= 2 && path[1] == ':') {
+        prefix.assign(2, ':');
+        prefix[0] = std::tolower(path[0]);
+        path.erase(0, 2);
+    }
+
+    // Normalize and prepend drive specifier, if any.
+    return prefix + _NormPath(path);
+#else
+    return _NormPath(inPath);
+#endif // defined(ARCH_OS_WINDOWS)
+}
+
 string
 TfAbsPath(string const& path)
 {
     if (path.empty()) {
         return path;
     }
-    else if (TfStringStartsWith(path, "/")) {
+
+#if defined(ARCH_OS_WINDOWS)
+    char buffer[ARCH_PATH_MAX];
+    if (GetFullPathName(path.c_str(), ARCH_PATH_MAX, buffer, nullptr)) {
+        return buffer;
+    }
+    else {
+        return path;
+    }
+#else
+    if (TfStringStartsWith(path, "/")) {
         return TfNormPath(path);
     }
 
-    boost::scoped_array<char> cwd(new char[PATH_MAX]);
+    std::unique_ptr<char[]> cwd(new char[ARCH_PATH_MAX]);
 
-    if (getcwd(cwd.get(), PATH_MAX) == NULL) {
+    if (getcwd(cwd.get(), ARCH_PATH_MAX) == NULL) {
         // CODE_COVERAGE_OFF hitting this would require creating a directory,
         // chdir'ing into it, deleting that directory, *then* calling this
         // function.
@@ -326,26 +457,46 @@ TfAbsPath(string const& path)
     }
 
     return TfNormPath(TfSafeString(cwd.get()) + "/" + path);
+#endif
+}
+
+string
+TfGetExtension(string const& path)
+{
+    static const string emptyPath;
+
+    if (path.empty()) {
+        return emptyPath;
+    }
+
+    const std::string fileName = TfGetBaseName(path);
+
+    // If this is a dot file with no extension (e.g. /some/path/.folder), then
+    // we return an empty string.
+    if (TfStringGetBeforeSuffix(fileName).empty()) {
+        return emptyPath;
+    }
+
+    return TfStringGetSuffix(fileName);
 }
 
 string
 TfReadLink(string const& path)
 {
-    if (path.empty()) {
-        return path;
-    }
-
-    boost::scoped_array<char> buf(new char[PATH_MAX]);
-    ssize_t len;
-
-    if ((len = readlink(path.c_str(), buf.get(), PATH_MAX)) == -1) {
-        return string();
-    }
-    buf.get()[len] = '\0';
-
-    return TfSafeString(buf.get());
+    return ArchReadLink(path.c_str());
 }
 
+bool TfIsRelativePath(std::string const& path)
+{
+#if defined(ARCH_OS_WINDOWS)
+    return path.empty() ||
+        (PathIsRelative(path.c_str()) && path[0] != '/' && path[0] != '\\');
+#else
+    return path.empty() || path[0] != '/';
+#endif
+}
+
+#if !defined(ARCH_OS_WINDOWS)
 vector<string>
 TfGlob(vector<string> const& paths, unsigned int flags)
 {
@@ -375,6 +526,108 @@ TfGlob(vector<string> const& paths, unsigned int flags)
     return results;
 }
 
+#else
+
+namespace {
+
+static
+void
+Tf_Glob(
+    vector<string>* result,
+    const std::string& prefix,
+    const std::string& pattern,
+    unsigned int flags)
+{
+    // Search for the first wildcard in pattern.
+    const string::size_type i = pattern.find_first_of("*?");
+
+    if (i == string::npos) {
+        // No more patterns so we simply need to see if the file exists.
+        // Conveniently GetFileAttributes() works on paths with a trailing
+        // backslash.
+        string path = prefix + pattern;
+        const DWORD attributes = GetFileAttributes(path.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES) {
+            // File exists.
+
+            // Append directory mark if necessary.
+            if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+                if ((flags & ARCH_GLOB_MARK) && path.back() != '\\') {
+                    path.push_back('\\');
+                }
+            }
+
+            result->push_back(path);
+        }
+    }
+    else {
+        // There are additional patterns to glob.  Find the next directory
+        // after the wildcard.
+        string::size_type j = pattern.find_first_of('\\', i);
+        if (j == string::npos) {
+            // We've bottomed out on the pattern.
+            j = pattern.size();
+        }
+
+        // Construct the remaining pattern, if any.
+        const string remainingPattern = pattern.substr(j);
+
+        // Construct the leftmost pattern.
+        const string leftmostPattern = prefix + pattern.substr(0, j);
+
+        // Construct the leftmost pattern's directory. 
+        const string leftmostDir = TfGetPathName(leftmostPattern);
+
+        // Glob the leftmost pattern.
+        WIN32_FIND_DATA data;
+        HANDLE find = FindFirstFile(leftmostPattern.c_str(), &data);
+        if (find != INVALID_HANDLE_VALUE) {
+            do {
+                // Recurse with next pattern.
+                Tf_Glob(result, leftmostDir + data.cFileName,
+                        remainingPattern, flags);
+            } while (FindNextFile(find, &data));
+            FindClose(find);
+        }
+    }
+}
+
+}
+
+vector<string>
+TfGlob(vector<string> const& paths, unsigned int flags)
+{
+    vector<string> result;
+
+    for (auto path: paths) {
+        const size_t n = result.size();
+
+        // Convert slashes to backslashes for Windows.
+        path = TfStringReplace(path, "/", "\\");
+
+        // Do the real work.
+        Tf_Glob(&result, "", path, flags);
+
+        // If no match and NOCHECK then append the input.
+        if ((flags & ARCH_GLOB_NOCHECK) && n == result.size()) {
+            result.push_back(path);
+        }
+    }
+
+    if ((flags & ARCH_GLOB_NOSORT) == 0) {
+        std::sort(result.begin(), result.end());
+    }
+
+    // Convert to forward slashes.
+    for (auto& path: result) {
+        path = TfStringReplace(path, "\\", "/");
+    }
+
+    return result;
+}
+
+#endif
+
 vector<string>
 TfGlob(string const& path, unsigned int flags)
 {
@@ -382,3 +635,5 @@ TfGlob(string const& path, unsigned int flags)
         ? vector<string>()
         : TfGlob(vector<string>(1, path), flags);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

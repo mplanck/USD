@@ -24,6 +24,10 @@
 #ifndef USDRI_GENERATED_RISPATTERN_H
 #define USDRI_GENERATED_RISPATTERN_H
 
+/// \file usdRi/risPattern.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdRi/api.h"
 #include "pxr/usd/usdRi/risObject.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
@@ -37,12 +41,16 @@
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfAssetPath;
 
 // -------------------------------------------------------------------------- //
 // RISPATTERN                                                                 //
 // -------------------------------------------------------------------------- //
 
+/// \class UsdRiRisPattern
+///
 /// Represents a ris pattern object. Multiple of these can be assigned.
 ///
 class UsdRiRisPattern : public UsdRiRisObject
@@ -53,6 +61,11 @@ public:
     /// true, GetStaticPrimDefinition() will return a valid prim definition with
     /// a non-empty typeName.
     static const bool IsConcrete = true;
+
+    /// Compile-time constant indicating whether or not this class inherits from
+    /// UsdTyped. Types which inherit from UsdTyped can impart a typename on a
+    /// UsdPrim.
+    static const bool IsTyped = true;
 
     /// Construct a UsdRiRisPattern on UsdPrim \p prim .
     /// Equivalent to UsdRiRisPattern::Get(prim.GetStage(), prim.GetPath())
@@ -72,15 +85,17 @@ public:
     }
 
     /// Destructor.
+    USDRI_API
     virtual ~UsdRiRisPattern();
 
     /// Return a vector of names of all pre-declared attributes for this schema
     /// class and all its ancestor classes.  Does not include attributes that
     /// may be authored by custom/extended methods of the schemas involved.
+    USDRI_API
     static const TfTokenVector &
     GetSchemaAttributeNames(bool includeInherited=true);
 
-    /// \brief Return a UsdRiRisPattern holding the prim adhering to this
+    /// Return a UsdRiRisPattern holding the prim adhering to this
     /// schema at \p path on \p stage.  If no prim exists at \p path on
     /// \p stage, or if the prim at that path does not adhere to this schema,
     /// return an invalid schema object.  This is shorthand for the following:
@@ -89,10 +104,11 @@ public:
     /// UsdRiRisPattern(stage->GetPrimAtPath(path));
     /// \endcode
     ///
+    USDRI_API
     static UsdRiRisPattern
     Get(const UsdStagePtr &stage, const SdfPath &path);
 
-    /// \brief Attempt to ensure a \a UsdPrim adhering to this schema at \p path
+    /// Attempt to ensure a \a UsdPrim adhering to this schema at \p path
     /// is defined (according to UsdPrim::IsDefined()) on this stage.
     ///
     /// If a prim adhering to this schema at \p path is already defined on this
@@ -114,17 +130,20 @@ public:
     /// specify this schema class, in case a stronger typeName opinion overrides
     /// the opinion at the current EditTarget.
     ///
+    USDRI_API
     static UsdRiRisPattern
     Define(const UsdStagePtr &stage, const SdfPath &path);
 
 private:
     // needs to invoke _GetStaticTfType.
     friend class UsdSchemaRegistry;
+    USDRI_API
     static const TfType &_GetStaticTfType();
 
     static bool _IsTypedSchema();
 
     // override SchemaBase virtuals.
+    USDRI_API
     virtual const TfType &_GetTfType() const;
 
 public:
@@ -132,10 +151,14 @@ public:
     // Feel free to add custom code below this line, it will be preserved by 
     // the code generator. 
     //
-    // Just remember to close the class delcaration with }; and complete the
-    // include guard with #endif
+    // Just remember to: 
+    //  - Close the class declaration with }; 
+    //  - Close the namespace with PXR_NAMESPACE_CLOSE_SCOPE
+    //  - Close the include guard with #endif
     // ===================================================================== //
     // --(BEGIN CUSTOM CODE)--
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

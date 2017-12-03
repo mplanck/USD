@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/attribute.h"
 #include "pxr/usd/usd/relationship.h"
@@ -35,6 +36,7 @@
 #include "pxr/usd/sdf/primSpec.h"
 
 #include "pxr/base/tf/pyContainerConversions.h"
+#include "pxr/base/tf/pyFunction.h"
 #include "pxr/base/tf/pyResultConversions.h"
 
 #include <boost/python/class.hpp>
@@ -48,12 +50,50 @@ using std::vector;
 
 using namespace boost::python;
 
-static SdfPayload
-_GetPayload(const UsdPrim &self)
+PXR_NAMESPACE_OPEN_SCOPE
+
+bool 
+Usd_PrimIsA(const UsdPrim& prim, const TfType& schemaType)
 {
-    SdfPayload result;
-    self.GetPayload(&result);
-    return result;
+    return prim._IsA(schemaType);
+}
+
+const PcpPrimIndex &
+Usd_PrimGetSourcePrimIndex(const UsdPrim& prim)
+{
+    return prim._GetSourcePrimIndex();
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
+
+static SdfPathVector
+_FindAllAttributeConnectionPaths(
+    UsdPrim const &self,
+    boost::python::object pypred,
+    bool recurseOnSources)
+{
+    using Predicate = std::function<bool (UsdAttribute const &)>;
+    Predicate pred;
+    if (pypred != boost::python::object())
+        pred = boost::python::extract<Predicate>(pypred);
+    return self.FindAllAttributeConnectionPaths(pred, recurseOnSources);
+}
+
+static SdfPathVector
+_FindAllRelationshipTargetPaths(
+    UsdPrim const &self,
+    boost::python::object pypred,
+    bool recurseOnTargets)
+{
+    using Predicate = std::function<bool (UsdRelationship const &)>;
+    Predicate pred;
+    if (pypred != boost::python::object())
+        pred = boost::python::extract<Predicate>(pypred);
+    return self.FindAllRelationshipTargetPaths(pred, recurseOnTargets);
 }
 
 static string
@@ -67,8 +107,16 @@ __repr__(const UsdPrim &self)
     }
 }
 
+} // anonymous namespace 
+
 void wrapUsdPrim()
 {
+    // Predicate signature for FindAllRelationshipTargetPaths().
+    TfPyFunctionFromPython<bool (UsdRelationship const &)>();
+
+    // Predicate signature for FindAllAttributeConnectionPaths().
+    TfPyFunctionFromPython<bool (UsdAttribute const &)>();
+
     class_<UsdPrim, bases<UsdObject> >("Prim")
         .def(Usd_ObjectSubclass())
         .def("__repr__", __repr__)
@@ -136,7 +184,7 @@ void wrapUsdPrim()
 
         .def("SetPropertyOrder", &UsdPrim::SetPropertyOrder, arg("order"))
 
-        .def("IsA", &UsdPrim::_IsA, arg("schemaType"))
+        .def("IsA", &Usd_PrimIsA, arg("schemaType"))
 
         .def("GetChild", &UsdPrim::GetChild, arg("name"))
 
@@ -154,6 +202,7 @@ void wrapUsdPrim()
         .def("GetFilteredNextSibling",
              (UsdPrim (UsdPrim::*)(const Usd_PrimFlagsPredicate &) const)
              &UsdPrim::GetFilteredNextSibling)
+        .def("IsPseudoRoot", &UsdPrim::IsPseudoRoot)
 
         .def("HasVariantSets", &UsdPrim::HasVariantSets)
         .def("GetVariantSets", &UsdPrim::GetVariantSets)
@@ -162,6 +211,7 @@ void wrapUsdPrim()
 
         .def("GetPrimIndex", &UsdPrim::GetPrimIndex,
              return_value_policy<return_by_value>())
+        .def("ComputeExpandedPrimIndex", &UsdPrim::ComputeExpandedPrimIndex)
 
         .def("CreateAttribute",
              (UsdAttribute (UsdPrim::*)(
@@ -188,6 +238,10 @@ void wrapUsdPrim()
         .def("GetAttribute", &UsdPrim::GetAttribute, arg("attrName"))
         .def("HasAttribute", &UsdPrim::HasAttribute, arg("attrName"))
 
+        .def("FindAllAttributeConnectionPaths",
+             &_FindAllAttributeConnectionPaths,
+             (arg("predicate")=object(), arg("recurseOnSources")=false))
+        
         .def("CreateRelationship",
              (UsdRelationship (UsdPrim::*)(const TfToken &, bool) const)
              &UsdPrim::CreateRelationship, (arg("name"), arg("custom")=true))
@@ -204,9 +258,11 @@ void wrapUsdPrim()
         .def("GetRelationship", &UsdPrim::GetRelationship, arg("relName"))
         .def("HasRelationship", &UsdPrim::HasRelationship, arg("relName"))
 
+        .def("FindAllRelationshipTargetPaths",
+             &_FindAllRelationshipTargetPaths,
+             (arg("predicate")=object(), arg("recurseOnTargets")=false))
 
         .def("HasPayload", &UsdPrim::HasPayload)
-        .def("GetPayload", _GetPayload)
         .def("SetPayload",
              (bool (UsdPrim::*)(const SdfPayload &) const)
              &UsdPrim::SetPayload, (arg("payload")))
@@ -218,7 +274,7 @@ void wrapUsdPrim()
              &UsdPrim::SetPayload, (arg("layer"), arg("primPath")))
         .def("ClearPayload", &UsdPrim::ClearPayload)
 
-        .def("Load", &UsdPrim::Load)
+        .def("Load", &UsdPrim::Load, (arg("policy")=UsdLoadWithDescendants))
         .def("Unload", &UsdPrim::Unload)
 
         .def("GetReferences", &UsdPrim::GetReferences)
@@ -244,13 +300,13 @@ void wrapUsdPrim()
         .def("IsInMaster", &UsdPrim::IsInMaster)
         .def("GetMaster", &UsdPrim::GetMaster)
 
+        .def("IsInstanceProxy", &UsdPrim::IsInstanceProxy)
+        .def("GetPrimInMaster", &UsdPrim::GetPrimInMaster)
+
         // Exposed only for testing and debugging.
-        .def("_GetSourcePrimIndex", &UsdPrim::_GetSourcePrimIndex,
+        .def("_GetSourcePrimIndex", &Usd_PrimGetSourcePrimIndex,
              return_value_policy<return_by_value>())
         ;
 
     TfPyRegisterStlSequencesFromPython<UsdPrim>();
 }
-
-
-

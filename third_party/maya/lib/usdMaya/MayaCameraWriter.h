@@ -24,7 +24,12 @@
 #ifndef _usdExport_MayaCameraWriter_h_
 #define _usdExport_MayaCameraWriter_h_
 
+#include "pxr/pxr.h"
 #include "usdMaya/MayaTransformWriter.h"
+#include "usdMaya/usdWriteJobCtx.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class UsdGeomCamera;
 
@@ -32,15 +37,18 @@ class UsdGeomCamera;
 class MayaCameraWriter : public MayaTransformWriter
 {
   public:
-    MayaCameraWriter(MDagPath & iDag, UsdStageRefPtr stage, const JobExportArgs & iArgs);
+    MayaCameraWriter(const MDagPath & iDag, const SdfPath& uPath, usdWriteJobCtx& jobCtx);
     virtual ~MayaCameraWriter() {};
 
-    virtual UsdPrim write(const UsdTimeCode &usdTime);
+    virtual void write(const UsdTimeCode &usdTime);
     
   protected:
     bool writeCameraAttrs(const UsdTimeCode &usdTime, UsdGeomCamera &primSchema);
 };
 
-typedef shared_ptr < MayaCameraWriter > MayaCameraWriterPtr;
+typedef std::shared_ptr<MayaCameraWriter> MayaCameraWriterPtr;
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // _usdExport_MayaCameraWriter_h_

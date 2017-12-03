@@ -21,18 +21,21 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file pxOsd/refinerFactory.h
-///
-
 #ifndef PXOSD_REFINER_FACTORY_H
 #define PXOSD_REFINER_FACTORY_H
 
+/// \file pxOsd/refinerFactory.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/pxOsd/api.h"
 #include "pxr/imaging/pxOsd/meshTopology.h"
 #include "pxr/base/vt/array.h"
 
-#include <opensubdiv3/far/topologyRefiner.h>
+#include <opensubdiv/far/topologyRefiner.h>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 typedef boost::shared_ptr<class OpenSubdiv::Far::TopologyRefiner> PxOsdTopologyRefinerSharedPtr;
 
@@ -41,10 +44,12 @@ class PxOsdRefinerFactory {
 public:
 
     /// Returns an OpenSubdiv TopologyRefiner
+    PXOSD_API
     static PxOsdTopologyRefinerSharedPtr Create(
         PxOsdMeshTopology const & topology, TfToken name=TfToken());
 
     /// Returns an OpenSubdiv TopologyRefiner with faceVarying topology
+    PXOSD_API
     static PxOsdTopologyRefinerSharedPtr Create(
         PxOsdMeshTopology const & topology,
         std::vector<VtIntArray> const &fvarTopologies,
@@ -52,5 +57,7 @@ public:
 
 };
 
-#endif // PXOSD_REFINER_FACTORY_H
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // PXOSD_REFINER_FACTORY_H

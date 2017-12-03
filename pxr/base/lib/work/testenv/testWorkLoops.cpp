@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/work/loops.h"
 
 #include "pxr/base/work/arenaDispatcher.h"
@@ -29,12 +31,16 @@
 #include "pxr/base/tf/stopwatch.h"
 #include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/staticData.h"
+#include "pxr/base/arch/fileSystem.h"
 
-#include <boost/bind.hpp>
-#include <boost/foreach.hpp>
+#include <functional>
 
 #include <cstdio>
 #include <iostream>
+
+using namespace std::placeholders;
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 static void
 _Double(size_t begin, size_t end, std::vector<int> *v)
@@ -46,7 +52,7 @@ _Double(size_t begin, size_t end, std::vector<int> *v)
 static void
 _DoubleAll(std::vector<int> &v)
 {
-    BOOST_FOREACH(int &i, v) {
+    for (int &i : v) {
         i *= 2;
     }
 }
@@ -84,7 +90,7 @@ _DoTBBTest(bool verify, const size_t arraySize, const size_t numIterations)
     sw.Start();
     for (size_t i = 0; i < numIterations; i++) {
 
-        WorkParallelForN(arraySize, boost::bind(&_Double, _1, _2, &v));       
+        WorkParallelForN(arraySize, std::bind(&_Double, _1, _2, &v));       
 
     }
 
@@ -105,7 +111,7 @@ _DoTBBTestForEach(
 {
     static const size_t partitionSize = 20;
     std::vector< std::vector<int> > vs(partitionSize);
-    BOOST_FOREACH(std::vector<int> &v, vs) {
+    for (auto& v : vs) {
         _PopulateVector(arraySize / partitionSize, v);
     }
 
@@ -119,7 +125,7 @@ _DoTBBTestForEach(
 
     if (verify) {
         TF_AXIOM(numIterations == 1);
-        BOOST_FOREACH(const std::vector<int> &v, vs) {
+        for (const auto& v : vs) {
             _VerifyDoubled(v);
         }
     }
@@ -134,32 +140,53 @@ _DoSerialTest()
     const size_t N = 200;
     std::vector<int> v;
     _PopulateVector(N, v);
-    WorkSerialForN(N, boost::bind(&_Double, _1, _2, &v));
+    WorkSerialForN(N, std::bind(&_Double, _1, _2, &v));
     _VerifyDoubled(v);
+}
+
+// Make sure that the API for WorkParallelForN and WorkSerialForN can be
+// interchanged.  
+void
+_DoSignatureTest()
+{
+    struct F
+    {
+        // Test that this can be non-const
+        void operator()(size_t start, size_t end) {
+        }
+    };
+
+    F f;
+
+    WorkParallelForN(100, f);
+    WorkSerialForN(100, f);
+
+    WorkParallelForN(100, F());
+    WorkSerialForN(100, F());
 }
 
 
 int
 main(int argc, char **argv)
 {
-    const bool perfMode = ((argc > 1) and !strcmp(argv[1], "--perf")); 
+    const bool perfMode = ((argc > 1) && !strcmp(argv[1], "--perf")); 
     const size_t arraySize = 1000000;
     const size_t numIterations = perfMode ? 1000 : 1;
 
     WorkSetMaximumConcurrencyLimit();
 
     std::cout << "Initialized with " << 
-        WorkGetMaximumConcurrencyLimit() << " cores..." << std::endl;
+        WorkGetPhysicalConcurrencyLimit() << " cores..." << std::endl;
 
 
-    double tbbSeconds = _DoTBBTest(not perfMode, arraySize, numIterations);
+    double tbbSeconds = _DoTBBTest(!perfMode, arraySize, numIterations);
 
     std::cout << "TBB parallel_for took: " << tbbSeconds << " seconds" 
         << std::endl;
 
 
     double tbbForEachSeconds = _DoTBBTestForEach(
-        not perfMode, arraySize, numIterations);
+        !perfMode, arraySize, numIterations);
 
     std::cout << "TBB parallel_for_each took: " << tbbForEachSeconds
         << " seconds" << std::endl;
@@ -167,11 +194,12 @@ main(int argc, char **argv)
 
     _DoSerialTest();
 
+    _DoSignatureTest();
 
     if (perfMode) {
 
         // XXX:perfgen only accepts metric names ending in _time.  See bug 97317
-        FILE *outputFile = fopen("perfstats.raw", "w");
+        FILE *outputFile = ArchOpenFile("perfstats.raw", "w");
         fprintf(outputFile,
             "{'profile':'TBB Loops_time','metric':'time','value':%f,'samples':1}\n",
             tbbSeconds);

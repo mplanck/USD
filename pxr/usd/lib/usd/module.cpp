@@ -21,13 +21,17 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/tf/pyModule.h"
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 TF_WRAP_MODULE
 {
     TF_WRAP(UsdCommon);
     TF_WRAP(UsdNotice);
     TF_WRAP(UsdTimeCode);
+    TF_WRAP(UsdTokens);
     TF_WRAP(UsdInterpolationType);
 
     // UsdObject and its subclasses.
@@ -45,7 +49,7 @@ TF_WRAP_MODULE
     TF_WRAP(UsdReferences);
     TF_WRAP(UsdSchemaRegistry);
     TF_WRAP(UsdSpecializes);
-    TF_WRAP(UsdTreeIterator);
+    TF_WRAP(UsdPrimRange);
     TF_WRAP(UsdVariantSets);
 
     // SchemaBase and subclasses.
@@ -56,12 +60,16 @@ TF_WRAP_MODULE
     TF_WRAP(UsdStage);
     TF_WRAP(UsdStageCache);
     TF_WRAP(UsdStageCacheContext);
+    TF_WRAP(UsdStagePopulationMask);
 
     // Generated schema.
     TF_WRAP(UsdClipsAPI);
+    TF_WRAP(UsdCollectionAPI);
     TF_WRAP(UsdModelAPI);
 
     // Miscellaenous classes
     TF_WRAP(UsdAttributeQuery);
     TF_WRAP(UsdCrateInfo);
+    TF_WRAP(UsdResolveInfo);
+    TF_WRAP(Version);
 }

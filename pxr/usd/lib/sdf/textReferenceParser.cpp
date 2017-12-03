@@ -23,18 +23,21 @@
 //
 ///
 /// \file sdf/textReferenceParser.cpp
-#include "pxr/usd/sdf/textReferenceParser.h"
 
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/textReferenceParser.h"
 #include "pxr/base/tf/staticTokens.h"
-#include "pxr/base/tracelite/trace.h"
-#include <boost/foreach.hpp>
+
 #include <boost/range/iterator_range.hpp>
 #include <boost/regex.hpp>
+
 #include <fstream>
 #include <sstream>
 
 using std::string;
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_DEFINE_PRIVATE_TOKENS(_Tokens,
     (baseAsset)
@@ -73,18 +76,37 @@ Sdf_ParseExternalReferences(
             "(asset|asset\\[\\])\\s+\\S+"
         ")\\s*=");
 
-    // Matches a reference, with optional label/revision specifier.
-    boost::regex assetRef("@([^@]+(?:[@#][^@,]+)?)?@");
-    
-    BOOST_FOREACH(const string& line, boost::make_iterator_range(begin, end)) {
+    // Matches a reference. These regexes are the asset regexes in the
+    // text file format parser. Combining them into a single regex here
+    // ensures we handle multiple references with different delimiters
+    // in a single line properly. 
+    //
+    // Note that having the same asset path in an external reference
+    // statement (with or without different delimiters) will result in
+    // duplicates in the corresponding output vector.
+    //
+    // The order of the regexes is important, otherwise an asset path
+    // like @@@foo.sdf@bar@@@ would match the shorter regex and cause
+    // the "@bar" part of the path to be ignored.
+    boost::regex assetRef(
+        "@@@((([^[:cntrl:]@]|@{1,2}[^@]|\\\\@@@)+)?(@{0,2}))@@@"
+        "|"
+        "@([^[:cntrl:]@]+)?@"
+        );
+
+    // Sub-expressions 1 and 5 contain the matched asset paths.
+    const int submatches[2] = { 1, 5 };
+
+    for (auto lineIter = begin; lineIter != end; ++lineIter) {
+        const string& line = *lineIter;
         // Look for an approximation of the most common kinds of comments, and
         // skip lines that match. This doesn't handle SLASHTERIX style
         // comments, and may also incorrectly identify lines as comments,
         // although this is not typically a problem.
         const size_t c = line.find_first_not_of(' ');
-        if (c != string::npos and
-            ((line[c] == '"') or
-             (line[c] == '/') or
+        if (c != string::npos &&
+            ((line[c] == '"') ||
+             (line[c] == '/') ||
              (line[c] == '#')))
             continue;
 
@@ -95,10 +117,11 @@ Sdf_ParseExternalReferences(
         if (type == _Tokens->baseAsset)
             continue;
 
-        boost::sregex_token_iterator it(line.begin(), line.end(), assetRef, 1);
+        boost::sregex_token_iterator it(
+            line.begin(), line.end(), assetRef, submatches);
         boost::sregex_token_iterator end;
         for ( ; it != end ; ++it) {
-            if (not it->length())
+            if (!it->length())
                 continue;
 
             // If we extracted a type, put the path in the correct bucket. Put
@@ -113,7 +136,7 @@ Sdf_ParseExternalReferences(
                 references->push_back(*it);
         }
 
-        if (not type.empty() and line.find(']') != string::npos)
+        if (!type.empty() && line.find(']') != string::npos)
             type.clear();
     }
 }
@@ -130,23 +153,23 @@ SdfExtractExternalReferences(
         return;
     }
 
-    if (not subLayers) {
+    if (!subLayers) {
         TF_CODING_ERROR("Invalid subLayers pointer");
         return;
     }
 
-    if (not references) {
+    if (!references) {
         TF_CODING_ERROR("Invalid references pointer");
         return;
     }
 
-    if (not payloads) {
+    if (!payloads) {
         TF_CODING_ERROR("Invalid payloads pointer");
         return;
     }
 
     std::ifstream ifs(filePath.c_str());
-    if (not ifs) {
+    if (!ifs) {
         TF_RUNTIME_ERROR("Unable to open '%s' for reading.", filePath.c_str());
         return;
     }
@@ -164,17 +187,17 @@ SdfExtractExternalReferencesFromString(
     vector<string>* references,
     vector<string>* payloads)
 {
-    if (not subLayers) {
+    if (!subLayers) {
         TF_CODING_ERROR("Invalid subLayers pointer");
         return;
     }
 
-    if (not references) {
+    if (!references) {
         TF_CODING_ERROR("Invalid references pointer");
         return;
     }
 
-    if (not payloads) {
+    if (!payloads) {
         TF_CODING_ERROR("Invalid payloads pointer");
         return;
     }
@@ -186,3 +209,4 @@ SdfExtractExternalReferencesFromString(
         subLayers, references, payloads);
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE

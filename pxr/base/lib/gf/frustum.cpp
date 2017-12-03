@@ -21,8 +21,9 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/gf/frustum.h"
 
+#include "pxr/pxr.h"
+#include "pxr/base/gf/frustum.h"
 #include "pxr/base/gf/bbox3d.h"
 #include "pxr/base/gf/matrix4d.h"
 #include "pxr/base/gf/ostreamHelpers.h"
@@ -37,6 +38,8 @@
 #include <iostream>
 
 using namespace std;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // CODE_COVERAGE_OFF_GCOV_BUG
 TF_REGISTRY_FUNCTION(TfType) {
@@ -58,7 +61,6 @@ GfFrustum::GfFrustum() :
     _projectionType(GfFrustum::Perspective)
 {
     _rotation.SetIdentity();
-    _localToFrustum.SetIdentity();
 }
 
 GfFrustum::GfFrustum(const GfVec3d &position, const GfRotation &rotation,
@@ -70,8 +72,7 @@ GfFrustum::GfFrustum(const GfVec3d &position, const GfRotation &rotation,
     _window(window),
     _nearFar(nearFar),
     _viewDistance(viewDistance),
-    _projectionType(projectionType),
-    _localToFrustum(1.0)
+    _projectionType(projectionType)
 {
 }
 
@@ -82,8 +83,7 @@ GfFrustum::GfFrustum(const GfMatrix4d &camToWorldXf,
     _window(window),
     _nearFar(nearFar),
     _viewDistance(viewDistance),
-    _projectionType(projectionType),
-    _localToFrustum(1.0)
+    _projectionType(projectionType)
 {
     SetPositionAndRotationFromMatrix(camToWorldXf);
 }
@@ -195,14 +195,14 @@ GfFrustum::GetFOV(bool isFovVertical /* = false */)
 void
 GfFrustum::SetOrthographic(double left, double right,
                            double bottom, double top,
-                           double near, double far)
+                           double nearPlane, double farPlane)
 {
     _projectionType = GfFrustum::Orthographic;
 
     _window.SetMin(GfVec2d(left, bottom));
     _window.SetMax(GfVec2d(right, top));
-    _nearFar.SetMin(near);
-    _nearFar.SetMax(far);
+    _nearFar.SetMin(nearPlane);
+    _nearFar.SetMax(farPlane);
 
     _DirtyFrustumPlanes();
 }
@@ -210,7 +210,7 @@ GfFrustum::SetOrthographic(double left, double right,
 bool
 GfFrustum::GetOrthographic(double *left, double *right,
                            double *bottom, double *top,
-                           double *near, double *far) const
+                           double *nearPlane, double *farPlane) const
 {
     if (_projectionType != GfFrustum::Orthographic)
         return false;
@@ -220,8 +220,8 @@ GfFrustum::GetOrthographic(double *left, double *right,
     *bottom = _window.GetMin()[1];
     *top    = _window.GetMax()[1];
 
-    *near   = _nearFar.GetMin();
-    *far    = _nearFar.GetMax();
+    *nearPlane	= _nearFar.GetMin();
+    *farPlane   = _nearFar.GetMax();
 
     return true;
 }
@@ -487,11 +487,11 @@ GfFrustum::Transform(const GfMatrix4d &matrix)
     GfVec2d wMax = frustum._window.GetMax();
     // Make sure left < right
     if ( wMin[0] > wMax[0] ) {
-        swap( wMin[0], wMax[0] );
+        std::swap( wMin[0], wMax[0] );
     }
     // Make sure bottom < top
     if ( wMin[1] > wMax[1] ) {
-        swap( wMin[1], wMax[1] );
+        std::swap( wMin[1], wMax[1] );
     }
     frustum._window.SetMin( wMin );
     frustum._window.SetMax( wMax );
@@ -648,6 +648,38 @@ GfFrustum::ComputeCorners() const
     // of the view matrix.
     GfMatrix4d m = ComputeViewInverse();
     for (int i = 0; i < 8; i++)
+        corners[i] = m.Transform(corners[i]);
+
+    return corners;
+}
+
+vector<GfVec3d>
+GfFrustum::ComputeCornersAtDistance(double d) const
+{
+    const GfVec2d &winMin = _window.GetMin();
+    const GfVec2d &winMax = _window.GetMax();
+
+    vector<GfVec3d> corners;
+    corners.reserve(4);
+
+    if (_projectionType == Perspective) {
+        // Similar to ComputeCorners
+        corners.push_back(GfVec3d(d * winMin[0], d * winMin[1], -d));
+        corners.push_back(GfVec3d(d * winMax[0], d * winMin[1], -d));
+        corners.push_back(GfVec3d(d * winMin[0], d * winMax[1], -d));
+        corners.push_back(GfVec3d(d * winMax[0], d * winMax[1], -d));
+    }
+    else {
+        corners.push_back(GfVec3d(winMin[0], winMin[1], -d));
+        corners.push_back(GfVec3d(winMax[0], winMin[1], -d));
+        corners.push_back(GfVec3d(winMin[0], winMax[1], -d));
+        corners.push_back(GfVec3d(winMax[0], winMax[1], -d));
+    }
+
+    // Each corner is then transformed into world space by the inverse
+    // of the view matrix.
+    const GfMatrix4d m = ComputeViewInverse();
+    for (int i = 0; i < 4; i++)
         corners[i] = m.Transform(corners[i]);
 
     return corners;
@@ -911,7 +943,7 @@ GfFrustum::_SegmentIntersects(GfVec3d const &p0, uint32_t p0Mask,
     
     // If either of the masks has all 6 planes set, the point is
     // inside the frustum, so there's an intersection.
-    if ((p0Mask == 0x3F) or (p1Mask == 0x3F))
+    if ((p0Mask == 0x3F) || (p1Mask == 0x3F))
         return true;
 
     // If we get here, the 2 points of the segment are both outside
@@ -1002,7 +1034,7 @@ GfFrustum::Intersects(const GfVec3d &p0,
     
     // If any of the masks has all 6 planes set, the point is inside
     // the frustum, so there's an intersection.
-    if ((p0Mask == 0x3F) or (p1Mask == 0x3F) or (p2Mask == 0x3F))
+    if ((p0Mask == 0x3F) || (p1Mask == 0x3F) || (p2Mask == 0x3F))
         return true;
 
     // If we get here, the 3 points of the triangle are all outside
@@ -1060,43 +1092,6 @@ GfFrustum::Intersects(const GfVec3d &p0,
     return false;
 }
 
-//----------------------------------------------------------------------
-// Local space intersection routines.
-//
-// These routines are the most efficient way to intersect geometry with
-// the frustum.
-//
-// For now, they consist simply of transforming the point into whatever
-// space the frustum is in (as set in GfFrustum::SetTransform). In the
-// future these routines can be made about twice as fast by replacing
-// _localToFrustum with a matrix that carries the point into the space
-// of the "normalized frustum". The normalized frustum has all its vertices
-// at with coordinates that are 0, 1, or -1.
-//
-bool
-GfFrustum::IntersectsInLocalSpace(const GfVec3d &p1) const
-{
-    GfVec3d frustumP1 = _localToFrustum.Transform(p1);
-    return Intersects( frustumP1);
-}
-
-bool
-GfFrustum::IntersectsInLocalSpace(const GfVec3d &p1, const GfVec3d &p2) const
-{
-    GfVec3d frustumP1 = _localToFrustum.Transform(p1);
-    GfVec3d frustumP2 = _localToFrustum.Transform(p2);
-    return Intersects( frustumP1, frustumP2);
-}
-
-bool
-GfFrustum::IntersectsInLocalSpace(const GfVec3d &p1, const GfVec3d &p2, const GfVec3d &p3) const
-{
-    GfVec3d frustumP1 = _localToFrustum.Transform(p1);
-    GfVec3d frustumP2 = _localToFrustum.Transform(p2);
-    GfVec3d frustumP3 = _localToFrustum.Transform(p3);
-    return Intersects( frustumP1, frustumP2, frustumP3);
-}
-
 void
 GfFrustum::_DirtyFrustumPlanes()
 {
@@ -1106,7 +1101,7 @@ GfFrustum::_DirtyFrustumPlanes()
 void
 GfFrustum::_CalculateFrustumPlanes() const
 {
-    if (not _planes.empty())
+    if (!_planes.empty())
         return;
 
     _planes.reserve(6);
@@ -1318,7 +1313,7 @@ GfFrustum::SetPositionAndRotationFromMatrix(
     // First conform matrix to be...
     GfMatrix4d conformedXf = camToWorldXf;
     // ... right handed
-    if (not conformedXf.IsRightHanded()) {
+    if (!conformedXf.IsRightHanded()) {
         static GfMatrix4d flip(GfVec4d(-1.0, 1.0, 1.0, 1.0));
         conformedXf = flip * conformedXf;
     }
@@ -1344,3 +1339,5 @@ operator<<(std::ostream& out, const GfFrustum& f)
 
     return out;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

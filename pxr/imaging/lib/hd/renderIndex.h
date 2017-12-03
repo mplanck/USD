@@ -24,96 +24,117 @@
 #ifndef HD_RENDER_INDEX_H
 #define HD_RENDER_INDEX_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/changeTracker.h"
 #include "pxr/imaging/hd/perfLog.h"
-#include "pxr/base/gf/vec4i.h"
+#include "pxr/imaging/hd/primTypeIndex.h"
+#include "pxr/imaging/hd/sortedIds.h"
+#include "pxr/imaging/hd/tokens.h"
+
+#include "pxr/imaging/hf/perfLog.h"
 
 #include "pxr/usd/sdf/path.h"
+
+#include "pxr/base/gf/vec4i.h"
+#include "pxr/base/tf/hashmap.h"
 
 #include <boost/noncopyable.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/smart_ptr.hpp>
-#include "pxr/base/tf/hashmap.h"
+
+#include <tbb/enumerable_thread_specific.h>
 
 #include <vector>
+#include <unordered_map>
+#include <memory>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+class HdRprim;
+class HdSprim;
+class HdBprim;
 class HdDrawItem;
 class HdRprimCollection;
 class HdSceneDelegate;
+class HdRenderDelegate;
+class HdExtComputation;
+class VtValue;
+class HdInstancer;
 
-typedef boost::shared_ptr<class HdLight> HdLightSharedPtr;
-typedef boost::shared_ptr<class HdDrawTarget> HdDrawTargetSharedPtr;
-typedef boost::shared_ptr<class HdCamera> HdCameraSharedPtr;
+
 typedef boost::shared_ptr<class HdDirtyList> HdDirtyListSharedPtr;
-typedef boost::shared_ptr<class HdRprim> HdRprimSharedPtr;
-typedef boost::shared_ptr<class HdRprim const> HdRprimConstSharedPtr;
-typedef boost::shared_ptr<class HdInstancer> HdInstancerSharedPtr;
-typedef boost::shared_ptr<class HdSurfaceShader> HdSurfaceShaderSharedPtr;
 typedef boost::shared_ptr<class HdTask> HdTaskSharedPtr;
-typedef boost::shared_ptr<class HdTexture> HdTextureSharedPtr;
+typedef boost::shared_ptr<class HdResourceRegistry> HdResourceRegistrySharedPtr;
+typedef std::vector<HdTaskSharedPtr> HdTaskSharedPtrVector;
+typedef std::unordered_map<TfToken,
+                           VtValue,
+                           TfToken::HashFunctor> HdTaskContext;
 
+/// \class HdRenderIndex
+///
 /// The mapping from client scenegraph to the render engine's scene.
 ///
 /// The HdRenderIndex only tracks primitives that result in draw calls and
 /// relies on the HdSceneDelegate to provide any hierarchical or other
 /// computed values.
 ///
-class HdRenderIndex : public boost::noncopyable {
+class HdRenderIndex final : public boost::noncopyable {
 public:
+    typedef std::vector<HdDrawItem const*> HdDrawItemPtrVector;
+    typedef std::unordered_map<TfToken, HdDrawItemPtrVector,
+                               boost::hash<TfToken> > HdDrawItemView;
 
-    // XXX: These should return iterator ranges, not vectors;
-    //      they also shouldn't be pointers.
-    typedef std::vector<HdDrawItem const*> HdDrawItemView;
-    typedef std::vector<HdLightSharedPtr> HdLightView;
-    typedef std::vector<HdDrawTargetSharedPtr> HdDrawTargetView;
+    /// Create a render index with the given render delegate.
+    /// Returns null if renderDelegate is null.
+    HD_API
+    static HdRenderIndex* New(HdRenderDelegate *renderDelegate) {
+        if (renderDelegate == nullptr) {
+            TF_CODING_ERROR(
+                "Null Render Delegate provided to create render index");
+            return nullptr;
+        }
+        return new HdRenderIndex(renderDelegate);
+    }
 
-    HdRenderIndex();
+    HD_API
     ~HdRenderIndex();
 
-    /// Clear all rprims, instancers, shaders and textures.
+    /// Clear all r (render), s (state) and b (buffer) prims.
+    HD_API
     void Clear();
 
-    /// Given a prim id and instance id, returns the prim path of the owner
-    SdfPath GetPrimPathFromPrimIdColor(GfVec4i const& primIdColor,
-                                       GfVec4i const& instanceIdColor,
-                                       int* instanceIndexOut = NULL) const;
+    /// Clear all entries in the render index under
+    /// the given root and belong to a specified delegate.
+    ///
+    /// Used for example to unload a delegate.
+    HD_API
+    void RemoveSubtree(const SdfPath &root, HdSceneDelegate* sceneDelegate);
+
+    // ---------------------------------------------------------------------- //
+    /// Given a prim id, returns the path of the correspoding rprim
+    /// or an empty path if none is found.
+    HD_API
+    SdfPath GetRprimPathFromPrimId(int primId) const;
  
     // ---------------------------------------------------------------------- //
     /// \name Synchronization
     // ---------------------------------------------------------------------- //
-
+    HD_API
     HdDrawItemView GetDrawItems(HdRprimCollection const& collection);
 
-    HdLightView GetLights();
-
-    /// Returns a list of all draw targets in the render index.
-    HdDrawTargetView GetDrawTargets();
-
     /// Synchronize all objects in the DirtyList
+    HD_API
     void Sync(HdDirtyListSharedPtr const &dirtyList);
 
     /// Processes all pending dirty lists 
-    void SyncAll();
-
-    /// Synchronize all cameras in the render index
-    void SyncCameras();
-
-    /// Synchronize all lights in the render index
-    void SyncLights();
-
-    /// Synchronize all draw targets in the render index
-    void SyncDrawTargets();
-
+    HD_API
+    void SyncAll(HdTaskSharedPtrVector const &tasks, HdTaskContext *taskContext);
 
     /// Returns a vector of Rprim IDs that are bound to the given DelegateID.
-    SdfPathVector const& GetDelegateRprimIDs(SdfPath const& delegateID) const;
 
-    /// For each delegate that has at least one child with dirty bits matching
-    /// the given dirtyMask, pushes the delegate ID into the given IDs vector.
-    /// The resulting vector is a list of all delegate IDs who have at least one
-    /// child that matches the mask.
-    void GetDelegateIDsWithDirtyRprims(int dirtyMask, SdfPathVector* IDs) const;
 
     // ---------------------------------------------------------------------- //
     /// \name Change Tracker
@@ -126,14 +147,19 @@ public:
     /// \name Rprim Support
     // ---------------------------------------------------------------------- //
 
+    /// Returns whether the rprim type is supported by this render index.
+    HD_API
+    bool IsRprimTypeSupported(TfToken const& typeId) const;
+
     /// Insert a rprim into index
-    template <typename T>
-    void InsertRprim(HdSceneDelegate* delegate,
-                     SdfPath const& id,
-                     SdfPath const& surfaceShaderId,
+    HD_API
+    void InsertRprim(TfToken const& typeId,
+                     HdSceneDelegate* sceneDelegate,
+                     SdfPath const& rprimId,
                      SdfPath const& instancerId = SdfPath());
 
     /// Remove a rprim from index
+    HD_API
     void RemoveRprim(SdfPath const& id);
 
     /// Returns true if rprim \p id exists in index.
@@ -142,24 +168,47 @@ public:
     }
 
     /// Returns the rprim of id
-    HdRprimSharedPtr const &GetRprim(SdfPath const &id) const;
+    HD_API
+    HdRprim const *GetRprim(SdfPath const &id) const;
 
-    /// Returns true if the given RprimID is a member of the collection.
-    bool IsInCollection(SdfPath const& id, TfToken const& collectionName) const;
+    /// Returns the scene delegate for the given rprim
+    HD_API
+    HdSceneDelegate *GetSceneDelegateForRprim(SdfPath const &id) const;
+
+    /// Query function to return the id's of the scene delegate and instancer
+    /// associated with the Rprim at the given path.
+    HD_API
+    bool GetSceneDelegateAndInstancerIds(SdfPath const &id,
+                                         SdfPath* sceneDelegateId,
+                                         SdfPath* instancerId) const;
+
+    /// Returns the render tag for the given rprim
+    HD_API
+    TfToken GetRenderTag(SdfPath const& id, TfToken const& reprName) const;
+
+    /// Returns a sorted list of all Rprims in the render index.
+    /// The list is sorted by std::less<SdfPath>
+    HD_API
+    const SdfPathVector &GetRprimIds() { return _rprimIds.GetIds(); }
+
 
     /// Returns the subtree rooted under the given path.
-    SdfPathVector GetRprimSubtree(SdfPath const& root) const;
+    HD_API
+    SdfPathVector GetRprimSubtree(SdfPath const& root);
+
 
     // ---------------------------------------------------------------------- //
     /// \name Instancer Support
     // ---------------------------------------------------------------------- //
 
     /// Insert an instancer into index
+    HD_API
     void InsertInstancer(HdSceneDelegate* delegate,
                          SdfPath const &id,
                          SdfPath const &parentId = SdfPath());
 
     /// Remove an instancer from index
+    HD_API
     void RemoveInstancer(SdfPath const& id);
 
     /// Returns true if instancer \p id exists in index.
@@ -168,36 +217,8 @@ public:
     }
 
     /// Returns the instancer of id
-    HdInstancerSharedPtr GetInstancer(SdfPath const &id) const;
-
-    // ---------------------------------------------------------------------- //
-    /// \name Shader Support
-    // ---------------------------------------------------------------------- //
-
-    /// Inserts a new shader into the render index with an identifer of \p id.
-    /// Note that Rprims can be speculatively bound to a shader before the
-    /// shader has been inserted into the render index, however the shader must
-    /// exist before any Rprims to which it is bound are rendered.
-    template <typename T>
-    void InsertShader(HdSceneDelegate* delegate, SdfPath const& id);
-
-    /// Removes the given shader from the RenderIndex. The client must unbind
-    /// or remove any existing Rprims that are bound to this shader before
-    /// rendering.
-    void RemoveShader(SdfPath const& id);
-
-    /// Returns true if a shader exists in the index with the given \p id.
-    bool HasShader(SdfPath const& id) {
-        return _shaderMap.find(id) != _shaderMap.end();
-    }
-
-    /// Returns the shader for the given \p id.
-    HdSurfaceShaderSharedPtr const& GetShader(SdfPath const& id) const;
-
-    /// Returns the fallback shader.
-    HdSurfaceShaderSharedPtr const& GetShaderFallback() const {
-        return _surfaceFallback;
-    };
+    HD_API
+    HdInstancer *GetInstancer(SdfPath const &id) const;
 
     // ---------------------------------------------------------------------- //
     /// \name Task Support
@@ -208,6 +229,7 @@ public:
     void InsertTask(HdSceneDelegate* delegate, SdfPath const& id);
 
     /// Removes the given task from the RenderIndex.
+    HD_API
     void RemoveTask(SdfPath const& id);
 
     /// Returns true if a task exists in the index with the given \p id.
@@ -216,73 +238,118 @@ public:
     }
 
     /// Returns the task for the given \p id.
+    HD_API
     HdTaskSharedPtr const& GetTask(SdfPath const& id) const;
 
     // ---------------------------------------------------------------------- //
-    /// \name Texture Support
+    /// \name Scene state prims (e.g. camera, light)
     // ---------------------------------------------------------------------- //
 
-    /// Inserts a new texture into the RenderIndex with an identifier of \p id.
-    template <typename T>
-    void InsertTexture(HdSceneDelegate* delegate, SdfPath const& id);
+    /// Returns whether the sprim type is supported by this render index.
+    HD_API
+    bool IsSprimTypeSupported(TfToken const& typeId) const;
 
-    /// Removes the given texture from the RenderIndex.
-    void RemoveTexture(SdfPath const& id);
+    /// Insert a sprim into index
+    HD_API
+    void InsertSprim(TfToken const& typeId,
+                     HdSceneDelegate* delegate,
+                     SdfPath const& sprimId);
 
-    /// Returns true if a texture exists in the index with the given \p id.
-    bool HasTexture(SdfPath const& id) {
-        return _textureMap.find(id) != _textureMap.end();
+    HD_API
+    void RemoveSprim(TfToken const& typeId, SdfPath const &id);
+
+    HD_API
+    HdSprim const *GetSprim(TfToken const& typeId, SdfPath const &id) const;
+
+    /// Returns the subtree rooted under the given path for the given sprim
+    /// type.
+    HD_API
+    SdfPathVector GetSprimSubtree(TfToken const& typeId,
+                                  SdfPath const& root);
+
+    /// Returns the fullback prim for the Sprim of the given type.
+    HD_API
+    HdSprim *GetFallbackSprim(TfToken const& typeId) const;
+
+
+    // ---------------------------------------------------------------------- //
+    /// \name Buffer prims (e.g. textures, buffers)
+    // ---------------------------------------------------------------------- //
+
+    /// Returns whether the bprim type is supported by this render index.
+    HD_API
+    bool IsBprimTypeSupported(TfToken const& typeId) const;
+
+    /// Insert a bprim into index
+    HD_API
+    void InsertBprim(TfToken const& typeId,
+                     HdSceneDelegate* delegate,
+                     SdfPath const& bprimId);
+
+    HD_API
+    void RemoveBprim(TfToken const& typeId, SdfPath const &id);
+
+    HD_API
+    HdBprim const *GetBprim(TfToken const& typeId, SdfPath const &id) const;
+
+    /// Returns the subtree rooted under the given path for the given bprim
+    /// type.
+    HD_API
+    SdfPathVector GetBprimSubtree(TfToken const& typeId,
+                                  SdfPath const& root);
+
+    /// Returns the fallback prim for the Bprim of the given type.
+    HD_API
+    HdBprim *GetFallbackBprim(TfToken const& typeId) const;
+
+    // ---------------------------------------------------------------------- //
+    /// \name ExtComputation Support
+    // ---------------------------------------------------------------------- //
+
+    /// Insert an ExtComputation into index
+    HD_API
+    void InsertExtComputation(HdSceneDelegate* delegate,
+                              SdfPath const &id);
+
+    /// Remove an ExtComputation from index
+    HD_API
+    void RemoveExtComputation(SdfPath const& id);
+
+    /// Returns true if ExtComputation \p id exists in index.
+    bool HasExtComputation(SdfPath const& id) {
+        return _extComputationMap.find(id) != _extComputationMap.end();
     }
 
-    /// Returns the texture for the given \p id.
-    HdTextureSharedPtr const& GetTexture(SdfPath const& id) const;
+    /// Returns the ExtComputation of id
+    HD_API
+    HdExtComputation const *GetExtComputation(SdfPath const &id) const;
+
+    /// Query function to look up a computation and its delegate
+    HD_API
+    void GetExtComputationInfo(SdfPath const &id,
+                               HdExtComputation **computation,
+                               HdSceneDelegate **sceneDelegate);
+
 
     // ---------------------------------------------------------------------- //
-    /// \name Camera Support
+    /// \name Render Delegate
     // ---------------------------------------------------------------------- //
+    /// Currently, a render index only supports connection to one type of
+    /// render delegate, due to the inserted information and change tracking
+    /// being specific to that delegate type.
+    HD_API
+    HdRenderDelegate *GetRenderDelegate() const;
 
-    /// Inserts a new camera into the RenderIndex with an identifier of \p id.
-    template <typename T>
-    void 
-    InsertCamera(HdSceneDelegate* delegate, SdfPath const& id);
-
-    /// Removes the given camera from the RenderIndex.
-    void RemoveCamera(SdfPath const& id);
-
-    /// Returns the camera for the given \p id.
-    HdCameraSharedPtr const& GetCamera(SdfPath const& id) const;
-
-    // ---------------------------------------------------------------------- //
-    /// \name Light Support
-    // ---------------------------------------------------------------------- //
-
-    /// Inserts a new light into the RenderIndex with an identifier of \p id.
-    template <typename T>
-    void
-    InsertLight(HdSceneDelegate* delegate, SdfPath const& id);
-
-    /// Removes the given light from the RenderIndex.
-    void RemoveLight(SdfPath const& id);
-
-    /// Returns the light for the given \p id.
-    HdLightSharedPtr const& GetLight(SdfPath const& id) const;
-
-    // ---------------------------------------------------------------------- //
-    /// \name Draw Target Support
-    // ---------------------------------------------------------------------- //
-
-    /// Inserts a new draw target into the RenderIndex with an identifier of
-    /// \p id.
-    template <typename T>
-    void
-    InsertDrawTarget(HdSceneDelegate* delegate, SdfPath const& id);
-
-    /// Removes the given draw target from the RenderIndex.
-    void RemoveDrawTarget(SdfPath const& id);
-
-    HdDrawTargetSharedPtr const& GetDrawTarget(SdfPath const& id) const;
+    /// Returns a shared ptr to the resource registry of the current render
+    /// delegate.
+    HD_API
+    HdResourceRegistrySharedPtr GetResourceRegistry() const;
 
 private:
+    // The render index constructor is private so we can check
+    // renderDelegate before construction: see HdRenderIndex::New(...).
+    HdRenderIndex(HdRenderDelegate *renderDelegate);
+
     // ---------------------------------------------------------------------- //
     // Private Helper methods 
     // ---------------------------------------------------------------------- //
@@ -292,177 +359,118 @@ private:
     void _CompactPrimIds();
 
     // Allocate the next available instance id to the prim
-    void _AllocatePrimId(HdRprimSharedPtr prim);
-    
-    // Insert rprimID into the delegateRprimMap.
-    void _TrackDelegateRprim(HdSceneDelegate* delegate, 
-                             SdfPath const& rprimID,
-                             HdRprimSharedPtr const& rprim);
-
-    // Inserts the shader into the index and updates tracking state.
-    void _TrackDelegateShader(HdSceneDelegate* delegate, 
-                              SdfPath const& shaderId,
-                              HdSurfaceShaderSharedPtr const& shader);
+    void _AllocatePrimId(HdRprim* prim);
 
     // Inserts the task into the index and updates tracking state.
+    // _TrackDelegateTask is called by the inlined InsertTask<T>, so it needs
+    // to be marked HD_API.
+    HD_API
     void _TrackDelegateTask(HdSceneDelegate* delegate, 
                             SdfPath const& taskId,
                             HdTaskSharedPtr const& task);
 
-    // Inserts the texture into the index and updates tracking state.
-    void _TrackDelegateTexture(HdSceneDelegate* delegate, 
-                              SdfPath const& textureId,
-                              HdTextureSharedPtr const& texture);
+    template <typename T>
+    static inline const TfToken & _GetTypeId();
 
-    // Inserts the camera into the index and updates tracking state.
-    void _TrackDelegateCamera(HdSceneDelegate* delegate, 
-                              SdfPath const& cameraId,
-                              HdCameraSharedPtr const& camera);
 
-    // Inserts the light into the index and updates tracking state.
-    void _TrackDelegateLight(HdSceneDelegate* delegate, 
-                              SdfPath const& lightId,
-                              HdLightSharedPtr const& light);
-
-    // Inserts the draw target into the index and updates tracking state.
-    void _TrackDelegateDrawTarget(HdSceneDelegate* delegate,
-                                  SdfPath const& drawTargetId,
-                                  HdDrawTargetSharedPtr const& drawTarget);
+    void _RemoveRprimSubtree(const SdfPath &root,
+                             HdSceneDelegate* sceneDelegate);
+    void _RemoveInstancerSubtree(const SdfPath &root,
+                                 HdSceneDelegate* sceneDelegate);
+    void _RemoveExtComputationSubtree(const SdfPath &root,
+                                      HdSceneDelegate* sceneDelegate);
+    void _RemoveTaskSubtree(const SdfPath &root,
+                            HdSceneDelegate* sceneDelegate);
 
 
     // ---------------------------------------------------------------------- //
     // Index State
     // ---------------------------------------------------------------------- //
     struct _RprimInfo {
-        SdfPath delegateID;
-        size_t childIndex;
-        HdRprimSharedPtr rprim;
+        HdSceneDelegate *sceneDelegate;
+        HdRprim         *rprim;
     };
-    
-    typedef TfHashMap<SdfPath, HdSurfaceShaderSharedPtr, SdfPath::Hash> _ShaderMap;
-    typedef TfHashMap<SdfPath, HdTaskSharedPtr, SdfPath::Hash> _TaskMap;
-    typedef TfHashMap<SdfPath, HdTextureSharedPtr, SdfPath::Hash> _TextureMap;
-    typedef TfHashMap<SdfPath, _RprimInfo, SdfPath::Hash> _RprimMap;
-    typedef TfHashMap<SdfPath, SdfPathVector, SdfPath::Hash> _DelegateRprimMap;
-    typedef TfHashMap<SdfPath, HdCameraSharedPtr, SdfPath::Hash> _CameraMap;
-    typedef TfHashMap<SdfPath, HdLightSharedPtr, SdfPath::Hash> _LightMap;
-    typedef TfHashMap<SdfPath, HdDrawTargetSharedPtr, SdfPath::Hash> _DrawTargetMap;
 
-    typedef std::set<SdfPath> _RprimIDSet;
+    typedef std::unique_ptr<HdExtComputation> HdExtComputationPtr;
+    struct _ExtComputationInfo {
+        HdSceneDelegate     *sceneDelegate;
+        HdExtComputationPtr  extComputation;
+    };
+
+
+    typedef TfHashMap<SdfPath, HdTaskSharedPtr, SdfPath::Hash> _TaskMap;
+    typedef TfHashMap<SdfPath, _RprimInfo, SdfPath::Hash> _RprimMap;
     typedef std::map<uint32_t, SdfPath> _RprimPrimIDMap;
 
-    _DelegateRprimMap _delegateRprimMap;
-    _RprimMap _rprimMap;
+    typedef Hd_PrimTypeIndex<HdSprim> _SprimIndex;
+    typedef Hd_PrimTypeIndex<HdBprim> _BprimIndex;
 
-    _RprimIDSet _rprimIDSet;
+    _RprimMap     _rprimMap;
+    Hd_SortedIds  _rprimIds;
+
     _RprimPrimIDMap _rprimPrimIdMap;
 
-    _ShaderMap _shaderMap;
     _TaskMap _taskMap;
-    _TextureMap _textureMap;
-    _CameraMap _cameraMap;
-    _LightMap _lightMap;
-    _DrawTargetMap _drawTargetMap;
+
+    _SprimIndex     _sprimIndex;
+    _BprimIndex     _bprimIndex;
 
     HdChangeTracker _tracker;
     int32_t _nextPrimId; 
 
-    typedef TfHashMap<SdfPath, HdInstancerSharedPtr, SdfPath::Hash> _InstancerMap;
+    typedef TfHashMap<SdfPath, HdInstancer*, SdfPath::Hash> _InstancerMap;
     _InstancerMap _instancerMap;
-    HdSurfaceShaderSharedPtr _surfaceFallback;
 
+
+    typedef std::unordered_map<SdfPath, _ExtComputationInfo, SdfPath::Hash>
+                                                             _ExtComputationMap;
+    _ExtComputationMap _extComputationMap;
+
+
+    // XXX: TO FIX Move
     typedef std::vector<HdDirtyListSharedPtr> _DirtyListVector;
     _DirtyListVector _syncQueue;
+
+    HdRenderDelegate *_renderDelegate;
+
+    /// Register the render delegate's list of supported prim types.
+    void _InitPrimTypes();
+
+    /// Creates fallback prims for each supported prim type.
+    bool _CreateFallbackPrims();
+
+    /// Release the fallback prims.
+    void _DestroyFallbackPrims();
+
+    typedef tbb::enumerable_thread_specific<HdRenderIndex::HdDrawItemView>
+                                                           _ConcurrentDrawItems;
+
+    void _AppendDrawItems(const SdfPathVector &rprimIds,
+                          size_t begin,
+                          size_t end,
+                          HdRprimCollection const& collection,
+                          _ConcurrentDrawItems* result);
+
+    /// Register core hydra reprs. Only ever called once, the first time
+    /// a render index is created.
+    /// XXX: This code should move to the application layer.
+    static void _ConfigureReprs();
+
+    // Remove default constructor
+    HdRenderIndex() = delete;
 };
-
-template <typename T>
-void
-HdRenderIndex::InsertRprim(HdSceneDelegate* delegate, SdfPath const& id,
-                           SdfPath const& surfaceShaderId, 
-                           SdfPath const& instancerId)
-{
-    HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-#if 0
-    // TODO: enable this after patching.
-    if (not id.IsAbsolutePath()) {
-        TF_CODING_ERROR("All Rprim IDs must be absolute paths <%s>\n",
-                id.GetText());
-        return;
-    }
-#endif
-
-    if (ARCH_UNLIKELY(TfMapLookupPtr(_rprimMap, id)))
-        return;
-    
-    HdRprimSharedPtr rprim = boost::make_shared<T>(delegate, id, 
-                                                  surfaceShaderId, instancerId);
-    _TrackDelegateRprim(delegate, id, rprim);
-}
-
-template <typename T>
-void
-HdRenderIndex::InsertShader(HdSceneDelegate* delegate, SdfPath const& id)
-{
-    HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-
-    HdSurfaceShaderSharedPtr shader = boost::make_shared<T>(delegate, id);
-    _TrackDelegateShader(delegate, id, shader);
-}
 
 template <typename T>
 void
 HdRenderIndex::InsertTask(HdSceneDelegate* delegate, SdfPath const& id)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     HdTaskSharedPtr task = boost::make_shared<T>(delegate, id);
     _TrackDelegateTask(delegate, id, task);
 }
 
-template <typename T>
-void
-HdRenderIndex::InsertTexture(HdSceneDelegate* delegate, SdfPath const& id)
-{
-    HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+PXR_NAMESPACE_CLOSE_SCOPE
 
-    HdTextureSharedPtr texture = boost::make_shared<T>(delegate, id);
-    _TrackDelegateTexture(delegate, id, texture);
-}
-
-template <typename T>
-void
-HdRenderIndex::InsertCamera(HdSceneDelegate* delegate, SdfPath const& id)
-{
-    HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-
-    boost::shared_ptr<T> camera = boost::make_shared<T>(delegate, id);
-    _TrackDelegateCamera(delegate, id, camera);
-}
-
-template <typename T>
-void
-HdRenderIndex::InsertLight(HdSceneDelegate* delegate, SdfPath const& id)
-{
-    HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-
-    boost::shared_ptr<T> light = boost::make_shared<T>(delegate, id);
-    _TrackDelegateLight(delegate, id, light);
-}
-
-template <typename T>
-void
-HdRenderIndex::InsertDrawTarget(HdSceneDelegate* delegate, SdfPath const& id)
-{
-    HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-
-    boost::shared_ptr<T> drawTarget = boost::make_shared<T>(delegate, id);
-    _TrackDelegateDrawTarget(delegate, id, drawTarget);
-}
 #endif //HD_RENDER_INDEX_H

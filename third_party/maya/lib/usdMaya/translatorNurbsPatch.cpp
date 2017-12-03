@@ -21,12 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/translatorNurbsPatch.h"
 
 #include "usdMaya/primReaderArgs.h"
 #include "usdMaya/primReaderContext.h"
 #include "usdMaya/translatorGprim.h"
-#include "usdMaya/translatorLook.h"
+#include "usdMaya/translatorMaterial.h"
 #include "usdMaya/translatorUtil.h"
 
 #include "pxr/usd/usdGeom/nurbsPatch.h"
@@ -46,6 +47,9 @@
 #include <maya/MTimeArray.h>
 #include <maya/MTrimBoundaryArray.h>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 
 /* static */
 bool 
@@ -55,7 +59,7 @@ PxrUsdMayaTranslatorNurbsPatch::Read(
         const PxrUsdMayaPrimReaderArgs& args,
         PxrUsdMayaPrimReaderContext* context)
 {
-    if (not usdNurbsPatch) {
+    if (!usdNurbsPatch) {
         return false;
     }
 
@@ -65,12 +69,12 @@ PxrUsdMayaTranslatorNurbsPatch::Read(
 
     // Create the transform node for the patch.
     MObject mayaNode;
-    if (not PxrUsdMayaTranslatorUtil::CreateTransformNode(prim,
-                                                          parentNode,
-                                                          args,
-                                                          context,
-                                                          &status,
-                                                          &mayaNode)) {
+    if (!PxrUsdMayaTranslatorUtil::CreateTransformNode(prim,
+                                                       parentNode,
+                                                       args,
+                                                       context,
+                                                       &status,
+                                                       &mayaNode)) {
         return false;
     }
 
@@ -107,7 +111,8 @@ PxrUsdMayaTranslatorNurbsPatch::Read(
     std::vector<double> pointsTimeSamples;
     size_t numTimeSamples = 0;
     if (args.GetReadAnimData()) {
-        usdNurbsPatch.GetPointsAttr().GetTimeSamples(&pointsTimeSamples);
+        PxrUsdMayaTranslatorUtil::GetTimeSamples(usdNurbsPatch.GetPointsAttr(),
+                args, &pointsTimeSamples);
         numTimeSamples = pointsTimeSamples.size();
         if (numTimeSamples>0) {
             pointsTimeSample = pointsTimeSamples[0];
@@ -196,10 +201,10 @@ PxrUsdMayaTranslatorNurbsPatch::Read(
         context->RegisterNewMayaNode( shapePath, surfaceObj ); // used for undo/redo
     }
 
-    // If a look is bound, create (or reuse if already present) and assign it
+    // If a material is bound, create (or reuse if already present) and assign it
     // If no binding is present, assign the nurbs surface to the default shader
     const TfToken& shadingMode = args.GetShadingMode();  
-    PxrUsdMayaTranslatorLook::AssignLook(
+    PxrUsdMayaTranslatorMaterial::AssignMaterial(
             shadingMode,
             usdNurbsPatch,
             surfaceObj,
@@ -463,3 +468,6 @@ PxrUsdMayaTranslatorNurbsPatch::Read(
          
     return true;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

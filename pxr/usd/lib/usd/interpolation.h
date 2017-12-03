@@ -24,25 +24,33 @@
 #ifndef USD_INTERPOLATION_H
 #define USD_INTERPOLATION_H
 
+/// \file usd/interpolation.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/base/gf/declare.h"
 
 #include <boost/preprocessor/seq/for_each.hpp>
 
-/// \file interpolation.h
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 /// \enum UsdInterpolationType
-/// \brief Attribute value interpolation options. 
+///
+/// Attribute value interpolation options. 
+///
 /// See \ref Usd_AttributeInterpolation for more details.
+///
 enum UsdInterpolationType
 {
-    UsdInterpolationTypeHeld,  //< Held interpolation
-    UsdInterpolationTypeLinear //< Linear interpolation
+    UsdInterpolationTypeHeld,  ///< Held interpolation
+    UsdInterpolationTypeLinear ///< Linear interpolation
 };
 
 /// Sequence of value types that support linear interpolation.
 /// These types and VtArrays of these types are supported:
-/// \li <b>half</b>
+/// \li <b>GfHalf</b>
 /// \li <b>float</b>
 /// \li <b>double</b>
 /// \li <b>GfMatrix2d</b>
@@ -62,7 +70,7 @@ enum UsdInterpolationType
 /// \li <b>GfQuath</b> (via quaternion slerp)
 /// \hideinitializer
 #define USD_LINEAR_INTERPOLATION_TYPES               \
-    (half) (VtArray<half>)                           \
+    (GfHalf) (VtArray<GfHalf>)                       \
     (float) (VtArray<float>)                         \
     (double) (VtArray<double>)                       \
     (GfMatrix2d) (VtArray<GfMatrix2d>)               \
@@ -82,7 +90,8 @@ enum UsdInterpolationType
     (GfQuath) (VtArray<GfQuath>)
 
 /// \struct UsdLinearInterpolationTraits
-/// \brief Traits class describing whether a particular C++ value type
+///
+/// Traits class describing whether a particular C++ value type
 /// supports linear interpolation.
 ///
 /// UsdLinearInterpolationTraits<T>::isSupported will be true for all
@@ -106,5 +115,8 @@ BOOST_PP_SEQ_FOR_EACH(_USD_DECLARE_INTERPOLATION_TRAITS, ~,
 
 #undef _USD_DECLARE_INTERPOLATION_TRAITS
 /// \endcond
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_INTERPOLATION_H

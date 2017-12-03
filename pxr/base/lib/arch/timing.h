@@ -24,105 +24,89 @@
 #ifndef ARCH_TIMING_H
 #define ARCH_TIMING_H
 
-/*!
- * \file timing.h
- * \brief High-resolution, low-cost timing routines.
- * \ingroup group_arch_SystemFunctions
- */
+/// \file arch/timing.h
+/// \ingroup group_arch_SystemFunctions
+/// High-resolution, low-cost timing routines.
 
+#include "pxr/pxr.h"
+#include "pxr/base/arch/api.h"
 #include "pxr/base/arch/defines.h"
 #include "pxr/base/arch/inttypes.h"
 
-#if defined(ARCH_OS_LINUX) || defined(ARCH_OS_DARWIN)
+/// \addtogroup group_arch_SystemFunctions
+///@{
+
+#if defined(ARCH_OS_LINUX)
 #include <x86intrin.h>
+#elif defined(ARCH_OS_DARWIN)
+#include <mach/mach_time.h>
 #elif defined(ARCH_OS_WINDOWS)
 #include <intrin.h>
 #endif
 
-/*!
- * \brief Macro that defines the clocks per second
- * \ingroup group_arch_SystemFunctions
- *
- * Unfortunately, Red Hat 7.1 does not define CLK_TCK correctly, so 
- * ARCH_CLK_TCK is the only guaranteed way to get the value of CLK_TCK.
- * The value is currently the same on all of our platforms.
- */
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// Macro that defines the clocks per second
+///
+/// Unfortunately, Red Hat 7.1 does not define CLK_TCK correctly, so
+/// ARCH_CLK_TCK is the only guaranteed way to get the value of CLK_TCK. The
+/// value is currently the same on all of our platforms.
 #define ARCH_CLK_TCK 100
 
-
-/*!
- * \brief Return the current time in system-dependent units.
- * \ingroup group_arch_SystemFunctions
- *
- * The current time is returned as a number of "ticks", where each
- * tick represents some system-dependent amount of time.  The
- * resolution of the timing routines varies, but on all systems, it is
- * well under one microsecond.  The cost of this routine is
- * approximately 40 nanoseconds on a 900 Mhz Pentium III Linux box, 300
- * nanoseconds on a 400 Mhz Sun, and 200 nanoseconds on a 250 Mhz SGI,
- * and 200 nanoseconds on a 500 MHz PowerMac G4.
- *
- * On SGIs and Linux x86 and Apple PPC systems, the time is queried by
- * reading from a hardware register, which is very fast; on the SUNS,
- * a standard system call (gethrtime()) is used, which accounts for the
- * slowness of the operation.
- *
- * By contrast, the standard system call \c gettimeofday() takes,
- * respectively, 540, 4900 nanoseconds, and 370 nanoseconds on
- * the same Linux, SGI and SUN workstations.
- * 
- */
-  
+/// Return the current time in system-dependent units.
+///
+/// The current time is returned as a number of "ticks", where each tick
+/// represents some system-dependent amount of time.  The resolution of the
+/// timing routines varies, but on all systems, it is well under one
+/// microsecond.  The cost of this routine is in the tens of nanoseconds
+/// on GHz class machines.
 inline uint64_t
 ArchGetTickTime()
 {
-// On Intel, we'll use the rdtsc instruction
-#if defined(ARCH_CPU_INTEL)
+#if defined(ARCH_OS_DARWIN)
+    // On Darwin we'll use mach_absolute_time().
+    return mach_absolute_time();
+#elif defined(ARCH_CPU_INTEL)
+    // On Intel we'll use the rdtsc instruction.
     return __rdtsc();
 #else
 #error Unknown architecture.
-#endif // defined(ARCH_CPU_INTEL)
+#endif
 }
 
-/*!
- * \brief Convert a duration measured in "ticks", as returned
- * by \c ArchGetTickTime(), to nanoseconds.
- * \ingroup group_arch_SystemFunctions
- *
- * An example to test the timing routines would be:
- * \code
- *
- *     int64_t t1 = ArchGetTickTime();
- *     sleep(10);
- *     int64_t t2 = ArchGetTickTime();
- *
- *     // duration should be approximately 10 * 1e9 = 1e10 nanoseconds.
- *     int64_t duration = ArchTicksToNanoseconds(t2 - t1);
- *	
- * \endcode
- */
-
+/// Convert a duration measured in "ticks", as returned by
+/// \c ArchGetTickTime(), to nanoseconds.
+///
+/// An example to test the timing routines would be:
+/// \code
+///     int64_t t1 = ArchGetTickTime();
+///     sleep(10);
+///     int64_t t2 = ArchGetTickTime();
+///
+///     // duration should be approximately 10/// 1e9 = 1e10 nanoseconds.
+///     int64_t duration = ArchTicksToNanoseconds(t2 - t1);
+/// \endcode
+///
+ARCH_API
 int64_t ArchTicksToNanoseconds(uint64_t nTicks);
 
-/*!
- * \brief Convert a duration measured in "ticks", as returned
- * by \c ArchGetTickTime(), to seconds.
- * \ingroup group_arch_SystemFunctions
- */
+/// Convert a duration measured in "ticks", as returned by
+/// \c ArchGetTickTime(), to seconds.
+ARCH_API
 double ArchTicksToSeconds(uint64_t nTicks);
 
-/*!
- * \brief Convert a duration in seconds to "ticks", as returned by \a
- * ArchGetTickTime().
- * \ingroup group_arch_SystemFunctions
- */
+/// Convert a duration in seconds to "ticks", as returned by
+/// \c ArchGetTickTime().
+ARCH_API
 uint64_t ArchSecondsToTicks(double seconds);
     
-/*!
- * \brief Get nanoseconds per tick.  Useful when converting ticks
- * obtained from ArchTickTime()
- * \ingroup group_arch_SystemFunctions
- */
+/// Get nanoseconds per tick. Useful when converting ticks obtained from
+/// \c ArchTickTime()
+ARCH_API
 double ArchGetNanosecondsPerTick();
+
+///@}
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // ARCH_TIMING_H

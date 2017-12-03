@@ -28,7 +28,13 @@
 #ifndef PXRUSDMAYAGL_BATCHRENDERER_H
 #define PXRUSDMAYAGL_BATCHRENDERER_H
 
+#include "pxr/pxr.h"
+#include "pxrUsdMayaGL/api.h"
+#include "pxrUsdMayaGL/softSelectHelper.h"
+
 #include "pxr/base/arch/hash.h"
+#include "pxr/base/gf/matrix4d.h"
+#include "pxr/base/gf/vec4d.h"
 #include "pxr/base/tf/debug.h"
 #include "pxr/usd/usd/stage.h"
 #include "pxr/imaging/glf/simpleLightingContext.h"
@@ -36,30 +42,34 @@
 #include "pxr/imaging/hd/enums.h"
 #include "pxr/imaging/hd/renderIndex.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
+#include "pxr/imaging/hdSt/renderDelegate.h"
 #include "pxr/imaging/hdx/intersector.h"
 #include "pxr/usdImaging/usdImaging/delegate.h"
-#include "pxr/usdImaging/usdImaging/engine.h"
 #include "pxr/usdImaging/usdImaging/tokens.h"
 
 #include <maya/M3dView.h>
+#include <maya/MDagPath.h>
 #include <maya/MDrawContext.h>
-#include <maya/MUserData.h>
-#include <maya/MViewport2Renderer.h>
+#include <maya/MDrawRequest.h>
 #include <maya/MHWGeometryUtilities.h>
 #include <maya/MPxSurfaceShape.h>
-#include <maya/MDrawRequest.h>
-#include <maya/MDagPath.h>
+#include <maya/MUserData.h>
+#include <maya/MViewport2Renderer.h>
 
-#include <set>
-#include <unordered_set>
-#include <unordered_map>
+#include <memory>
 #include <functional>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DEBUG_CODES(
     PXRUSDMAYAGL_QUEUE_INFO
 );
-
-class MDagPath;
 
 typedef boost::shared_ptr<class HdxIntersector> HdxIntersectorSharedPtr;
 
@@ -86,9 +96,11 @@ public:
     /// \brief Init the BatchRenderer class before using it.  This should be
     /// called at least once and it is OK to call it multiple times.  This
     /// handles things like initializing Gl/Glew.
+    PXRUSDMAYAGL_API
     static void Init();
-    
-    static UsdMayaGLBatchRenderer& GetGlobalRenderer() { return _sGlobalRenderer; }
+
+    PXRUSDMAYAGL_API
+    static UsdMayaGLBatchRenderer& GetGlobalRenderer();
 
     struct RenderParams
     {
@@ -106,6 +118,7 @@ public:
         //
         HdCullStyle cullStyle = HdCullStyleNothing;
         TfToken drawRepr = HdTokens->refined;
+        TfTokenVector renderTags;
 
         // Color Params
         //
@@ -136,9 +149,11 @@ public:
     public:
             
         /// \brief Construct a new uninitialized \c ShapeRenderer.
+        PXRUSDMAYAGL_API
         ShapeRenderer();
 
-        void Init(const HdRenderIndexSharedPtr &renderIndex,
+        PXRUSDMAYAGL_API
+        void Init(HdRenderIndex *renderIndex,
                   const SdfPath& sharedId,
                   const UsdPrim& rootPrim,
                   const SdfPathVector& excludedPaths);
@@ -146,6 +161,7 @@ public:
         /// \brief Register the \c ShapeRenderer with the specific DAG object
         /// in question. This should be called once per frame, per
         /// \c ShapeRenderer in use.
+        PXRUSDMAYAGL_API
         void PrepareForQueue(
                 const MDagPath& objPath,
                 UsdTimeCode time,
@@ -159,6 +175,7 @@ public:
         ///
         /// Sets \p drawShape and \p drawBoundingBox depending on whether shape
         /// and/or bounding box rendering is indicated from the state.
+        PXRUSDMAYAGL_API
         RenderParams GetRenderParams(
                 const MDagPath& objPath,
                 const M3dView::DisplayStyle& displayStyle,
@@ -170,6 +187,7 @@ public:
         ///
         /// Sets \p drawShape and \p drawBoundingBox depending on whether shape
         /// and/or bounding box rendering is indicated from the state.
+        PXRUSDMAYAGL_API
         RenderParams GetRenderParams(
                 const MDagPath& objPath,
                 const unsigned int& displayStyle,
@@ -182,6 +200,7 @@ public:
         /// 
         /// \p boxToDraw may be set to NULL if no box is desired to be drawn.
         ///
+        PXRUSDMAYAGL_API
         void QueueShapeForDraw(
                 MPxSurfaceShapeUI *shapeUI,
                 MDrawRequest& drawRequest,
@@ -198,6 +217,7 @@ public:
         /// 
         /// \p boxToDraw may be set to NULL if no box is desired to be drawn.
         ///
+        PXRUSDMAYAGL_API
         void QueueShapeForDraw(
                 MUserData* &userData,
                 const RenderParams& params,
@@ -208,6 +228,7 @@ public:
         /// 
         /// \p hitPoint yields the point of interesection if \c true is returned.
         ///
+        PXRUSDMAYAGL_API
         bool TestIntersection(
                 M3dView& aView, 
                 unsigned int pickResolution,
@@ -234,25 +255,43 @@ public:
     /// \brief hd task
     class TaskDelegate : public HdSceneDelegate {
     public:
-        TaskDelegate(HdRenderIndexSharedPtr const& renderIndex,
+        PXRUSDMAYAGL_API
+        TaskDelegate(HdRenderIndex *renderIndex,
                      SdfPath const& delegateID);
 
         // HdSceneDelegate interface
+        PXRUSDMAYAGL_API
         virtual VtValue Get(SdfPath const& id, TfToken const& key);
 
-        void SetCameraState(const GfMatrix4d& viewMatrix,
+        PXRUSDMAYAGL_API
+        void SetCameraState(const GfMatrix4d& worldToViewMatrix,
                             const GfMatrix4d& projectionMatrix,
                             const GfVec4d& viewport);
-        void SetLightingStateFromOpenGL();
 
+        // VP 1.0 only.
+        PXRUSDMAYAGL_API
+        void SetLightingStateFromVP1(const GfMatrix4d& worldToViewMatrix,
+                                     const GfMatrix4d& projectionMatrix);
+
+        // VP 2.0 only.
+        PXRUSDMAYAGL_API
+        void SetLightingStateFromMayaDrawContext(
+                const MHWRender::MDrawContext& context);
+
+        PXRUSDMAYAGL_API
         HdTaskSharedPtrVector GetSetupTasks();
 
+        PXRUSDMAYAGL_API
         HdTaskSharedPtr GetRenderTask(size_t hash,
                                       RenderParams const &params,
                                       SdfPathVector const &roots);
 
     protected:
+        PXRUSDMAYAGL_API
         void _InsertRenderTask(SdfPath const &id);
+
+        PXRUSDMAYAGL_API
+        void _SetLightingStateFromLightingContext();
 
         template <typename T>
         T const &_GetValue(SdfPath const &id, TfToken const &key) {
@@ -277,7 +316,7 @@ public:
         SdfPath _cameraId;
         GfVec4d _viewport;
 
-        GlfSimpleLightingContextRefPtr _lightingContextForOpenGLState;
+        GlfSimpleLightingContextRefPtr _lightingContext;
 
         typedef TfHashMap<TfToken, VtValue, TfToken::HashFunctor> _ValueCache;
         typedef TfHashMap<SdfPath, _ValueCache, SdfPath::Hash> _ValueCacheMap;
@@ -291,25 +330,46 @@ public:
     /// The objected pointed to is owned by the
     /// \c UsdMayaGLBatchRenderer and will be valid for as long as the
     /// \c UsdMayaGLBatchRenderer object is valid.
+    PXRUSDMAYAGL_API
     ShapeRenderer *GetShapeRenderer(
                     const UsdPrim& usdPrim, 
                     const SdfPathVector& excludePrimPaths,
                     const MDagPath& objPath );
     
+    /// \brief Gets UsdMayaGLSoftSelectHelper that this batchRenderer maintains.
+    /// This should only be used by ShapeRenderer::GetRenderParams
+    PXRUSDMAYAGL_API
+    const UsdMayaGLSoftSelectHelper& GetSoftSelectHelper();
+
     /// \brief Construct a new, unique BatchRenderer. In almost all cases,
-    /// this should not be used -- use \c GlobalBatchRenderer() instead.
+    /// this should not be used -- use \c GetGlobalRenderer() instead.
+    PXRUSDMAYAGL_API
     UsdMayaGLBatchRenderer();
-    
+
+    PXRUSDMAYAGL_API
+    ~UsdMayaGLBatchRenderer();
+
+
+    /// \brief Reset the internal state of the global UsdMayaGLBatchRenderer.
+    /// In particular, it's important that this happen when switching to a new
+    /// Maya scene so that any UsdImagingDelegates held by ShapeRenderers that
+    /// have been populated with USD stages can have those stages released,
+    /// since the delegates hold a strong pointers to their stages.
+    PXRUSDMAYAGL_API
+    static void Reset();
+
     /// \brief Render batch or bounds in VP1 based on \p request
+    PXRUSDMAYAGL_API
     void Draw(
             const MDrawRequest& request,
             M3dView &view );
     
     /// \brief Render batch or bounds in VP2 based on \p userData
+    PXRUSDMAYAGL_API
     void Draw(
             const MHWRender::MDrawContext& context,
             const MUserData *userData );
-    
+
 private:
     
     /// \brief Helper function to find a key for the shape in the renderer cache
@@ -345,17 +405,31 @@ private:
     /// performance hit when no batches are queued.
     void _RenderBatches(
             const MHWRender::MDrawContext* vp2Context,
-            const MMatrix& viewMat,
-            const MMatrix& projectionMat,
-            const GfVec4d& viewport );
-    
-    /// \brief Render specific object's bounds.
-    void _RenderBounds(
-            const MBoundingBox& bounds,
-            const GfVec4f& wireframeColor,
-            const MMatrix& worldViewMat,
-            const MMatrix& projectionMat );
-    
+            const GfMatrix4d& worldToViewMatrix,
+            const GfMatrix4d& projectionMatrix,
+            const GfVec4d& viewport);
+
+    /// \brief Handler for Maya Viewport 2.0 end render notifications.
+    ///
+    /// Viewport 2.0 may execute a render in multiple passes (shadow, color,
+    /// etc.), and Maya sends a notification when all rendering has finished.
+    /// When this notification is received, this method is invoked to reset
+    /// some state in the batch renderer and prepare it for subsequent
+    /// selection.
+    /// For the legacy viewport, there is no such notification sent by Maya.
+    static void _OnMayaEndRenderCallback(
+            MHWRender::MDrawContext& context,
+            void* clientData);
+
+    /// \brief Perform post-render state cleanup.
+    ///
+    /// For Viewport 2.0, this method gets invoked by
+    /// _OnMayaEndRenderCallback() and is what does the actual cleanup work.
+    /// For the legacy viewport, there is no such notification sent by Maya, so
+    /// this method is called internally at the end of Hydra draws for the
+    /// legacy viewport.
+    void _MayaRenderDidEnd();
+
     /// \brief Cache of hashed \c ShapeRenderer objects for fast lookup
     typedef std::unordered_map<size_t,ShapeRenderer> _ShapeRendererMap;
     _ShapeRendererMap _shapeRendererMap;
@@ -377,26 +451,47 @@ private:
     /// \brief container of all batched render calls to be made at next display
     /// refresh.
     _RendererQueueMap _renderQueue;
-        
+
+    /// \brief Container of Maya render pass identifiers of passes drawn so far
+    /// during a Viewport 2.0 render.
+    ///
+    /// Since all Hydra geometry is drawn at once, we only ever want to execute
+    /// the Hydra draw once per Maya render pass (shadow, color, etc.). This
+    /// container keeps track of which passes have been drawn by Hydra, and it
+    /// is reset when the batch renderer is notified that a Maya render has
+    /// ended.
+    std::unordered_set<std::string> _drawnMayaRenderPasses;
+
     /// \brief container of batched render calls made at last display refresh,
     /// to be used at next selection operation.
     _RendererQueueMap _selectQueue;
-    
+
     typedef std::unordered_map<SdfPath, HdxIntersector::Hit, SdfPath::Hash> HitBatch;
     
     /// \brief a cache of all selection results gathered since the last display
     /// refresh.
     HitBatch _selectResults;
-    
-    /// \brief Master \c UsdImagingGL renderer used to render batches.
 
+    /// \brief Hydra engine objects used to render batches.
+    /// Note that the Hydra render index is constructed with and is dependent
+    /// on the render delegate. At destruction time, the render index uses the
+    /// delegate to destroy Hydra prims, so the delegate must be destructed
+    /// *after* the render index. We enforce that ordering by declaring the
+    /// render delegate *before* the render index, since class members are
+    /// destructed in reverse declaration order.
     HdEngine _hdEngine;
-    HdRenderIndexSharedPtr _renderIndex;
+    HdStRenderDelegate _renderDelegate;
+    std::unique_ptr<HdRenderIndex> _renderIndex;
+
     TaskDelegateSharedPtr _taskDelegate;
     HdxIntersectorSharedPtr _intersector;
-    
+    UsdMayaGLSoftSelectHelper _softSelectHelper;
+
     /// \brief Sole global batch renderer used by default.
-    static UsdMayaGLBatchRenderer _sGlobalRenderer;
+    static std::unique_ptr<UsdMayaGLBatchRenderer> _sGlobalRendererPtr;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDMAYAGL_BATCHRENDERER_H

@@ -24,9 +24,14 @@
 #ifndef HD_SHADER_KEY_H
 #define HD_SHADER_KEY_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/enums.h"
 #include "pxr/base/tf/token.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // This is a static utility class to interpret prim specific shaderKeys.
 //
@@ -51,24 +56,25 @@ struct HdShaderKey {
                            key.GetTES(),
                            key.GetGS(),
                            key.GetFS(),
-                           key.GetPrimitiveMode(),
-                           key.GetPrimitiveIndexSize(),
+                           static_cast<int16_t> (key.GetPrimitiveType()), // class enum type
                            key.GetCullStyle(),
                            key.GetPolygonMode(),
-                           key.IsCullingPass());
+                           key.IsCullingPass(),
+                           key.IsFaceVarying());
     }
 
+    HD_API
     static ID ComputeHash(TfToken const &glslfxFile,
                           TfToken const *VS,
                           TfToken const *TCS,
                           TfToken const *TES,
                           TfToken const *GS,
                           TfToken const *FS,
-                          int16_t primitiveMode,
-                          int16_t primitiveIndexSize,
+                          int16_t primType,
                           HdCullStyle cullStyle,
                           HdPolygonMode polygonMode,
-                          bool isCullingPass);
+                          bool isCullingPass,
+                          bool IsFaceVarying);
 
     template <typename KEY>
     static std::string GetGLSLFXString(KEY const &key) {
@@ -80,6 +86,7 @@ struct HdShaderKey {
                                key.GetFS());
     }
 
+    HD_API
     static std::string GetGLSLFXString(TfToken const &glslfxFile,
                                        TfToken const *VS,
                                        TfToken const *TCS,
@@ -88,5 +95,8 @@ struct HdShaderKey {
                                        TfToken const *FS);
 
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_SHADER_KEY_H

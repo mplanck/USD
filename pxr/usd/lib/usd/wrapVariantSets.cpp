@@ -21,8 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/variantSets.h"
 #include "pxr/usd/usd/editContext.h"
+#include "pxr/usd/usd/pyEditContext.h"
 
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
@@ -38,6 +40,10 @@ using std::string;
 using std::vector;
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static object
 _HasAuthoredVariantSelection(const UsdVariantSet &self)
@@ -61,11 +67,14 @@ _GetVariantEditContext(const UsdVariantSet &self, const SdfLayerHandle &layer) {
     return UsdPyEditContext(self.GetVariantEditContext(layer));
 }
 
+} // anonymous namespace 
+
 void wrapUsdVariantSets()
 {
     class_<UsdVariantSet>("VariantSet", no_init)
-        .def("FindOrCreateVariant", &UsdVariantSet::FindOrCreateVariant,
-             arg("variantName"))
+        .def("AddVariant", &UsdVariantSet::AddVariant,
+             (arg("variantName"),
+              arg("position")=UsdListPositionTempDefault))
         .def("GetVariantNames", &UsdVariantSet::GetVariantNames,
              return_value_policy<TfPySequenceToList>())
         .def("HasAuthoredVariant", &UsdVariantSet::HasAuthoredVariant)
@@ -87,8 +96,9 @@ void wrapUsdVariantSets()
         ;
 
     class_<UsdVariantSets>("VariantSets", no_init)
-        .def("FindOrCreate", &UsdVariantSets::FindOrCreate,
-             arg("variantSetName"))
+        .def("AddVariantSet", &UsdVariantSets::AddVariantSet,
+             (arg("variantSetName"),
+              arg("position")=UsdListPositionTempDefault))
         .def("GetNames", _GetNames, return_value_policy<TfPySequenceToList>())
         .def("GetVariantSet", &UsdVariantSets::GetVariantSet,
              arg("variantSetName"))
@@ -100,4 +110,3 @@ void wrapUsdVariantSets()
              (arg("variantSetName"), arg("variantName")))
         ;
 }
-

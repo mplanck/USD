@@ -21,25 +21,25 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/regTest.h"
 #include "pxr/base/tf/errorMark.h"
 #include "pxr/base/tf/instantiateSingleton.h"
 
-#include <boost/foreach.hpp>
-
 #include <algorithm>
 #include <iostream>
 #include <signal.h>
-#include <unistd.h>
-
-
-
-TF_INSTANTIATE_SINGLETON(TfRegTest);
 
 using std::cerr;
 using std::endl;
 using std::string;
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+TF_INSTANTIATE_SINGLETON(TfRegTest);
 
 TfRegTest&
 TfRegTest::GetInstance()
@@ -101,8 +101,9 @@ TfRegTest::_PrintTestNames()
 
 
     sort(names.begin(), names.end());
-    BOOST_FOREACH(string const &name, names)
+    for (const auto& name : names) {
         cerr << "\n    " << name;
+    }
 
     cerr << endl;
 }
@@ -121,39 +122,39 @@ TfRegTest::_Main(int argc, char *argv[])
     string progName(argv[0]);
 
     if (argc < 2) {
-        ::_Usage(progName);
+        _Usage(progName);
         _PrintTestNames();
         return 2;
     }
 
     if (argc < 2) {
-        ::_Usage(progName);
+        _Usage(progName);
         _PrintTestNames();
         return 2;
     }
 
-    ::_testName = argv[1];
+    _testName = argv[1];
 
-    if (_functionTable.find(::_testName) != _functionTable.end()) {
+    if (_functionTable.find(_testName) != _functionTable.end()) {
         if (argc > 2) {
-            cerr << progName << ": test function '" << ::_testName
+            cerr << progName << ": test function '" << _testName
                  << "' takes no arguments." << endl;
             return 2;
         }
         TfErrorMark m;
-        return ::_HandleErrors(m, (*_functionTable[::_testName])());
+        return _HandleErrors(m, (*_functionTable[_testName])());
     }
-    else if (_functionTableWithArgs.find(::_testName) !=
+    else if (_functionTableWithArgs.find(_testName) !=
              _functionTableWithArgs.end()) {
         TfErrorMark m;
-        return ::_HandleErrors(m,
-                (*_functionTableWithArgs[::_testName])(argc-1, argv+1));
+        return _HandleErrors(m,
+                (*_functionTableWithArgs[_testName])(argc-1, argv+1));
     }
     else {
-        cerr << progName << ": unknown test function " << ::_testName << ".\n";
+        cerr << progName << ": unknown test function " << _testName << ".\n";
         _PrintTestNames();
         return 3;
     }
 }
 
-
+PXR_NAMESPACE_CLOSE_SCOPE

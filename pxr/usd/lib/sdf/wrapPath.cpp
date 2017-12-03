@@ -21,7 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
+#include <set>
+#include <utility>
+#include <vector>
+#include <locale>
+
 #include "pxr/usd/sdf/path.h"
+#include "pxr/base/tf/pyAnnotatedBoolResult.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/hash.h"
@@ -29,14 +38,14 @@
 
 #include <boost/python.hpp>
 
-#include <set>
-#include <utility>
-#include <vector>
-
 using namespace boost::python;
 using std::pair;
 using std::string;
 using std::vector;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static vector<SdfPath> GetPrefixesHelper( const SdfPath &path ) {
     return path.GetPrefixes();
@@ -87,27 +96,19 @@ _FindLongestPrefix(SdfPathVector const &paths, SdfPath const &path)
     return object(*result);
 }
 
-// XXX TODO:
-// In order to accommodate this code moving to amber, CtfPyAnnotatedBoolResult
-// would need to be moved to pxr/base/tf. This is a a medium sized move;
-// I'm deferring that to later to get this into the build now so that
-// refactoring can move forward. We should revisit this.
-
-// struct Sdf_PathIsValidPathStringResult : public CtfPyAnnotatedBoolResult<string>
-// {
-//     Sdf_PathIsValidPathStringResult(bool val, string const &msg) :
-//         TfPyAnnotatedBoolResult<string>(val, msg) {}
-// };
+struct Sdf_PathIsValidPathStringResult : public TfPyAnnotatedBoolResult<string>
+{
+    Sdf_PathIsValidPathStringResult(bool val, string const &msg) :
+        TfPyAnnotatedBoolResult<string>(val, msg) {}
+};
 
 static
-//Sdf_PathIsValidPathStringResult
-bool
+Sdf_PathIsValidPathStringResult
 _IsValidPathString(string const &pathString)
 {
     string errMsg;
     bool valid = SdfPath::IsValidPathString(pathString, &errMsg);
-    // return Sdf_PathIsValidPathStringResult(valid, errMsg);
-    return valid;
+    return Sdf_PathIsValidPathStringResult(valid, errMsg);
 }
 
 static
@@ -122,8 +123,10 @@ _WrapGetAllTargetPathsRecursively(SdfPath const self)
 static bool
 __nonzero__(SdfPath const &self)
 {
-    return not self.IsEmpty();
+    return !self.IsEmpty();
 }
+
+} // anonymous namespace 
 
 void wrapPath() {    
     typedef SdfPath This;
@@ -168,7 +171,7 @@ void wrapPath() {
             "The relational attribute target path for this path.\n\n"
             "EmptyPath if this is not a relational attribute path.")
 
-        .def("GetAllTargetPathsRecursively", &::_WrapGetAllTargetPathsRecursively,
+        .def("GetAllTargetPathsRecursively", &_WrapGetAllTargetPathsRecursively,
              return_value_policy<TfPySequenceToList>())
 
         .def("GetVariantSelection", &This::GetVariantSelection,
@@ -185,6 +188,7 @@ void wrapPath() {
         .def("ContainsPrimVariantSelection", &This::ContainsPrimVariantSelection)
         .def("IsRelationalAttributePath", &This::IsRelationalAttributePath)
         .def("IsTargetPath", &This::IsTargetPath)
+        .def("ContainsTargetPath", &This::ContainsTargetPath)
         .def("IsMapperPath", &This::IsMapperPath)
         .def("IsMapperArgPath", &This::IsMapperArgPath)
         .def("IsExpressionPath", &This::IsExpressionPath)
@@ -285,7 +289,7 @@ void wrapPath() {
         .def(self > self)
         .def(self <= self)
         .def(self >= self)
-        .def("__repr__", ::_Repr)
+        .def("__repr__", _Repr)
         .def("__hash__", &This::GetHash)
         ;
 
@@ -309,7 +313,8 @@ void wrapPath() {
         TfPyContainerConversions::
             variable_capacity_all_items_convertible_policy >();
 
-    // Register conversion for python list -> set<SdfPath>
+    // Register conversion for python list <-> set<SdfPath>
+    to_python_converter<SdfPathSet, TfPySequenceToPython<SdfPathSet> >();
     TfPyContainerConversions::from_python_sequence<
         std::set<SdfPath>,
         TfPyContainerConversions::set_policy >();
@@ -318,8 +323,8 @@ void wrapPath() {
 
     VtValueFromPython<SdfPath>();
 
-    // Sdf_PathIsValidPathStringResult::
-    //     Wrap<Sdf_PathIsValidPathStringResult>("_IsValidPathStringResult",
-    //                                          "errorMessage");
+    Sdf_PathIsValidPathStringResult::
+        Wrap<Sdf_PathIsValidPathStringResult>("_IsValidPathStringResult",
+                                            "errorMessage");
 
 }

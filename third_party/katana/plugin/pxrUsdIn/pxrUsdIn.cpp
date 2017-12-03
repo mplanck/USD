@@ -23,26 +23,25 @@
 //
 #include <FnGeolibServices/FnBuiltInOpArgsUtil.h>
 
+#include "pxr/pxr.h"
 #include "usdKatana/blindDataObject.h"
 #include "usdKatana/cache.h"
 #include "usdKatana/locks.h"
 #include "usdKatana/readBlindData.h"
-
 #include "usdKatana/usdInPluginRegistry.h"
 
 #include "pxr/usd/usd/modelAPI.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
-
 #include "pxr/usd/usd/variantSets.h"
+#include "pxr/usd/usdGeom/metrics.h"
+#include "pxr/usd/usdGeom/motionAPI.h"
 
 #include <FnGeolib/op/FnGeolibOp.h>
+#include <FnGeolib/util/Path.h>
 #include <FnLogging/FnLogging.h>
 
 #include "usdKatana/utils.h"
-
-// just for info
-#include "pxr/usd/usdUtils/pipeline.h"
 
 #include "pxr/base/tf/pathUtils.h"
 
@@ -50,15 +49,20 @@
 #include <stdio.h>
 
 #include <sstream>
+#include <memory>
+
 
 FnLogSetup("PxrUsdIn")
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 namespace FnKat = Foundry::Katana;
 
 // convenience macro to report an error.
 #define ERROR(...)\
     interface.setAttr("type", Foundry::Katana::StringAttribute("error"));\
-    interface.setAttr("errorMesssage", Foundry::Katana::StringAttribute(TfStringPrintf(__VA_ARGS__)));
+    interface.setAttr("errorMessage", Foundry::Katana::StringAttribute(\
+        TfStringPrintf(__VA_ARGS__)));
 
 // see overview.dox for more documentation.
 class PxrUsdInOp : public FnKat::GeolibOp
@@ -81,14 +85,21 @@ public:
         boost::shared_lock<boost::upgrade_mutex> 
             readerLock(UsdKatanaGetStageLock());
 
-        UsdPrim prim;
-        PxrUsdKatanaUsdInArgsRefPtr usdInArgs;
 
         PxrUsdKatanaUsdInPrivateData* privateData = 
-            static_cast<PxrUsdKatanaUsdInPrivateData*>(interface.getPrivateData());
+            static_cast<PxrUsdKatanaUsdInPrivateData*>(
+                interface.getPrivateData());
+
+        // We may be constructing the private data locally -- in which case
+        // it will not be destroyed by the Geolib runtime.
+        // This won't be used directly but rather just filled if the private
+        // needs to be locally built.
+        std::unique_ptr<PxrUsdKatanaUsdInPrivateData> localPrivateData;
 
         FnKat::GroupAttribute opArgs = interface.getOpArg();
         
+        // Get usdInArgs.
+        PxrUsdKatanaUsdInArgsRefPtr usdInArgs;
         if (privateData) {
             usdInArgs = privateData->GetUsdInArgs();
         } else {
@@ -98,37 +109,77 @@ public:
                 .update(opArgs)
                 .deepUpdate(additionalOpArgs)
                 .build();
+            
+            // Construct local private data if none was provided by the parent.
+            // This is a legitmate case for the root of the scene -- most
+            // relevant with the isolatePath pointing at a deeper scope which
+            // may have meaningful type/kind ops.
+            
+            if (usdInArgs->GetStage())
+            {
+                localPrivateData.reset(new PxrUsdKatanaUsdInPrivateData(
+                                   usdInArgs->GetRootPrim(),
+                                   usdInArgs, privateData));
+                privateData = localPrivateData.get();
+            }
         }
-
-        if (not usdInArgs) {
+        // Validate usdInArgs.
+        if (!usdInArgs) {
             ERROR("Could not initialize PxrUsdIn usdInArgs.");
             return;
         }
+        
+        if (!usdInArgs->GetErrorMessage().empty())
+        {
+            ERROR(usdInArgs->GetErrorMessage().c_str());
+            return;
+        }
 
-        if (interface.atRoot()) {
+        UsdStagePtr stage = usdInArgs->GetStage();
+
+        UsdPrim prim = privateData
+            ? privateData->GetUsdPrim()
+            : usdInArgs->GetRootPrim();
+        
+        // Validate usd prim.
+        if (!prim) {
+            ERROR("No prim at %s",
+                  interface.getRelativeOutputLocationPath().c_str());
+            return;
+        }
+
+        // Determine if we want to perform the stage-wide queries.
+        FnAttribute::IntAttribute processStageWideQueries = 
+            opArgs.getChildByName("processStageWideQueries");
+        if (processStageWideQueries.isValid() &&
+            processStageWideQueries.getValue(0, false) == 1) {
             interface.stopChildTraversal();
+            // Reset processStageWideQueries for children ops.
+            opArgs = FnKat::GroupBuilder()
+                .update(opArgs)
+                .set("processStageWideQueries", FnAttribute::IntAttribute(0))
+                .build();
 
-            prim = usdInArgs->GetRootPrim();
+            const bool stageIsZup =
+                (UsdGeomGetStageUpAxis(stage)==UsdGeomTokens->z);
 
-            // XXX This info currently gets used to determine whether
-            // to correctively rotate cameras. The camera's zUp needs to be
-            // recorded until we have no more USD z-Up assets and the katana
-            // assets have no more prerotate camera nodes.
             interface.setAttr("info.usd.stageIsZup",
-                    FnKat::IntAttribute(UsdUtilsGetCamerasAreZup(usdInArgs->GetStage())));
+                              FnKat::IntAttribute(stageIsZup));
 
             // Construct the global camera list at the USD scene root.
             //
             FnKat::StringBuilder cameraListBuilder;
 
-            SdfPathVector cameraPaths = PxrUsdKatanaUtils::FindCameraPaths(prim.GetStage());
+            SdfPathVector cameraPaths = PxrUsdKatanaUtils::FindCameraPaths(stage);
 
             TF_FOR_ALL(cameraPathIt, cameraPaths)
             {
                 const std::string path = (*cameraPathIt).GetString();
 
-                // only add cameras to the camera list that are beneath the isolate prim path
-                if (path.find(usdInArgs->GetIsolatePath()) != std::string::npos)
+                // only add cameras to the camera list that are beneath 
+                // the isolate prim path
+                if (path.find(usdInArgs->GetIsolatePath()) != 
+                    std::string::npos)
                 {
                     cameraListBuilder.push_back(
                         TfNormPath(usdInArgs->GetRootLocationPath()+"/"+
@@ -141,199 +192,280 @@ public:
             {
                 interface.setAttr("cameraList", cameraListAttr);
             }
+
+            // lightList and some globals.itemLists.
+            SdfPathVector lightPaths = PxrUsdKatanaUtils::FindLightPaths(stage);
+            stage->LoadAndUnload(SdfPathSet(lightPaths.begin(), lightPaths.end()),
+                                 SdfPathSet());
+            PxrUsdKatanaUtilsLightListEditor lightListEditor(interface,
+                                                             usdInArgs);
+            for (const SdfPath &p: lightPaths) {
+                lightListEditor.SetPath(p);
+                PxrUsdKatanaUsdInPluginRegistry::
+                    ExecuteLightListFncs(lightListEditor);
+            }
+            lightListEditor.Build();
             
             interface.setAttr("info.usdOpArgs", opArgs);
-            
-            FnKat::GroupAttribute masterMapping =
-                    opArgs.getChildByName("masterMapping");
-            if (masterMapping.isValid() && masterMapping.getNumberOfChildren())
-            {
-                FnGeolibServices::StaticSceneCreateOpArgsBuilder sscb(false);
-                
-                
-                
-                for (size_t i = 0, e = masterMapping.getNumberOfChildren();
-                        i != e; ++i)
-                {
-                    std::string masterName = FnKat::DelimiterDecode(
-                            masterMapping.getChildName(i));
-                    
-                    std::string katanaPath =  FnKat::StringAttribute(
-                            masterMapping.getChildByIndex(i)
-                                    ).getValue("", false);
-                    
-                    if (katanaPath.empty())
-                    {
-                        continue;
-                    }
-                    
-                    sscb.createEmptyLocation(katanaPath, "instance source");
-                    sscb.setAttrAtLocation(katanaPath,
-                            "tabs.scenegraph.stopExpand", FnKat::IntAttribute(1));
-                    sscb.setAttrAtLocation(katanaPath, "childPrimPath",
-                            FnKat::StringAttribute(masterName));
-                }
-                
-                interface.createChild(
-                        "Masters",
-                        "PxrUsdIn.MasterIntermediate",
-                        FnKat::GroupBuilder()
-                            .update(opArgs)
-                            .set("staticScene", sscb.build())
-                            .build(),
-                        FnKat::GeolibCookInterface::ResetRootFalse,
-                        new PxrUsdKatanaUsdInPrivateData(
-                                usdInArgs->GetRootPrim(), usdInArgs, privateData),
-                        PxrUsdKatanaUsdInPrivateData::Delete);
-                
-                
-            }
-            
-        }
-        else {
-            prim = privateData->GetUsdPrim();
-        }
-
-        if (not prim) {
-            ERROR("No prim at %s", interface.getRelativeOutputLocationPath().c_str());
-            return;
         }
 
         bool verbose = usdInArgs->IsVerbose();
 
-        if (not prim.IsLoaded()) {
-            SdfPath pathToLoad = prim.GetPath();
-            UsdStageRefPtr stage = prim.GetStage();
-            readerLock.unlock();
-            prim = _LoadPrim(stage, pathToLoad, verbose);
-            if (not prim) {
-                ERROR("load prim %s failed", pathToLoad.GetText());
-                return;
-            }
-            readerLock.lock();
-        }
-
-        //
-        // Compute and set the 'bound' attribute.
-        //
-        // Note, bound computation is handled here because bounding
-        // box computation requires caching for optimal performance.
-        // Instead of passing around a bounding box cache everywhere
-        // it's needed, we use the usdInArgs data strucutre for caching.
-        //
-
-        if (PxrUsdKatanaUtils::IsBoundable(prim)) {
-            interface.setAttr("bound",
-                _MakeBoundsAttribute(prim, usdInArgs));
-        }
-
-        //
-        // Find and execute the core op that handles the USD type.
-        //
-
+        // The next section only makes sense to execute on non-pseudoroot prims
+        if (prim.GetPath() != SdfPath::AbsoluteRootPath())
         {
-            std::string opName;
-            if (PxrUsdKatanaUsdInPluginRegistry::FindUsdType(
-                    prim.GetTypeName(), &opName)) {
-                if (not opName.empty()) {
-                    interface.execOp(opName, opArgs);
+            if (!prim.IsLoaded()) {
+                SdfPath pathToLoad = prim.GetPath();
+                readerLock.unlock();
+                prim = _LoadPrim(stage, pathToLoad, verbose);
+                if (!prim) {
+                    ERROR("load prim %s failed", pathToLoad.GetText());
+                    return;
+                }
+                readerLock.lock();
+            }
+
+            // When in "as sources and instances" mode, scan for instances
+            // and masters at each location that contains a payload.
+            if (prim.HasPayload() &&
+                !usdInArgs->GetPrePopulate() &&
+                FnAttribute::StringAttribute(
+                    interface.getOpArg("instanceMode")
+                    ).getValue("expanded", false) == 
+                "as sources and instances")
+            {
+                FnKat::GroupAttribute masterMapping =
+                    PxrUsdKatanaUtils::BuildInstanceMasterMapping(
+                        prim.GetStage(), prim.GetPath());
+                FnKat::StringAttribute masterParentPath(prim.GetPath().GetString());
+                if (masterMapping.isValid() &&
+                    masterMapping.getNumberOfChildren()) {
+                    opArgs = FnKat::GroupBuilder()
+                        .update(opArgs)
+                        .set("masterMapping", masterMapping)
+                        .set("masterParentPath", masterParentPath)
+                        .build();
+                } else {
+                    opArgs = FnKat::GroupBuilder()
+                        .update(opArgs)
+                        .del("masterMapping")
+                        .build();
                 }
             }
-        }
 
-        //
-        // Find and execute the site-specific op that handles the USD type.
-        //
+            //
+            // Pass along the prim's velocityScale; if it isn't authored, let the
+            // inherited value flow through.
+            //
 
-        {
-            std::string opName;
-            if (PxrUsdKatanaUsdInPluginRegistry::FindUsdTypeForSite(
-                    prim.GetTypeName(), &opName)) {
-                if (not opName.empty()) {
-                    interface.execOp(opName, opArgs);
+            float velocityScale = FnKat::FloatAttribute(
+                opArgs.getChildByName("velocityScale")).getValue(1.0f, false);
+            auto motionAPI = UsdGeomMotionAPI(prim);
+            UsdAttribute velocityScaleAttr = motionAPI.GetVelocityScaleAttr();
+            if (velocityScaleAttr and velocityScaleAttr.HasAuthoredValueOpinion() and
+                velocityScaleAttr.Get(&velocityScale, privateData->GetCurrentTime()))
+            {
+                opArgs = FnKat::GroupBuilder()
+                    .update(opArgs)
+                    .set("velocityScale", FnKat::FloatAttribute(velocityScale))
+                    .build();
+            }
+
+            //
+            // Compute and set the 'bound' attribute.
+            //
+            // Note, bound computation is handled here because bounding
+            // box computation requires caching for optimal performance.
+            // Instead of passing around a bounding box cache everywhere
+            // it's needed, we use the usdInArgs data strucutre for caching.
+            //
+
+            if (PxrUsdKatanaUtils::IsBoundable(prim)) {
+                interface.setAttr("bound",
+                                  _MakeBoundsAttribute(prim, *privateData));
+            }
+
+            //
+            // Find and execute the core op that handles the USD type.
+            //
+
+            {
+                std::string opName;
+                if (PxrUsdKatanaUsdInPluginRegistry::FindUsdType(
+                        prim.GetTypeName(), &opName)) {
+                    if (!opName.empty()) {
+                        
+                        if (privateData)
+                        {
+                            // roughly equivalent to execOp except that we can
+                            // locally override privateData
+                            PxrUsdKatanaUsdInPluginRegistry::ExecuteOpDirectExecFnc(
+                                    opName, *privateData, opArgs, interface);
+
+                            opArgs = privateData->updateExtensionOpArgs(opArgs);
+                        }
+                        
+                    }
                 }
             }
-        }
 
-        //
-        // Find and execute the core kind op that handles the model kind.
-        //
+            //
+            // Find and execute the site-specific op that handles the USD type.
+            //
 
-        bool execKindOp = FnKat::IntAttribute(
+            {
+                std::string opName;
+                if (PxrUsdKatanaUsdInPluginRegistry::FindUsdTypeForSite(
+                        prim.GetTypeName(), &opName)) {
+                    if (!opName.empty()) {
+                        if (privateData)
+                        {
+                            // roughly equivalent to execOp except that we can
+                            // locally override privateData
+                            PxrUsdKatanaUsdInPluginRegistry::ExecuteOpDirectExecFnc(
+                                    opName, *privateData, opArgs, interface);
+                            opArgs = privateData->updateExtensionOpArgs(opArgs);
+                        }
+                    }
+                }
+            }
+
+            //
+            // Find and execute the core kind op that handles the model kind.
+            //
+
+            bool execKindOp = FnKat::IntAttribute(
                 interface.getOutputAttr("__UsdIn.execKindOp")).getValue(1, false);
 
-        if (execKindOp)
-        {
-            TfToken kind;
-            if (UsdModelAPI(prim).GetKind(&kind)) {
-                std::string opName;
-                if (PxrUsdKatanaUsdInPluginRegistry::FindKind(kind, &opName)) {
-                    if (not opName.empty()) {
-                        interface.execOp(opName, opArgs);
+            if (execKindOp)
+            {
+                TfToken kind;
+                if (UsdModelAPI(prim).GetKind(&kind)) {
+                    std::string opName;
+                    if (PxrUsdKatanaUsdInPluginRegistry::FindKind(kind, &opName)) {
+                        if (!opName.empty()) {
+                            if (privateData)
+                            {
+                                // roughly equivalent to execOp except that we can
+                                // locally override privateData
+                                PxrUsdKatanaUsdInPluginRegistry::ExecuteOpDirectExecFnc(
+                                        opName, *privateData, opArgs, interface);
+                                
+                                opArgs = privateData->updateExtensionOpArgs(opArgs);
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        //
-        // Find and execute the site-specific kind op that handles the model kind.
-        //
+            //
+            // Find and execute the site-specific kind op that handles 
+            // the model kind.
+            //
 
-        if (_hasSiteKinds) {
-            TfToken kind;
-            if (UsdModelAPI(prim).GetKind(&kind)) {
-                std::string opName;
-                if (PxrUsdKatanaUsdInPluginRegistry::FindKindForSite(kind, &opName)) {
-                    if (not opName.empty()) {
-                        interface.execOp(opName, opArgs);
+            if (_hasSiteKinds) {
+                TfToken kind;
+                if (UsdModelAPI(prim).GetKind(&kind)) {
+                    std::string opName;
+                    if (PxrUsdKatanaUsdInPluginRegistry::FindKindForSite(
+                            kind, &opName)) {
+                        if (!opName.empty()) {
+                            if (privateData)
+                            {
+                                PxrUsdKatanaUsdInPluginRegistry::ExecuteOpDirectExecFnc(
+                                        opName, *privateData, opArgs, interface);
+                                opArgs = privateData->updateExtensionOpArgs(opArgs);
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        //
-        // Read blind data. This is last because blind data opinions should always win.
-        //
+            //
+            // Read blind data. This is last because blind data opinions 
+            // should always win.
+            //
 
-        PxrUsdKatanaAttrMap attrs;
-        PxrUsdKatanaReadBlindData(UsdKatanaBlindDataObject(prim), attrs);
-        attrs.toInterface(interface);
-
+            PxrUsdKatanaAttrMap attrs;
+            PxrUsdKatanaReadBlindData(UsdKatanaBlindDataObject(prim), attrs);
+            attrs.toInterface(interface);
+        }   // if (prim.GetPath() != SdfPath::AbsoluteRootPath())
+        
         bool skipAllChildren = FnKat::IntAttribute(
-                interface.getOutputAttr("__UsdIn.skipAllChildren")).getValue(0, false);
+                interface.getOutputAttr("__UsdIn.skipAllChildren")).getValue(
+                0, false);
+
+        if (prim.IsMaster() and FnKat::IntAttribute(
+                opArgs.getChildByName("childOfIntermediate")
+                ).getValue(0, false) == 1)
+        {
+            interface.setAttr("type",
+                    FnKat::StringAttribute("instance source"));
+            interface.setAttr("tabs.scenegraph.stopExpand", 
+                    FnKat::IntAttribute(1));
+
+            // XXX masters are simple placeholders and will not get read as
+            // models, so we'll need to explicitly process their Looks in a
+            // manner similar to what the PxrUsdInCore_ModelOp does.
+            UsdPrim lookPrim =
+                    prim.GetChild(TfToken(
+                    UsdKatanaTokens->katanaLooksScopeName));
+            if (lookPrim)
+            {
+                interface.setAttr(UsdKatanaTokens->katanaLooksChildNameExclusionAttrName,
+                        FnKat::IntAttribute(1));
+                interface.createChild(TfToken(UsdKatanaTokens->katanaLooksScopeName),
+                        "UsdInCore_LooksGroupOp",
+                        FnKat::GroupAttribute(),
+                        FnKat::GeolibCookInterface::ResetRootTrue,
+                        new PxrUsdKatanaUsdInPrivateData(
+                            lookPrim,
+                            privateData->GetUsdInArgs(),
+                            privateData),
+                        PxrUsdKatanaUsdInPrivateData::Delete);
+            }
+        }
 
         if (prim.IsInstance())
         {
             UsdPrim master = prim.GetMaster();
             interface.setAttr("info.usd.masterPrimPath",
-                    FnAttribute::StringAttribute(master.GetPrimPath().GetString()));
-            
+                    FnAttribute::StringAttribute(
+                        master.GetPrimPath().GetString()));
             
             FnAttribute::StringAttribute masterPathAttr = 
                     opArgs.getChildByName("masterMapping." +
-                            FnKat::DelimiterEncode(master.GetPrimPath().GetString()));
+                            FnKat::DelimiterEncode(
+                                master.GetPrimPath().GetString()));
             if (masterPathAttr.isValid())
             {
                 std::string masterPath = masterPathAttr.getValue("", false);
-                
+
+                std::string masterParentPath = FnAttribute::StringAttribute(
+                    opArgs.getChildByName("masterParentPath"))
+                    .getValue("", false);
+                if (masterParentPath == "/") {
+                    masterParentPath = std::string();
+                }
+
                 if (!masterPath.empty())
                 {
                     interface.setAttr(
                             "type", FnKat::StringAttribute("instance"));
                     interface.setAttr("geometry.instanceSource",
                             FnAttribute::StringAttribute(
-                                usdInArgs->GetRootLocationPath() + "/Masters/" + masterPath));
+                                usdInArgs->GetRootLocationPath() + 
+                                masterParentPath +
+                                "/Masters/" + masterPath));
                     
-                    // XXX, ConstraintGroups are still made for models that became
-                    //      instances. Need to suppress creation of that stuff
+                    // XXX, ConstraintGroups are still made for models 
+                    //      that became instances. Need to suppress creation 
+                    //      of that stuff
                     interface.deleteChildren();
                     skipAllChildren = true;
                 }
             }
-            
-            
         }
-        
         
         // advertise available variants for UIs to choose amongst
         UsdVariantSets variantSets = prim.GetVariantSets();
@@ -354,16 +486,84 @@ public:
                             variantSet.GetVariantSelection()));
             
         }
+            
+        // Emit "Masters".
+        // When prepopulating, these will be discovered and emitted under
+        // the root.  Otherwise, they will be discovered incrementally
+        // as each payload is loaded, and we emit them under the payload's
+        // location.
+        if (interface.atRoot() ||
+            (prim.HasPayload() && !usdInArgs->GetPrePopulate())) {
+            FnKat::GroupAttribute masterMapping =
+                    opArgs.getChildByName("masterMapping");
+            if (masterMapping.isValid() && masterMapping.getNumberOfChildren())
+            {
+                FnGeolibServices::StaticSceneCreateOpArgsBuilder sscb(false);
+                
+                for (size_t i = 0, e = masterMapping.getNumberOfChildren();
+                        i != e; ++i)
+                {
+                    std::string masterName = FnKat::DelimiterDecode(
+                            masterMapping.getChildName(i));
+                    
+                    std::string katanaPath =  FnKat::StringAttribute(
+                            masterMapping.getChildByIndex(i)
+                                    ).getValue("", false);
+                    
+                    if (katanaPath.empty())
+                    {
+                        continue;
+                    }
+                    
+                    katanaPath = "Masters/" + katanaPath;
+                    
+                    std::string leafName =
+                            FnGeolibUtil::Path::GetLeafName(katanaPath);
+                    std::string locationParent =
+                            FnGeolibUtil::Path::GetLocationParent(katanaPath);
+                    
+                    sscb.setAttrAtLocation(locationParent, "usdPrimPath",
+                            FnKat::StringAttribute(masterName));
+                    sscb.setAttrAtLocation(locationParent, "usdPrimName",
+                            FnKat::StringAttribute(leafName));
+                }
+                
+                FnKat::GroupAttribute childAttrs =
+                    sscb.build().getChildByName("c");
+                for (int64_t i = 0; i < childAttrs.getNumberOfChildren(); ++i)
+                {
+                    interface.createChild(
+                        childAttrs.getChildName(i),
+                        "PxrUsdIn.BuildIntermediate",
+                        FnKat::GroupBuilder()
+                            .update(opArgs)
+                            .set("staticScene", childAttrs.getChildByIndex(i))
+                            .build(),
+                        FnKat::GeolibCookInterface::ResetRootFalse,
+                        new PxrUsdKatanaUsdInPrivateData(
+                                usdInArgs->GetRootPrim(),
+                                usdInArgs, privateData),
+                        PxrUsdKatanaUsdInPrivateData::Delete);
+                }
+            }
+        }
 
+        if (privateData)
+        {
+            opArgs = PxrUsdKatanaUsdInPluginRegistry::ExecuteLocationDecoratorOps(
+                    *privateData, opArgs, interface);
+        }
 
-        if (not skipAllChildren) {
+        if (!skipAllChildren) {
 
             std::set<std::string> childrenToSkip;
-            FnKat::GroupAttribute childOps = interface.getOutputAttr("__UsdIn.skipChild");
+            FnKat::GroupAttribute childOps = interface.getOutputAttr(
+                "__UsdIn.skipChild");
             if (childOps.isValid()) {
                 for (int64_t i = 0; i < childOps.getNumberOfChildren(); i++) {
                     std::string childName = childOps.getChildName(i);
-                    bool shouldSkip = FnKat::IntAttribute(childOps.getChildByIndex(i)).getValue(0, false);
+                    bool shouldSkip = FnKat::IntAttribute(
+                        childOps.getChildByIndex(i)).getValue(0, false);
                     if (shouldSkip) {
                         childrenToSkip.insert(childName);
                     }
@@ -374,12 +574,13 @@ public:
             // we replace the current prim with the master prim before 
             // iterating on the children.
             //
-            if (prim.IsInstance() and not privateData->GetMasterPath().IsEmpty())
+            if (prim.IsInstance() && !privateData->GetMasterPath().IsEmpty())
             {
                 const UsdPrim& masterPrim = prim.GetMaster();
-                if (not masterPrim)
+                if (!masterPrim)
                 {
-                    ERROR("USD Prim is advertised as an instance but master prim cannot be found.");
+                    ERROR("USD Prim is advertised as an instance "
+                        "but master prim cannot be found.");
                 }
                 else
                 {
@@ -388,7 +589,12 @@ public:
             }
 
             // create children
-            TF_FOR_ALL(childIter, prim.GetFilteredChildren(UsdPrimIsDefined and UsdPrimIsActive and not UsdPrimIsAbstract))
+            auto predicate = UsdPrimIsActive && !UsdPrimIsAbstract;
+            if (interface.getNumInputs() == 0) {
+                // Require a defining specifier on prims if there is no input.
+                predicate = UsdPrimIsDefined && predicate;
+            }
+            TF_FOR_ALL(childIter, prim.GetFilteredChildren(predicate))
             {
                 const UsdPrim& child = *childIter;
                 const std::string& childName = child.GetName();
@@ -397,136 +603,124 @@ public:
                     continue;
                 }
 
+                // If we allow prims without a defining specifier then
+                // also check that the prim exists in the input so we
+                // have something to override.
+                if (!child.HasDefiningSpecifier()) {
+                    if (!interface.doesLocationExist(childName)) {
+                        // Skip over with no def.
+                        continue;
+                    }
+                }
+
                 interface.createChild(
                         childName,
                         "",
                         opArgs,
                         FnKat::GeolibCookInterface::ResetRootFalse,
-                        new PxrUsdKatanaUsdInPrivateData(child, usdInArgs, privateData),
+                        new PxrUsdKatanaUsdInPrivateData(
+                                child, usdInArgs,
+                                privateData),
                         PxrUsdKatanaUsdInPrivateData::Delete);
             }
         }
 
         // keep things around if we are verbose
-        if (not verbose) {
+        if (!verbose) {
             interface.deleteAttr("__UsdIn");
         }
+        
+        
+        
+        
     }
 
-    // TODO, consider caching this conversion
-    static
-    std::string GetVariantStringFromSession(
-            FnAttribute::GroupAttribute sessionAttr,
-                    const std::string & rootLocation)
-    {
-        FnAttribute::GroupAttribute variantsAttr =
-                sessionAttr.getChildByName("variants");
-        if (variantsAttr.getNumberOfChildren() == 0)
-        {
-            return "";
-        }
-        
-        std::string rootLocationPlusSlash = rootLocation + "/";
-        
-        std::ostringstream buffer;
-        
-        for (int64_t i = 0, e = variantsAttr.getNumberOfChildren(); i != e;
-                ++i)
-        {
-            std::string entryName = FnAttribute::DelimiterDecode(
-                    variantsAttr.getChildName(i));
-            
-            FnAttribute::GroupAttribute entryVariantSets =
-                    variantsAttr.getChildByIndex(i);
-            
-            if (entryVariantSets.getNumberOfChildren() == 0)
-            {
-                continue;
-            }
-            
-            if (!pystring::startswith(entryName, rootLocationPlusSlash))
-            {
-                continue;
-            }
-            
-            std::string primPath = pystring::slice(entryName,
-                    rootLocation.size());
-            
-            for (int64_t i = 0, e = entryVariantSets.getNumberOfChildren();
-                    i != e; ++i)
-            {
-                std::string variantSetName = entryVariantSets.getChildName(i);
-                
-                FnAttribute::StringAttribute variantValueAttr =
-                        entryVariantSets.getChildByIndex(i);
-                if (!variantValueAttr.isValid())
-                {
-                    continue;
-                }
-                
-                buffer << ' ' << SdfPath(primPath).AppendVariantSelection(
-                        variantSetName, variantValueAttr.getValue("", false)
-                                ).GetString();
-            }
-        }
-        
-        return buffer.str();
-    }
+    
 
     static PxrUsdKatanaUsdInArgsRefPtr
     InitUsdInArgs(const FnKat::GeolibCookInterface &interface,
             FnKat::GroupAttribute & additionalOpArgs)
     {
+        ArgsBuilder ab;
+        
         FnKat::StringAttribute usdFileAttr = interface.getOpArg("fileName");
-        if (not usdFileAttr.isValid()) {
-            FnLogInfo("Missing fileName attr.");
-            return TfNullPtr;
+        if (!usdFileAttr.isValid()) {
+            return ab.buildWithError("PxrUsdIn: USD fileName not specified.");
         }
 
         std::string fileName = usdFileAttr.getValue();
         
-        std::string rootLocation = FnKat::StringAttribute(
+        ab.rootLocation = FnKat::StringAttribute(
                 interface.getOpArg("location")).getValue(
                         interface.getRootLocationPath(), false);
         
-        std::string variants = FnKat::StringAttribute(
-                interface.getOpArg("variants")).getValue("", false);
         
-        std::string sessionLocation = rootLocation;
+        std::string sessionLocation = ab.rootLocation;
         FnKat::StringAttribute sessionLocationAttr = 
                 interface.getOpArg("sessionLocation");
         if (sessionLocationAttr.isValid()) {
             sessionLocation = sessionLocationAttr.getValue();
         }
         
-        variants += GetVariantStringFromSession(
-                interface.getOpArg("session"), sessionLocation);
+        FnAttribute::GroupAttribute sessionAttr = 
+            interface.getOpArg("session");
 
-        SdfPathSet variantSelections;
+        
+        
+        // XXX BEGIN convert the legacy variant string to the session
+        // TODO: decide how long to do this as this form has been deprecated
+        //       for some time but may still be present in secondary uses
+        FnAttribute::GroupBuilder legacyVariantsGb;
+        
+        std::string variants = FnKat::StringAttribute(
+                interface.getOpArg("variants")).getValue("", false);
         std::set<std::string> selStrings = TfStringTokenizeToSet(variants);
         TF_FOR_ALL(selString, selStrings) {
             std::string errMsg;
             if (SdfPath::IsValidPathString(*selString, &errMsg)) {
                 SdfPath varSelPath(*selString);
                 if (varSelPath.IsPrimVariantSelectionPath()) {
-                    variantSelections.insert( SdfPath(*selString) );
+                    
+                    std::string entryPath = FnAttribute::DelimiterEncode(
+                            sessionLocation + 
+                            varSelPath.GetPrimPath().GetString());
+                    std::pair<std::string, std::string> sel =
+                            varSelPath.GetVariantSelection();
+                    
+                    legacyVariantsGb.set(entryPath + "." + sel.first,
+                            FnAttribute::StringAttribute(sel.second));
                     continue;
-                }   
-            }   
-            FnLogWarn(TfStringPrintf("Bad variant selection \"%s\"",
-                                     selString->c_str()).c_str());
-            return TfNullPtr;
+                }
+            }
+            
+            return ab.buildWithError(
+                    TfStringPrintf("PxrUsdIn: Bad variant selection \"%s\"",
+                            selString->c_str()).c_str());
         }
+        
+        FnAttribute::GroupAttribute legacyVariants = legacyVariantsGb.build();
+        
+        if (legacyVariants.getNumberOfChildren() > 0)
+        {
+            sessionAttr = FnAttribute::GroupBuilder()
+                .set("variants", legacyVariants)
+                .deepUpdate(sessionAttr)
+                .build();
+        }
+        // XXX END
 
-        std::string ignoreLayerRegex = FnKat::StringAttribute(
+        ab.sessionLocation = sessionLocation;
+        ab.sessionAttr = sessionAttr;
+
+        ab.ignoreLayerRegex = FnKat::StringAttribute(
                 interface.getOpArg("ignoreLayerRegex")).getValue("", false);
 
-        bool verbose = FnKat::IntAttribute(
+        ab.verbose = FnKat::IntAttribute(
                 interface.getOpArg("verbose")).getValue(0, false);
 
         FnKat::GroupAttribute systemArgs(interface.getOpArg("system"));
 
-        double currentTime = 
+        ab.currentTime = 
             FnKat::FloatAttribute(systemArgs.getChildByName(
                 "timeSlice.currentTime")).getValue(0, false);
 
@@ -534,15 +728,13 @@ public:
             FnKat::IntAttribute(systemArgs.getChildByName(
                 "timeSlice.numSamples")).getValue(1, false);
 
-        double shutterOpen =
+        ab.shutterOpen =
             FnKat::FloatAttribute(systemArgs.getChildByName(
                 "timeSlice.shutterOpen")).getValue(0, false);
 
-        double shutterClose =
+        ab.shutterClose =
             FnKat::FloatAttribute(systemArgs.getChildByName(
                 "timeSlice.shutterClose")).getValue(0, false);
-
-        std::vector<double> motionSampleTimes;
 
         std::string motionSampleStr = FnKat::StringAttribute(
                 interface.getOpArg("motionSampleTimes")).getValue("", false);
@@ -550,58 +742,62 @@ public:
         // If motion samples was specified, convert the string of values
         // into a vector of doubles to store with the root args.
         //
-        if (numSamples < 2 or motionSampleStr.empty())
+        if (numSamples < 2 || motionSampleStr.empty())
         {
-            motionSampleTimes.push_back(0);
+            ab.motionSampleTimes.push_back(0);
         }
         else
         {
             std::vector<std::string> tokens;
             pystring::split(motionSampleStr, tokens, " ");
 
-            for (std::vector<std::string>::iterator it = tokens.begin(); it != tokens.end(); ++it)
+            for (std::vector<std::string>::iterator it = tokens.begin(); 
+                it != tokens.end(); ++it)
             {
-                motionSampleTimes.push_back(std::stod(*it));
+                ab.motionSampleTimes.push_back(std::stod(*it));
             }
         }
 
-        UsdStageRefPtr stage = 
-            UsdKatanaCache::GetInstance().GetStage(
-                fileName, 
-                variantSelections, 
-                ignoreLayerRegex, 
-                true /* forcePopulate */);
+        // Determine whether to prepopulate the USD stage.
+        ab.prePopulate =
+            FnKat::IntAttribute(interface.getOpArg("prePopulate"))
+                        .getValue(1 /* default prePopulate=yes */ , false);
 
-        if (not stage) {
-            FnLogInfo("No stage.");
-            return TfNullPtr;
+        ab.stage =  UsdKatanaCache::GetInstance().GetStage(
+                fileName, 
+                sessionAttr, sessionLocation,
+                ab.ignoreLayerRegex, 
+                ab.prePopulate);
+
+        if (!ab.stage) {
+            return ab.buildWithError("PxrUsdIn: USD Stage cannot be loaded.");
         }
 
         if (FnAttribute::StringAttribute(
                 interface.getOpArg("instanceMode")
-                        ).getValue("expanded", false) == "as sources and instances")
+                    ).getValue("expanded", false) == 
+                "as sources and instances")
         {
             additionalOpArgs = FnKat::GroupAttribute("masterMapping",
-                    PxrUsdKatanaUtils::BuildInstanceMasterMapping(stage), true);
+                PxrUsdKatanaUtils::BuildInstanceMasterMapping(ab.stage,
+                                      SdfPath::AbsoluteRootPath()), true);
         }
         
-        
-        
-
-        std::string isolatePath = FnKat::StringAttribute(
+        ab.isolatePath = FnKat::StringAttribute(
             interface.getOpArg("isolatePath")).getValue("", false);
 
         // if the specified isolatePath is not a valid prim, clear it out
-        if (not isolatePath.empty() and not stage->GetPrimAtPath(SdfPath(isolatePath)))
+        if (!ab.isolatePath.empty() && !ab.stage->GetPrimAtPath(
+            SdfPath(ab.isolatePath)))
         {
-            FnLogWarn("Invalid isolatePath: " << isolatePath);
-            isolatePath = "";
+            std::ostringstream errorBuffer;
+            errorBuffer << "PxrUsdIn: Invalid isolatePath: " << 
+                ab.isolatePath << ".";
+            return ab.buildWithError(errorBuffer.str());
         }
 
         // get extra attributes or namespaces if they exist
         //
-        PxrUsdKatanaUsdInArgs::StringListMap extraAttributesOrNamespaces;
-
         FnKat::StringAttribute extraAttributesOrNamespacesAttr = 
             interface.getOpArg("extraAttributesOrNamespaces");
 
@@ -622,39 +818,28 @@ public:
                 }
                 
                 pystring::split(value, tokens, ":", 1);
-                extraAttributesOrNamespaces[tokens[0]].push_back(value);
+                ab.extraAttributesOrNamespaces[tokens[0]].push_back(value);
             }
         }
         
         // always include userProperties if not explicitly included.
-        if (extraAttributesOrNamespaces.find("userProperties")
-                == extraAttributesOrNamespaces.end())
+        if (ab.extraAttributesOrNamespaces.find("userProperties")
+                == ab.extraAttributesOrNamespaces.end())
         {
-            extraAttributesOrNamespaces["userProperties"].push_back(
+            ab.extraAttributesOrNamespaces["userProperties"].push_back(
                     "userProperties");
         }
         else
         {
             // if it is there, enforce that it includes only the top-level attr
             std::vector<std::string> & userPropertiesNames =
-                    extraAttributesOrNamespaces["userProperties"];
+                    ab.extraAttributesOrNamespaces["userProperties"];
             
             userPropertiesNames.clear();
             userPropertiesNames.push_back("userProperties");
         }
-
-        return PxrUsdKatanaUsdInArgs::New(
-                stage,
-                rootLocation,
-                isolatePath,
-                variantSelections,
-                ignoreLayerRegex,
-                currentTime,
-                shutterOpen,
-                shutterClose,
-                motionSampleTimes,
-                extraAttributesOrNamespaces,
-                verbose);
+        
+        return ab.build();
     }
 
 private:
@@ -682,17 +867,24 @@ private:
     static FnKat::DoubleAttribute
     _MakeBoundsAttribute(
             const UsdPrim& prim,
-            PxrUsdKatanaUsdInArgsRefPtr usdInArgs)
+            const PxrUsdKatanaUsdInPrivateData& data)
     {
         if (prim.GetPath() == SdfPath::AbsoluteRootPath()) {
             // Special-case to pre-empt coding errors.
             return FnKat::DoubleAttribute();
         }
-        std::vector<GfBBox3d> bounds = usdInArgs->ComputeBounds(prim);
-        const std::vector<double>& motionSampleTimes = usdInArgs->GetMotionSampleTimes();
+        const std::vector<double>& motionSampleTimes =
+            data.GetMotionSampleTimes();
+        std::vector<GfBBox3d> bounds =
+            data.GetUsdInArgs()->ComputeBounds(prim, motionSampleTimes);
+
         bool hasInfiniteBounds = false;
-        FnKat::DoubleAttribute boundsAttr = PxrUsdKatanaUtils::ConvertBoundsToAttribute(
-                bounds, motionSampleTimes, &hasInfiniteBounds);
+        bool isMotionBackward = motionSampleTimes.size() > 1 &&
+            motionSampleTimes.front() > motionSampleTimes.back();
+        FnKat::DoubleAttribute boundsAttr = 
+            PxrUsdKatanaUtils::ConvertBoundsToAttribute(
+                bounds, motionSampleTimes, isMotionBackward, 
+                &hasInfiniteBounds);
 
         // Report infinite bounds as a warning.
         if (hasInfiniteBounds) {
@@ -710,11 +902,12 @@ bool PxrUsdInOp::_hasSiteKinds = false;
 //-----------------------------------------------------------------------------
 
 /*
- * This op bootstraps the primary PxrUsdIn op in order to have GeolibPrivateData
- * available at the root op location in PxrUsdIn. Since the GeolibCookInterface
- * API does not currently have the ability to pass GeolibPrivateData via execOp,
- * and we must exec all of the registered plugins to process USD prims, we instead
- * pre-build the GeolibPrivateData for the root location to ensure it is available.
+ * This op bootstraps the primary PxrUsdIn op in order to have
+ * GeolibPrivateData available at the root op location in PxrUsdIn. Since the 
+ * GeolibCookInterface API does not currently have the ability to pass 
+ * GeolibPrivateData via execOp, and we must exec all of the registered plugins
+ * to process USD prims, we instead pre-build the GeolibPrivateData for the
+ * root location to ensure it is available.
  */
 class PxrUsdInBootstrapOp : public FnKat::GeolibOp
 {
@@ -737,6 +930,17 @@ public:
         FnKat::GroupAttribute additionalOpArgs;
         PxrUsdKatanaUsdInArgsRefPtr usdInArgs =
                 PxrUsdInOp::InitUsdInArgs(interface, additionalOpArgs);
+        
+        if (!usdInArgs) {
+            ERROR("Could not initialize PxrUsdIn usdInArgs.");
+            return;
+        }
+        
+        if (!usdInArgs->GetErrorMessage().empty())
+        {
+            ERROR(usdInArgs->GetErrorMessage().c_str());
+            return;
+        }
 
         FnKat::GroupAttribute opArgs = FnKat::GroupBuilder()
             .update(interface.getOpArg())
@@ -752,7 +956,8 @@ public:
 
         if (tokens.empty())
         {
-            ERROR("Could not initialize PxrUsdIn op with PxrUsdIn.Bootstrap op.");
+            ERROR("Could not initialize PxrUsdIn op with "
+                "PxrUsdIn.Bootstrap op.");
             return;
         }
 
@@ -763,14 +968,17 @@ public:
                         "PxrUsdIn",
                         opArgs,
                         FnKat::GeolibCookInterface::ResetRootTrue,
-                        new PxrUsdKatanaUsdInPrivateData(usdInArgs->GetRootPrim(), usdInArgs),
+                        new PxrUsdKatanaUsdInPrivateData(
+                                usdInArgs->GetRootPrim(),
+                                usdInArgs,
+                                NULL /* parentData */),
                         PxrUsdKatanaUsdInPrivateData::Delete);
     }
 
 };
 
 
-class PxrUsdInMasterIntermediateOp : public FnKat::GeolibOp
+class PxrUsdInBuildIntermediateOp : public FnKat::GeolibOp
 {
 public:
     static void setup(FnKat::GeolibSetupInterface &interface)
@@ -778,89 +986,116 @@ public:
         interface.setThreading(
                 FnKat::GeolibSetupInterface::ThreadModeConcurrent);
     }
-    
+
     static void cook(FnKat::GeolibCookInterface &interface)
     {
-        PxrUsdKatanaUsdInPrivateData* privateData = 
-            static_cast<PxrUsdKatanaUsdInPrivateData*>(interface.getPrivateData());
+        PxrUsdKatanaUsdInPrivateData* privateData =
+            static_cast<PxrUsdKatanaUsdInPrivateData*>(
+                interface.getPrivateData());
         PxrUsdKatanaUsdInArgsRefPtr usdInArgs = privateData->GetUsdInArgs();
-        
+
         FnKat::GroupAttribute staticScene =
                 interface.getOpArg("staticScene");
-        
+
         FnKat::GroupAttribute attrsGroup = staticScene.getChildByName("a");
-        
-        FnKat::StringAttribute childPrimNameAttr =
-                attrsGroup.getChildByName("childPrimPath");
-        
-        if (childPrimNameAttr.isValid())
+
+        FnKat::StringAttribute primPathAttr =
+                attrsGroup.getChildByName("usdPrimPath");
+        FnKat::StringAttribute primNameAttr =
+                attrsGroup.getChildByName("usdPrimName");
+
+        // If prim attrs are present, use them to build out the usd prim.
+        // Otherwise, build out a katana group.
+        //
+        if (primPathAttr.isValid())
         {
             attrsGroup = FnKat::GroupBuilder()
                 .update(attrsGroup)
-                .del("childPrimPath")
+                .del("usdPrimPath")
+                .del("usdPrimName")
                 .build();
-            
-            std::string childPrimName = childPrimNameAttr.getValue("", false);
-            
-            if (!childPrimName.empty())
+
+            std::string primPath = primPathAttr.getValue("", false);
+            if (!primPath.empty())
             {
+                // Get the usd prim at the given source path.
+                //
                 UsdPrim prim = usdInArgs->GetStage()->GetPrimAtPath(
-                        SdfPath(childPrimName));
-                TF_FOR_ALL(childIter, prim.GetFilteredChildren(
-                        UsdPrimIsDefined
-                        and UsdPrimIsActive
-                        and not UsdPrimIsAbstract))
+                        SdfPath(primPath));
+
+                // Get the desired name for the usd prim; if one isn't provided,
+                // ask the prim directly.
+                //
+                std::string nameToUse = prim.GetName();
+                if (primNameAttr.isValid())
                 {
-                    const UsdPrim& child = *childIter;
-                    const std::string& childName = child.GetName();
-
-                    // if (childrenToSkip.count(childName)) {
-                    //     continue;
-                    // }
-
-                    interface.createChild(
-                            childName,
-                            "PxrUsdIn",
-                            interface.getOpArg(),
-                            FnKat::GeolibCookInterface::ResetRootFalse,
-                            new PxrUsdKatanaUsdInPrivateData(child, usdInArgs,
-                                    privateData),
-                            PxrUsdKatanaUsdInPrivateData::Delete);
+                    std::string primName = primNameAttr.getValue("", false);
+                    if (!primName.empty())
+                    {
+                        nameToUse = primName;
+                    }
                 }
+
+                // XXX In order for the prim's material hierarchy to get built
+                // out correctly via the PxrUsdInCore_LooksGroupOp, we'll need
+                // to override the original 'rootLocation' and 'isolatePath'
+                // UsdIn args.
+                //
+                ArgsBuilder ab;
+                ab.update(usdInArgs);
+                ab.rootLocation =
+                        interface.getOutputLocationPath() + "/" + nameToUse;
+                ab.isolatePath = primPath;
+
+                // Build the prim using PxrUsdIn.
+                //
+                interface.createChild(
+                        nameToUse,
+                        "PxrUsdIn",
+                        FnKat::GroupBuilder()
+                            .update(interface.getOpArg())
+                            .set("childOfIntermediate", FnKat::IntAttribute(1))
+                            .build(),
+                        FnKat::GeolibCookInterface::ResetRootFalse,
+                        new PxrUsdKatanaUsdInPrivateData(prim, ab.build(),
+                                privateData),
+                        PxrUsdKatanaUsdInPrivateData::Delete);
             }
         }
         else
         {
-            FnKat::GroupAttribute childrenGroup = staticScene.getChildByName("c");
+            FnKat::GroupAttribute childrenGroup =
+                staticScene.getChildByName("c");
             for (size_t i = 0, e = childrenGroup.getNumberOfChildren(); i != e;
                      ++i)
             {
                 FnKat::GroupAttribute childGroup =
                         childrenGroup.getChildByIndex(i);
-                
+
                 if (!childGroup.isValid())
                 {
                     continue;
                 }
-                
+
+                // Build the intermediate group using the same op.
+                //
                 interface.createChild(
-                            childrenGroup.getChildName(i),
-                            "",
-                            FnKat::GroupBuilder()
-                                .update(interface.getOpArg())
-                                .set("staticScene", childGroup)
-                                .build(),
-                            FnKat::GeolibCookInterface::ResetRootFalse,
-                            new PxrUsdKatanaUsdInPrivateData(
-                                    usdInArgs->GetRootPrim(), usdInArgs,
-                                            privateData),
-                            PxrUsdKatanaUsdInPrivateData::Delete);
-                
+                        childrenGroup.getChildName(i),
+                        "",
+                        FnKat::GroupBuilder()
+                            .update(interface.getOpArg())
+                            .set("staticScene", childGroup)
+                            .build(),
+                        FnKat::GeolibCookInterface::ResetRootFalse,
+                        new PxrUsdKatanaUsdInPrivateData(
+                                usdInArgs->GetRootPrim(), usdInArgs,
+                                privateData),
+                        PxrUsdKatanaUsdInPrivateData::Delete);
             }
-            
         }
-        
-        // apply the local attrs
+
+        // Apply local attrs.
+        //
         for (size_t i = 0, e = attrsGroup.getNumberOfChildren(); i != e; ++i)
         {
             interface.setAttr(attrsGroup.getChildName(i),
@@ -875,11 +1110,12 @@ public:
 
 DEFINE_GEOLIBOP_PLUGIN(PxrUsdInOp)
 DEFINE_GEOLIBOP_PLUGIN(PxrUsdInBootstrapOp)
-DEFINE_GEOLIBOP_PLUGIN(PxrUsdInMasterIntermediateOp)
+DEFINE_GEOLIBOP_PLUGIN(PxrUsdInBuildIntermediateOp)
 
 void registerPlugins()
 {
     REGISTER_PLUGIN(PxrUsdInOp, "PxrUsdIn", 0, 1);
     REGISTER_PLUGIN(PxrUsdInBootstrapOp, "PxrUsdIn.Bootstrap", 0, 1);
-    REGISTER_PLUGIN(PxrUsdInMasterIntermediateOp, "PxrUsdIn.MasterIntermediate", 0, 1);
+    REGISTER_PLUGIN(PxrUsdInBuildIntermediateOp,
+        "PxrUsdIn.BuildIntermediate", 0, 1);
 }

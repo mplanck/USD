@@ -24,28 +24,31 @@
 #ifndef ARCH_FUNCTION_H
 #define ARCH_FUNCTION_H
 
-/*!
- * \file arch/function.h
- * \brief Define preprocessor fuction name macros.
- *
- * This file extents the functionality of pxr/base/arch/functionLite.h.
- * This file needs to be public but shouldn't be accessed directly by
- * anyone other than lib/tf.
- */
+/// \file arch/function.h
+/// Define preprocessor function name macros.
+///
+/// This file extents the functionality of pxr/base/arch/functionLite.h.
+/// This file needs to be public but shouldn't be included directly by
+/// anything outside of \c lib/tf.
 
+#include "pxr/pxr.h"
+#include "pxr/base/arch/api.h"
 #include "pxr/base/arch/functionLite.h"
-
 #include <string>
 
-/*!
- * \brief Return well formatted function name.
- * \ingroup group_arch_Diagnostic
- *
- * This function assumes \c function is __ARCH_FUNCTION__ and
- * \c prettyFunction is __ARCH_PRETTY_FUNCTION__, and attempts to
- * reconstruct a well formatted function name.
- */
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// Return well formatted function name.
+///
+/// This function assumes \c function is __ARCH_FUNCTION__ and
+/// \c prettyFunction is __ARCH_PRETTY_FUNCTION__, and attempts to
+/// reconstruct a well formatted function name.
+///
+/// \ingroup group_arch_Diagnostic
+ARCH_API
 std::string ArchGetPrettierFunctionName(const std::string &function,
                                         const std::string &prettyFunction);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // ARCH_FUNCTION_H 

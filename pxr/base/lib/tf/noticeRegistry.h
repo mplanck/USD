@@ -24,54 +24,53 @@
 #ifndef TF_NOTICE_REGISTRY_H
 #define TF_NOTICE_REGISTRY_H
 
-#include "pxr/base/tf/singleton.h"
-#include "pxr/base/tf/notice.h"
+/// \file tf/noticeRegistry.h
+/// \ingroup group_tf_Notification
+
+#include "pxr/pxr.h"
+#include "pxr/base/tf/api.h"
 #include "pxr/base/tf/hash.h"
+#include "pxr/base/tf/hashmap.h"
+#include "pxr/base/tf/hashset.h"
+#include "pxr/base/tf/notice.h"
+#include "pxr/base/tf/singleton.h"
 #include "pxr/base/tf/type.h"
 
 #include <boost/noncopyable.hpp>
-#include "pxr/base/tf/hashmap.h"
-#include "pxr/base/tf/hashset.h"
 
 #include <tbb/enumerable_thread_specific.h>
 #include <tbb/spin_mutex.h>
 #include <atomic>
 
-/*!
- * \file noticeRegistry.h
- * \ingroup group_tf_Notification
- */
+PXR_NAMESPACE_OPEN_SCOPE
 
-
-
-/*!
- * \class Tf_NoticeRegistry NoticeRegistry.h pxr/base/tf/noticeRegistry.h
- * \ingroup group_tf_Notification
- * \internal
- * \brief Internal class representing the singleton notification
- * registry.
- *
- * Implementation notes.
- *
- * The registry is maintained as a hash map that carries TfNotice class
- * to a list of call back entries (each of type \c TfNotice::_DelivererBase*).
- *
- * Currently, each list has a mutex which is used for getting/setting the head
- * of the list.  When an item on the list needs to be removed (either from
- * a TfNotice::Revoke() call or because the listenening object has expired),
- * the item is removed from the list IF nobody else is using the registry.
- *
- * Otherwise, the item is left as an inactive item on the list; at some point,
- * we should maintain a free-list of items that need pruning, and remove them
- * when the registry's user count indicates it is not being used.  This is left
- * to do: but note that items should accumulate slowly in the registry, since
- * multiple active traversals (either by different threads, or because of
- * reentrancy) should be rare.
- */
-
+/// \class Tf_NoticeRegistry
+/// \ingroup group_tf_Notification
+/// \internal
+///
+/// Internal class representing the singleton notification registry.
+///
+/// Implementation notes.
+///
+/// The registry is maintained as a hash map that carries TfNotice class to a
+/// list of call back entries (each of type \c TfNotice::_DelivererBase*).
+///
+/// Currently, each list has a mutex which is used for getting/setting the
+/// head of the list.  When an item on the list needs to be removed (either
+/// from a TfNotice::Revoke() call or because the listenening object has
+/// expired), the item is removed from the list IF nobody else is using the
+/// registry.
+///
+/// Otherwise, the item is left as an inactive item on the list; at some
+/// point, we should maintain a free-list of items that need pruning, and
+/// remove them when the registry's user count indicates it is not being used.
+/// This is left to do: but note that items should accumulate slowly in the
+/// registry, since multiple active traversals (either by different threads,
+/// or because of reentrancy) should be rare.
+///
 class Tf_NoticeRegistry : boost::noncopyable {
 public:
-
+    TF_API
     void _BeginDelivery(const TfNotice &notice,
                         const TfWeakBase *sender,
                         const std::type_info &senderType,
@@ -79,45 +78,45 @@ public:
                         const std::type_info &listenerType,
                         const std::vector<TfNotice::WeakProbePtr> &probes);
 
+    TF_API
     void _EndDelivery(const std::vector<TfNotice::WeakProbePtr> &probes);
     
-    /*
-     * Register a particular deliverer, return the key created for the
-     * registration.
-     */
+    // Register a particular deliverer, return the key created for the
+    // registration.
+    TF_API
     TfNotice::Key _Register(TfNotice::_DelivererBase* deliverer);
 
-    /*
-     * Send notice n to all interested listeners.
-     */
+    // Send notice n to all interested listeners.
+    TF_API
     size_t _Send(const TfNotice &n, const TfType &noticeType,
                  const TfWeakBase *s, const void *senderUniqueId,
                  const std::type_info &senderType);
 
-    /*
-     * Remove listener instance indicated by \p key.  This is pass by
-     * reference so we can mark the key as having been revoked.
-     */
+    // Remove listener instance indicated by \p key.  This is pass by
+    // reference so we can mark the key as having been revoked.
+    TF_API
     void _Revoke(TfNotice::Key& key);
 
-    /*
-     * Abort if casting of a notice failed; warn if it succeeded
-     * but TfSafeDynamic_cast was required.
-     */
+    // Abort if casting of a notice failed; warn if it succeeded but
+    // TfSafeDynamic_cast was required.
+    TF_API
     void _VerifyFailedCast(const std::type_info& toType,
                            const TfNotice& notice, const TfNotice* castNotice);
     
-    /*
-     * Return reference to singleton object.
-     */
+    // Return reference to singleton object.
+    TF_API
     static Tf_NoticeRegistry& _GetInstance() {
         return TfSingleton<Tf_NoticeRegistry>::GetInstance();
     }
 
+    TF_API
     void _InsertProbe(const TfNotice::WeakProbePtr &probe);
+    TF_API
     void _RemoveProbe(const TfNotice::WeakProbePtr &probe);
 
+    TF_API
     void _IncrementBlockCount();
+    TF_API
     void _DecrementBlockCount();
 
 private:
@@ -139,15 +138,14 @@ private:
                     const std::type_info &senderType,
                     const std::vector<TfNotice::WeakProbePtr> &probes);
     void _EndSend(const std::vector<TfNotice::WeakProbePtr> &probes);
-    /*
-     * It is safe to add a new item onto an STL list during traversal
-     * by multiple threads; the only thing to guard against is a race
-     * when setting/getting the head of the list.
-     *
-     * Removal is trickier: if we can remove something right away, we do (i.e. if
-     * nobody but us is traversing the registry).  Otherwise, we just mark the
-     * item on the list as inactive.
-     */
+
+    // It is safe to add a new item onto an STL list during traversal by
+    // multiple threads; the only thing to guard against is a race when
+    // setting/getting the head of the list.
+    //
+    // Removal is trickier: if we can remove something right away, we do (i.e.
+    // if nobody but us is traversing the registry).  Otherwise, we just mark
+    // the item on the list as inactive.
 
     class _DelivererContainer {
     public:
@@ -171,7 +169,7 @@ private:
              TfNotice::_DelivererBase* item) {
         _Lock lock(c->_mutex);
 
-        TF_DEV_AXIOM(not item->_list);
+        TF_DEV_AXIOM(!item->_list);
 
         _DelivererList *dlist;
         if (sender)
@@ -232,7 +230,6 @@ private:
         _Lock lock(_userCountMutex);
         _userCount += amount;
     }
-    
 
     _DelivererTable _delivererTable;
     _Mutex _tableMutex;
@@ -258,8 +255,8 @@ private:
     tbb::enumerable_thread_specific<size_t> _perThreadBlockCount;
 };
 
+TF_API_TEMPLATE_CLASS(TfSingleton<Tf_NoticeRegistry>);
 
+PXR_NAMESPACE_CLOSE_SCOPE
 
-
-
-#endif
+#endif // TF_NOTICE_REGISTRY_H

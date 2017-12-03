@@ -21,16 +21,17 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file pcp/utils.h
-///
-///
-
 #ifndef PCP_UTILS_H
 #define PCP_UTILS_H
 
-#include <string>
+/// \file pcp/utils.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/layer.h"
+
+#include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 SdfLayer::FileFormatArguments Pcp_GetArgumentsForTargetSchema(
     const std::string& targetSchema);
@@ -38,5 +39,7 @@ SdfLayer::FileFormatArguments Pcp_GetArgumentsForTargetSchema(
 void Pcp_GetArgumentsForTargetSchema(
     const std::string& targetSchema,
     SdfLayer::FileFormatArguments* args);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PCP_UTILS_H

@@ -21,20 +21,24 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file glf/glslfxConfig.h
-
 #ifndef GLF_GLSLFX_CONFIG_H
 #define GLF_GLSLFX_CONFIG_H
 
+/// \file glf/glslfxConfig.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/base/vt/dictionary.h"
 
 #include <string>
 
-/// 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 /// \class GlfGLSLFXConfig 
-/// \brief A class representing the configuration of a glslfx file
+///
+/// A class representing the configuration of a glslfx file.
 ///
 /// GlfGLSLFXConfig provides an API for querying the configuration of a
 /// glslfx file
@@ -42,7 +46,7 @@
 class GlfGLSLFXConfig
 {
 public:
-    /// \brief Enumerates Roles that parameters can have
+    /// Enumerates Roles that parameters can have.
     ///
     /// <b>enum Role:</b>
     /// <ul>       
@@ -55,9 +59,9 @@ public:
         RoleColor = 1,
     };
 
-    /// 
-    /// \class GlfGLSLFXConfig::Parameter
-    /// \brief A class representing a parameter
+    /// \class Parameter
+    ///
+    /// A class representing a parameter.
     ///
     class Parameter {
     public:
@@ -78,9 +82,9 @@ public:
 
     typedef std::vector<Parameter> Parameters;
 
-    /// 
-    /// \class GlfGLSLFXConfig::Texture
-    /// \brief A class representing a texture
+    /// \class Texture
+    ///
+    /// A class representing a texture.
     ///
     class Texture {
     public:
@@ -98,9 +102,9 @@ public:
 
     typedef std::vector<Texture> Textures;
 
-    ///_
-    /// \class GlfGLSLFXConfig::Attribute
-    /// \brief A class representing an attribute
+    /// \class Attribute
+    ///
+    /// A class representing an attribute.
     ///
     class Attribute {
     public:
@@ -119,23 +123,34 @@ public:
     ///
     /// The \p filename parameter is only used for error reporting.
     ///
+    GLF_API
     static GlfGLSLFXConfig * Read(std::string const & input,
                                   std::string const & filename,
                                   std::string *errorStr);
 
     typedef std::vector<std::string> SourceKeys;
 
+    typedef VtDictionary MetadataDictionary;
+
     /// Return the set of source keys for a particular shader stage
+    GLF_API
     SourceKeys GetSourceKeys(TfToken const & shaderStageKey) const;
 
     /// Return the parameters specified in the configuration
+    GLF_API
     Parameters GetParameters() const;
 
     /// Return the textures specified in the configuration
+    GLF_API
     Textures GetTextures() const;
 
     /// Returns the attributes specified in the configuration
+    GLF_API
     Attributes GetAttributes() const;
+
+    /// Returns the metadata specified in the configuration
+    GLF_API
+    MetadataDictionary GetMetadata() const;
 
 private:
     // private ctor. should only be called by ::Read
@@ -151,6 +166,9 @@ private:
     Attributes _GetAttributes(VtDictionary const & dict,
                               std::string *errorStr) const;
 
+    MetadataDictionary _GetMetadata(VtDictionary const & dict,
+                                    std::string *errorStr) const;
+
     typedef std::map<std::string, SourceKeys> _SourceKeyMap;
     _SourceKeyMap _GetSourceKeyMap(VtDictionary const & dict,
                                    std::string *errorStr) const;
@@ -158,7 +176,11 @@ private:
     Parameters _params;
     Textures _textures;
     Attributes _attributes;
+    MetadataDictionary _metadata;
     _SourceKeyMap _sourceKeyMap;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

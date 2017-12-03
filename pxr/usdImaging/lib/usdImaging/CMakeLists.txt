@@ -1,13 +1,8 @@
 set(PXR_PREFIX pxr/usdImaging)
 set(PXR_PACKAGE usdImaging)
 
-set(optionalPublicClasses "")
-if (QT4_FOUND)
-    list(APPEND optionalPublicClasses unitTestHelper)
-endif()
-
 # Note: both python include directives are included for compatibility.
-pxr_shared_library(usdImaging
+pxr_library(usdImaging
     LIBRARIES
         gf
         tf
@@ -15,6 +10,7 @@ pxr_shared_library(usdImaging
         tracelite
         vt
         work
+        garch
         glf
         hd
         hdx
@@ -22,88 +18,57 @@ pxr_shared_library(usdImaging
         sdf
         usd
         usdGeom
-        usdShade
         usdHydra
+        usdLux
+        usdRi
+        usdShade
         ar
         ${Boost_PYTHON_LIBRARY}
         ${PYTHON_LIBRARY}
-        ${OPENGL_gl_LIBRARY}
-        ${OPENGL_glu_LIBRARY}
-        ${GLEW_LIBRARY}
         ${TBB_tbb_LIBRARY}
-        ${TBB_tbbmalloc_LIBRARY}
 
     INCLUDE_DIRS
         ${PYTHON_INCLUDE_PATH}
         ${PYTHON_INCLUDE_DIRS}
-        ${OPENGL_INCLUDE_DIR}
-        ${GLEW_INCLUDE_DIR}
         ${TBB_INCLUDE_DIRS}
 
     PUBLIC_CLASSES
         adapterRegistry
         debugCodes
         delegate
-        engine
-        gl
-        hdEngine
         inheritedCache
         instancerContext
-        refEngine
+        package
         tokens
+        unitTestHelper
         valueCache
-        taskDelegate
         basisCurvesAdapter
         capsuleAdapter
         coneAdapter
         cubeAdapter
         cylinderAdapter
+        domeLightAdapter
+        drawModeAdapter
         gprimAdapter
+        hydraMaterialAdapter
         instanceAdapter
+        lightAdapter
+        materialAdapter
         meshAdapter
-        pointsAdapter
-        primAdapter
-        sphereAdapter
         nurbsPatchAdapter
-        ${optionalPublicClasses}
+        pointsAdapter
+        pointInstancerAdapter
+        primAdapter
+        rectLightAdapter
+        sphereAdapter
+        sphereLightAdapter
 
     PUBLIC_HEADERS
+        api.h
         version.h
-
-    PRIVATE_CLASSES
-        defaultTaskDelegate
-
-    PRIVATE_HEADERS
-        unitTestGLDrawing.h
-
-    CPPFILES
-        moduleDeps.cpp
-
-    PYMODULE_CPPFILES
-        module.cpp
-        wrapGL.cpp
-
-    PYTHON_FILES
-        __init__.py
 
     RESOURCE_FILES
         plugInfo.json
+        shaders/drawMode.glslfx
 )
 
-if (QT4_FOUND)
-    pxr_build_test(testUsdImagingBasicDrawing
-        LIBRARIES
-            hd
-            glf
-            glfq
-            usd
-            usdUtils
-            usdImaging
-            sdf
-            Qt4::QtCore
-            Qt4::QtOpenGL
-        CPPFILES
-            unitTestGLDrawing.cpp
-            testenv/testUsdImagingBasicDrawing.cpp
-    )
-endif()

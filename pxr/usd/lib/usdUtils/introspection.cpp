@@ -21,13 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usdUtils/introspection.h"
 
 #include "pxr/usd/kind/registry.h"
 
 #include "pxr/usd/usd/modelAPI.h"
 #include "pxr/usd/usd/prim.h"
-#include "pxr/usd/usd/treeIterator.h"
+#include "pxr/usd/usd/primRange.h"
 
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/token.h"
@@ -35,6 +36,9 @@
 #include <string>
 #include <set>
 #include <unordered_map>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 using std::string;
 
@@ -50,7 +54,7 @@ UsdUtilsComputeUsdStageStats(const std::string &rootLayerPath,
     }
     
     UsdStageRefPtr stage = UsdStage::Open(rootLayerPath, UsdStage::LoadAll);
-    if (not stage)
+    if (!stage)
         return nullptr;
 
     if (TfMallocTag::IsInitialized()) {
@@ -79,7 +83,7 @@ _UpdateCountsHelper(const UsdPrim &prim,
     size_t *instanceCount,
     std::unordered_map<TfToken, size_t, TfToken::HashFunctor> *primCountsByType)
 {
-    if (not prim)
+    if (!prim)
         return;
 
     ++(*totalPrimCount);
@@ -88,7 +92,7 @@ _UpdateCountsHelper(const UsdPrim &prim,
     if (prim.IsModel()) {
         TfToken kind;
         // Only count if it is a component model.
-        if (UsdModelAPI(prim).GetKind(&kind) and 
+        if (UsdModelAPI(prim).GetKind(&kind) &&
             KindRegistry::IsA(kind, KindTokens->component)) {
                 
             ++(*modelCount);
@@ -107,8 +111,8 @@ _UpdateCountsHelper(const UsdPrim &prim,
 
     (*instanceCount) += prim.IsInstance();
     (*activePrimCount) += prim.IsActive();
-    (*inactivePrimCount) += not prim.IsActive();
-    (*pureOverCount) += not prim.HasDefiningSpecifier();
+    (*inactivePrimCount) += !prim.IsActive();
+    (*pureOverCount) += !prim.HasDefiningSpecifier();
 
     TfToken typeName = prim.GetTypeName().IsEmpty() ? 
         UsdUtilsUsdStageStatsKeys->untyped : prim.GetTypeName();
@@ -145,9 +149,7 @@ UsdUtilsComputeUsdStageStats(const UsdStageWeakPtr &stage,
     PrimTypeAndCountMap primCountsByType;
     
     std::set<string> seenAssetNames;
-    for (UsdTreeIterator iter = stage->TraverseAll(); iter; ++iter ) {
-        const UsdPrim &prim = *iter;
-
+    for (UsdPrim prim: stage->TraverseAll()) {
         _UpdateCountsHelper(prim, &seenAssetNames, 
             &totalPrimCount, &primaryPrimCount, 
             &modelCount, &instancedModelCount, 
@@ -167,9 +169,7 @@ UsdUtilsComputeUsdStageStats(const UsdStageWeakPtr &stage,
         PrimTypeAndCountMap mastersPrimCountsByType;
 
         for (const UsdPrim &masterPrim : masters) {
-            UsdTreeIterator iter(masterPrim);
-            for (; iter; ++iter ) {
-                const UsdPrim &prim = *iter;
+            for (UsdPrim prim: UsdPrimRange(masterPrim)) {
                 _UpdateCountsHelper(prim, &seenAssetNames, 
                     &totalPrimCount, &mastersPrimCount, 
                     &modelCount, &instancedModelCount, 
@@ -238,3 +238,6 @@ UsdUtilsComputeUsdStageStats(const UsdStageWeakPtr &stage,
 
     return totalPrimCount;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

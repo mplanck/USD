@@ -28,6 +28,8 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
@@ -45,7 +47,7 @@ UsdGeomImageable::~UsdGeomImageable()
 UsdGeomImageable
 UsdGeomImageable::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomImageable();
     }
@@ -110,6 +112,19 @@ UsdGeomImageable::CreatePurposeAttr(VtValue const &defaultValue, bool writeSpars
                        writeSparsely);
 }
 
+UsdRelationship
+UsdGeomImageable::GetProxyPrimRel() const
+{
+    return GetPrim().GetRelationship(UsdGeomTokens->proxyPrim);
+}
+
+UsdRelationship
+UsdGeomImageable::CreateProxyPrimRel() const
+{
+    return GetPrim().CreateRelationship(UsdGeomTokens->proxyPrim,
+                       /* custom = */ false);
+}
+
 namespace {
 static inline TfTokenVector
 _ConcatenateAttributeNames(const TfTokenVector& left,const TfTokenVector& right)
@@ -141,9 +156,14 @@ UsdGeomImageable::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
@@ -152,19 +172,20 @@ UsdGeomImageable::GetSchemaAttributeNames(bool includeInherited)
 
 #include <boost/assign/list_of.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 UsdGeomPrimvar 
 UsdGeomImageable::CreatePrimvar(const TfToken& attrName,
                                 const SdfValueTypeName &typeName,
                                 const TfToken& interpolation,
-                                int elementSize,
-                                bool custom)
+                                int elementSize) const
 {
     const UsdPrim prim = GetPrim();
 
-    UsdGeomPrimvar primvar(prim, attrName, typeName, custom);
+    UsdGeomPrimvar primvar(prim, attrName, typeName);
 
     if (primvar){
-        if (not interpolation.IsEmpty())
+        if (!interpolation.IsEmpty())
             primvar.SetInterpolation(interpolation);
         if (elementSize > 0)
             primvar.SetElementSize(elementSize);
@@ -190,9 +211,9 @@ UsdGeomImageable::_MakePrimvars(std::vector<UsdProperty> const &props) const
     primvars.reserve(props.size());
     
     TF_FOR_ALL(prop, props) {
-        // All prefixed properties except the ones that contain extra namespaces 
-        // (eg. the "indices" attributes belonging to indexed primvars) will be 
-        // valid primvars.
+        // All prefixed properties except the ones that contain extra
+        // namespaces (eg. the ":indices" attributes belonging to indexed
+        // primvars) will be valid primvars.
         if (UsdGeomPrimvar primvar = UsdGeomPrimvar(prop->As<UsdAttribute>()))
             primvars.push_back(primvar);
     }
@@ -243,20 +264,17 @@ static
 TfToken
 _ComputeVisibility(UsdPrim const &prim, UsdTimeCode const &time)
 {
-    if (UsdPrim parent = prim.GetParent()){
-        TfToken myVis = _ComputeVisibility(parent, time);
-        if (myVis == UsdGeomTokens->invisible)
-            return myVis;
-        // XXX This could be a multithreaded performance concern
-        // due to operator-bool reliance on TfType, but it is more correct
-        // than just speculatively looking up an attribute called
-        // "visibility" and querying it, since it could appear as
-        // custom on a non-imageable prim.
-        if (UsdGeomImageable ip = UsdGeomImageable(prim)){
-            ip.GetVisibilityAttr().Get(&myVis, time);
-        }
+    TfToken localVis;
+    if (UsdGeomImageable ip = UsdGeomImageable(prim)) {
+        ip.GetVisibilityAttr().Get(&localVis, time);
 
-        return myVis;
+        if (localVis == UsdGeomTokens->invisible) {
+            return UsdGeomTokens->invisible;
+        }
+    }
+
+    if (UsdPrim parent = prim.GetParent()) {
+        return _ComputeVisibility(parent, time);
     }
 
     return UsdGeomTokens->inherited;
@@ -268,22 +286,19 @@ UsdGeomImageable::ComputeVisibility(UsdTimeCode const &time) const
     return _ComputeVisibility(GetPrim(), time);
 }
 
-
 static
 TfToken
-_ComputePurpose(UsdPrim const &prim)
+_ComputePurpose(UsdPrim const &prim, UsdPrim *root=NULL)
 {
     if (UsdPrim parent = prim.GetParent()){
-        TfToken myPurpose = _ComputePurpose(parent);
+        TfToken myPurpose = _ComputePurpose(parent, root);
         if (myPurpose != UsdGeomTokens->default_)
             return myPurpose;
-        // XXX This could be a multithreaded performance concern
-        // due to operator-bool reliance on TfType, but it is more correct
-        // than just speculatively looking up an attribute called
-        // "purpose" and querying it, since it could appear as
-        // custom on a non-imageable prim.
         if (UsdGeomImageable ip = UsdGeomImageable(prim)){
             ip.GetPurposeAttr().Get(&myPurpose);
+            if (root){
+                *root = prim;
+            }
         }
 
         return myPurpose;
@@ -325,7 +340,7 @@ _MakeVisible(const UsdPrim &prim, UsdTimeCode const &time, bool *hasInvisibleAnc
         if (UsdGeomImageable imageableParent = UsdGeomImageable(parent)) {
 
             // Change visibility of parent to inherited if it is invisible.
-            if (*hasInvisibleAncestor or 
+            if (*hasInvisibleAncestor ||
                 _SetInheritedIfInvisible(imageableParent, time))  {
 
                 *hasInvisibleAncestor = true;
@@ -361,7 +376,7 @@ UsdGeomImageable::MakeInvisible(const UsdTimeCode &time) const
 {
     UsdAttribute visAttr = CreateVisibilityAttr();
     TfToken myVis;
-    if (not visAttr.Get(&myVis, time) or myVis != UsdGeomTokens->invisible) {
+    if (!visAttr.Get(&myVis, time) || myVis != UsdGeomTokens->invisible) {
         visAttr.Set(UsdGeomTokens->invisible, time);
     }
 }
@@ -372,6 +387,65 @@ UsdGeomImageable::ComputePurpose() const
     return _ComputePurpose(GetPrim());
 }
 
+UsdPrim
+UsdGeomImageable::ComputeProxyPrim(UsdPrim *renderPrim) const
+{
+    UsdPrim  purposeRoot, self=GetPrim();
+    
+    TfToken purpose = _ComputePurpose(self, &purposeRoot);
+
+    if (purpose == UsdGeomTokens->render){
+        TF_VERIFY(purposeRoot);
+        SdfPathVector target;
+        UsdRelationship  proxyPrimRel = 
+            UsdGeomImageable(purposeRoot).GetProxyPrimRel();
+        if (proxyPrimRel.GetForwardedTargets(&target)){
+            if (target.size() == 1){
+                if (UsdPrim proxy = self.GetStage()->GetPrimAtPath(target[0])){
+                    if (_ComputePurpose(proxy) != UsdGeomTokens->proxy){
+                        TF_WARN("Prim <%s>, targeted as proxyPrim of prim "
+                                "<%s> does not have purpose 'proxy'",
+                                proxy.GetPath().GetText(),
+                                purposeRoot.GetPath().GetText());
+                        return UsdPrim();
+                    }
+                    if (renderPrim){
+                        *renderPrim = purposeRoot;
+                    }
+                    return proxy;
+                }
+            }
+            else if (target.size() > 1){
+                TF_WARN("Found multiple targets for proxyPrim rel on "
+                        "prim <%s>", purposeRoot.GetPath().GetText());
+            }
+        }
+    }
+
+    return UsdPrim();
+}
+
+bool
+UsdGeomImageable::SetProxyPrim(const UsdPrim &proxy) const
+{
+    if (proxy){
+        SdfPathVector targets {proxy.GetPath()};
+        return CreateProxyPrimRel().SetTargets(targets);
+    }
+    return false;
+}
+
+bool
+UsdGeomImageable::SetProxyPrim(const UsdSchemaBase &proxy) const
+{
+    if (proxy){
+        SdfPathVector targets {proxy.GetPrim().GetPath()};
+        return CreateProxyPrimRel().SetTargets(targets);
+    }
+    return false;
+}
+
+
 static
 TfTokenVector
 _MakePurposeVector(TfToken const &purpose1,
@@ -381,10 +455,10 @@ _MakePurposeVector(TfToken const &purpose1,
 {
     TfTokenVector purposes;
     
-    if (not purpose1.IsEmpty()) purposes.push_back(purpose1);
-    if (not purpose2.IsEmpty()) purposes.push_back(purpose2);
-    if (not purpose3.IsEmpty()) purposes.push_back(purpose3);
-    if (not purpose4.IsEmpty()) purposes.push_back(purpose4);
+    if (!purpose1.IsEmpty()) purposes.push_back(purpose1);
+    if (!purpose2.IsEmpty()) purposes.push_back(purpose2);
+    if (!purpose3.IsEmpty()) purposes.push_back(purpose3);
+    if (!purpose4.IsEmpty()) purposes.push_back(purpose4);
 
     return purposes;
 }
@@ -461,3 +535,5 @@ UsdGeomImageable::ComputeParentToWorldTransform(UsdTimeCode const &time) const
 {
     return UsdGeomXformCache(time).GetParentToWorldTransform(GetPrim());
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

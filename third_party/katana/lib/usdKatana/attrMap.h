@@ -24,8 +24,13 @@
 #ifndef PXRUSDKATANA_ATTRMAP_H
 #define PXRUSDKATANA_ATTRMAP_H
 
+#include "pxr/pxr.h"
 #include <FnAttribute/FnGroupBuilder.h>
 #include <FnGeolib/op/FnGeolibOp.h>
+#include "pxr/usd/usd/attribute.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 /// \brief An object to store attributes.  The current implementation uses
 /// a Foundry::Katana::GroupBuilder behind the scenes, but the dependence on
@@ -36,8 +41,16 @@
 /// GroupBuilder.
 class PxrUsdKatanaAttrMap
 {
-
 public:
+    /// Configure this object to evaluate USD attributes at the given time.
+    void SetUSDTimeCode(UsdTimeCode timeCode) {
+        _usdTimeCode = timeCode;
+    }
+
+    /// Set the katana attribute \p path by evaluating the given
+    /// USD attribute \p attr at the time configured in SetUSDTime().
+    /// Returns this object by reference so these calls can be chained.
+    PxrUsdKatanaAttrMap& Set(const std::string& path, const UsdAttribute& attr);
 
     /// \brief set \p attr at \p path.
     void set(const std::string& path, const Foundry::Katana::Attribute& attr);
@@ -55,6 +68,12 @@ private:
 
     Foundry::Katana::GroupBuilder _groupBuilder;
 
+    // Timecode to use when reading USD samples
+    UsdTimeCode _usdTimeCode;
+
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDKATANA_ATTRMAP_H

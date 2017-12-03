@@ -24,25 +24,30 @@
 #include "pxr/imaging/glf/glew.h"
 
 #include "pxr/imaging/hdx/shadowTask.h"
-#include "pxr/imaging/hdx/tokens.h"
 #include "pxr/imaging/hdx/simpleLightTask.h"
+#include "pxr/imaging/hdx/tokens.h"
+#include "pxr/imaging/hdx/package.h"
 
-#include "pxr/imaging/hd/light.h"
-#include "pxr/imaging/hd/camera.h"
+#include "pxr/imaging/hdSt/light.h"
+#include "pxr/imaging/hdSt/renderPass.h"
+
 #include "pxr/imaging/hd/changeTracker.h"
 #include "pxr/imaging/hd/perfLog.h"
+#include "pxr/imaging/hd/primGather.h"
 #include "pxr/imaging/hd/renderIndex.h"
-#include "pxr/imaging/hd/renderPass.h"
 #include "pxr/imaging/hd/renderPassState.h"
 #include "pxr/imaging/hd/resourceRegistry.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
 #include "pxr/imaging/hd/lightingShader.h"
-#include "pxr/imaging/hd/simpleLightingShader.h"
+
+#include "pxr/imaging/glf/simpleLightingContext.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 HdxShadowTask::HdxShadowTask(HdSceneDelegate* delegate, SdfPath const& id)
     : HdSceneTask(delegate, id)
     , _collectionVersion(0)
-    , _enableShadows(false)
     , _depthBiasEnable(false)
     , _depthBiasConstantFactor(0.0f)
     , _depthBiasSlopeFactor(1.0f)
@@ -54,26 +59,13 @@ void
 HdxShadowTask::_Execute(HdTaskContext* ctx)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
-
-    // When the shadows are not enabled we don't need to do any
-    // shadow map computation
-    if (not _enableShadows) {
-        return;
-    }
+    HF_MALLOC_TAG_FUNCTION();
 
     // Extract the lighting context information from the task context
     GlfSimpleLightingContextRefPtr lightingContext;
-    if (not _GetTaskContextData(ctx, HdTokens->lightingContext, &lightingContext)) {
+    if (!_GetTaskContextData(ctx, HdxTokens->lightingContext, &lightingContext)) {
         return;
     }
-
-    // Store the current viewport so we can reset after generating the shadows.
-    // Every call to BeginCapture will run internally a glViewport so we need
-    // to pop the state after creating the shadows
-    //
-    // Also store the polygon bit for polygon offset
-    glPushAttrib(GL_VIEWPORT_BIT | GL_POLYGON_BIT);
 
     if (_depthBiasEnable) {
         glEnable(GL_POLYGON_OFFSET_FILL);
@@ -81,11 +73,9 @@ HdxShadowTask::_Execute(HdTaskContext* ctx)
     } else {
         glDisable(GL_POLYGON_OFFSET_FILL);
     }
+
     // XXX: Move conversion to sync time once Task header becomes private.
     glDepthFunc(HdConversions::GetGlDepthFunc(_depthFunc));
-
-    // XXX: Do we ever want to disable this?
-    GLboolean oldPointSizeEnabled = glIsEnabled(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_PROGRAM_POINT_SIZE);
 
     // Generate the actual shadow maps
@@ -96,30 +86,26 @@ HdxShadowTask::_Execute(HdTaskContext* ctx)
         shadows->BeginCapture(shadowId, true);
 
         // Render the actual geometry in the collection
-        _passes[shadowId]->Execute(_renderPassStates[shadowId]);
+        _passes[shadowId]->Execute(_renderPassStates[shadowId], HdTokens->geometry);
 
         // Unbind the buffer and move on to the next shadow map
         shadows->EndCapture(shadowId);
     }
 
-    if (!oldPointSizeEnabled)
-    {
-        glDisable(GL_PROGRAM_POINT_SIZE);
-    }
-
-    glPopAttrib();
-
+    // restore GL states to default
+    glDisable(GL_PROGRAM_POINT_SIZE);
+    glDisable(GL_POLYGON_OFFSET_FILL);
 }
 
 void
 HdxShadowTask::_Sync(HdTaskContext* ctx)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     // Extract the lighting context information from the task context
     GlfSimpleLightingContextRefPtr lightingContext;
-    if (not _GetTaskContextData(ctx, HdTokens->lightingContext, &lightingContext)) {
+    if (!_GetTaskContextData(ctx, HdxTokens->lightingContext, &lightingContext)) {
         return;
     }
     GlfSimpleShadowArrayRefPtr const shadows = lightingContext->GetShadows();
@@ -141,14 +127,9 @@ HdxShadowTask::_Sync(HdTaskContext* ctx)
 
         // Extract the new shadow task params from exec
         HdxShadowTaskParams params;
-        if (not _GetSceneDelegateValue(HdTokens->params, &params)) {
+        if (!_GetSceneDelegateValue(HdTokens->params, &params)) {
             return;
         }
-
-        // Store if the shadows need to be generated or not,
-        // this flag will be used to early out during Execute step when
-        // shadows are not needed
-        _enableShadows = params.enableShadows;
 
         _depthBiasEnable = params.depthBiasEnable;
         _depthBiasConstantFactor = params.depthBiasConstantFactor;
@@ -162,82 +143,91 @@ HdxShadowTask::_Sync(HdTaskContext* ctx)
         _passes.clear();
         _renderPassStates.clear();
 
-        if (_enableShadows) {
-            HdSceneDelegate* delegate = GetDelegate();
+        HdSceneDelegate* delegate = GetDelegate();
+        HdRenderIndex &renderIndex = delegate->GetRenderIndex();
+        
+        // Extract the HD lights used to render the scene from the 
+        // task context, we will use them to find out what
+        // lights are dirty and if we need to update the
+        // collection for shadows mapping
+        
+        // XXX: This is inefficient, need to be optimized
+        SdfPathVector lightPaths;
+        if (renderIndex.IsSprimTypeSupported(HdPrimTypeTokens->light)) {
+            SdfPathVector sprimPaths = renderIndex.GetSprimSubtree(
+                HdPrimTypeTokens->light, SdfPath::AbsoluteRootPath());
 
-            // Extract the HD lights used to render the scene from the 
-            // task context, we will use them to find out what
-            // lights are dirty and if we need to update the
-            // collection for shadows mapping
-            HdLightSharedPtrVector lights = 
-                _ComputeIncludedLights(
-                    delegate->GetRenderIndex().GetLights(),
-                    params.lightIncludePaths,
-                    params.lightExcludePaths);
+            HdPrimGather gather;
 
-            GlfSimpleLightVector const glfLights = lightingContext->GetLights();
+            gather.Filter(sprimPaths,
+                          params.lightIncludePaths,
+                          params.lightExcludePaths,
+                          &lightPaths);
+        }
+        
+        HdStLightPtrConstVector lights;
+        TF_FOR_ALL (it, lightPaths) {
+             const HdStLight *light = static_cast<const HdStLight *>(
+                                         renderIndex.GetSprim(
+                                                 HdPrimTypeTokens->light, *it));
 
-            TF_VERIFY(lights.size() == glfLights.size());
-
-            // Iterate through all lights and for those that have
-            // shadows enabled we will extract the colection from 
-            // the render index and create a pass that during execution
-            // it will be used for generating each shadowmap
-            for (size_t lightId = 0; lightId < glfLights.size(); lightId++) {
-                
-                if (not glfLights[lightId].HasShadow()) {
-                    continue;
-                }
-            
-                // Extract the collection from the HD light
-                const HdRprimCollection &col =
-                                         lights[lightId]->GetShadowCollection();
-
-                // Creates a pass with the right geometry that will be
-                // use during Execute phase to draw the maps
-                HdRenderPassSharedPtr p = boost::make_shared<HdRenderPass>
-                    (&delegate->GetRenderIndex(), col);
-
-                HdRenderPassStateSharedPtr renderPassState(new HdRenderPassState());
-
-                // Update the rest of the renderpass state parameters for this pass
-                renderPassState->SetOverrideColor(params.overrideColor);
-                renderPassState->SetWireframeColor(params.wireframeColor);
-                renderPassState->SetLightingEnabled(false);
-                // XXX : This can be removed when Hydra has support for 
-                //       transparent objects.
-                renderPassState->SetAlphaThreshold(1.0 /* params.alphaThreshold */);
-                renderPassState->SetTessLevel(params.tessLevel);
-                renderPassState->SetDrawingRange(params.drawingRange);
-
-                // Invert front and back faces for shadow
-                // XXX: this should be taken care by shadow-repr.
-                switch (params.cullStyle)
-                {
-                    case HdCullStyleBack:
-                        renderPassState->SetCullStyle(HdCullStyleFront);
-                        break;
-
-                    case HdCullStyleFront:
-                        renderPassState->SetCullStyle(HdCullStyleBack);
-                        break;
-
-                    case HdCullStyleBackUnlessDoubleSided:
-                        renderPassState->SetCullStyle(HdCullStyleFrontUnlessDoubleSided);
-                        break;
-
-                    case HdCullStyleFrontUnlessDoubleSided:
-                        renderPassState->SetCullStyle(HdCullStyleBackUnlessDoubleSided);
-                        break;
-
-                    default:
-                        renderPassState->SetCullStyle(params.cullStyle);
-                        break;
-                }
-
-                _passes.push_back(p);
-                _renderPassStates.push_back(renderPassState);
+             if (light != nullptr) {
+                lights.push_back(light);
             }
+        }
+        
+        GlfSimpleLightVector const glfLights = lightingContext->GetLights();
+        
+        if (!renderIndex.IsSprimTypeSupported(HdPrimTypeTokens->light) ||
+            !TF_VERIFY(lights.size() == glfLights.size())) {
+            return;
+        }
+        
+        // Iterate through all lights and for those that have
+        // shadows enabled we will extract the colection from 
+        // the render index and create a pass that during execution
+        // it will be used for generating each shadowmap
+        for (size_t lightId = 0; lightId < glfLights.size(); lightId++) {
+            
+            if (!glfLights[lightId].HasShadow()) {
+                continue;
+            }
+            
+            // Extract the collection from the HD light
+            VtValue vtShadowCollection =
+                lights[lightId]->Get(HdStLightTokens->shadowCollection);
+            const HdRprimCollection &col =
+                vtShadowCollection.IsHolding<HdRprimCollection>() ?
+                    vtShadowCollection.Get<HdRprimCollection>() : HdRprimCollection();
+
+            // Creates a pass with the right geometry that will be
+            // use during Execute phase to draw the maps
+            HdRenderPassSharedPtr p = boost::make_shared<HdSt_RenderPass>
+                (&delegate->GetRenderIndex(), col);
+
+            HdRenderPassShaderSharedPtr renderPassShadowShader
+                (new HdRenderPassShader(HdxPackageRenderPassShadowShader()));
+            HdRenderPassStateSharedPtr renderPassState
+                (new HdRenderPassState(renderPassShadowShader));
+
+            // Update the rest of the renderpass state parameters for this pass
+            renderPassState->SetOverrideColor(params.overrideColor);
+            renderPassState->SetWireframeColor(params.wireframeColor);
+            renderPassState->SetLightingEnabled(false);
+            
+            // XXX : This can be removed when Hydra has support for 
+            //       transparent objects.
+            //       We use an epsilon offset from 1.0 to allow for 
+            //       calculation during primvar interpolation which
+            //       doesn't fully saturate back to 1.0.
+            const float TRANSPARENT_ALPHA_THRESHOLD = (1.0f - 1e-6f);
+            renderPassState->SetAlphaThreshold(TRANSPARENT_ALPHA_THRESHOLD);
+            renderPassState->SetTessLevel(params.tessLevel);
+            renderPassState->SetDrawingRange(params.drawingRange);
+            renderPassState->SetCullStyle(params.cullStyle);
+            
+            _passes.push_back(p);
+            _renderPassStates.push_back(renderPassState);
         }
     }
 
@@ -248,7 +238,8 @@ HdxShadowTask::_Sync(HdTaskContext* ctx)
             shadows->GetProjectionMatrix(passId),
             GfVec4d(0,0,shadows->GetSize()[0],shadows->GetSize()[1]));
 
-        _renderPassStates[passId]->Sync();
+        _renderPassStates[passId]->Sync(
+            GetDelegate()->GetRenderIndex().GetResourceRegistry());
         _passes[passId]->Sync();
     }
 }
@@ -274,7 +265,6 @@ std::ostream& operator<<(std::ostream& out, const HdxShadowTaskParams& pv)
         << pv.cullStyle << " "
         << pv.camera << " "
         << pv.viewport << " "
-        << pv.enableShadows << " "
         ;
         TF_FOR_ALL(it, pv.lightIncludePaths) {
             out << *it;
@@ -287,27 +277,29 @@ std::ostream& operator<<(std::ostream& out, const HdxShadowTaskParams& pv)
 
 bool operator==(const HdxShadowTaskParams& lhs, const HdxShadowTaskParams& rhs) 
 {
-    return  lhs.overrideColor == rhs.overrideColor and
-            lhs.wireframeColor == rhs.wireframeColor and
-            lhs.enableLighting == rhs.enableLighting and
-            lhs.enableIdRender == rhs.enableIdRender and
-            lhs.alphaThreshold == rhs.alphaThreshold and
-            lhs.tessLevel == rhs.tessLevel and
-            lhs.drawingRange == rhs.drawingRange and
-            lhs.depthBiasEnable == rhs.depthBiasEnable and
-            lhs.depthBiasConstantFactor == rhs.depthBiasConstantFactor and
-            lhs.depthBiasSlopeFactor == rhs.depthBiasSlopeFactor and
-            lhs.depthFunc == rhs.depthFunc and
-            lhs.cullStyle == rhs.cullStyle and
-            lhs.camera == rhs.camera and
-            lhs.viewport == rhs.viewport and
-            lhs.enableShadows == rhs.enableShadows and
-            lhs.lightIncludePaths == rhs.lightIncludePaths and
+    return  lhs.overrideColor == rhs.overrideColor                      && 
+            lhs.wireframeColor == rhs.wireframeColor                    &&                     
+            lhs.enableLighting == rhs.enableLighting                    &&
+            lhs.enableIdRender == rhs.enableIdRender                    &&
+            lhs.alphaThreshold == rhs.alphaThreshold                    &&
+            lhs.tessLevel == rhs.tessLevel                              && 
+            lhs.drawingRange == rhs.drawingRange                        && 
+            lhs.depthBiasEnable == rhs.depthBiasEnable                  && 
+            lhs.depthBiasConstantFactor == rhs.depthBiasConstantFactor  && 
+            lhs.depthBiasSlopeFactor == rhs.depthBiasSlopeFactor        && 
+            lhs.depthFunc == rhs.depthFunc                              && 
+            lhs.cullStyle == rhs.cullStyle                              && 
+            lhs.camera == rhs.camera                                    && 
+            lhs.viewport == rhs.viewport                                && 
+            lhs.lightIncludePaths == rhs.lightIncludePaths              && 
             lhs.lightExcludePaths == rhs.lightExcludePaths
             ;
 }
 
 bool operator!=(const HdxShadowTaskParams& lhs, const HdxShadowTaskParams& rhs) 
 {
-    return not(lhs == rhs);
+    return !(lhs == rhs);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -21,18 +21,17 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file js/converter.h
-
 #ifndef JS_CONVERTER_H
 #define JS_CONVERTER_H
 
+/// \file js/converter.h
+
+#include "pxr/pxr.h"
 #include "pxr/base/js/value.h"
 #include "pxr/base/tf/diagnostic.h"
-#include <boost/foreach.hpp>
-#include <boost/utility/enable_if.hpp>
 
-// \struct Js_ValueToInt
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Converts a \c JsValue \p value holding an \c int value to a \c ValueType
 // holding an \c int64_t.
 template <class ValueType, class MapType, bool UseInt64 = true>
@@ -93,9 +92,9 @@ private:
     static ValueType _ToValueType(const JsValue& value) {
         switch (value.GetType()) {
         case JsValue::ObjectType:
-            return ValueType(_ObjectToMap(value.GetObject()));
+            return ValueType(_ObjectToMap(value.GetJsObject()));
         case JsValue::ArrayType:
-            return ValueType(_ArrayToVector(value.GetArray()));
+            return ValueType(_ArrayToVector(value.GetJsArray()));
         case JsValue::BoolType:
             return ValueType(value.GetBool());
         case JsValue::StringType:
@@ -116,7 +115,7 @@ private:
     /// Converts \p object to \c MapType.
     static MapType _ObjectToMap(const JsObject& object) {
         MapType result;
-        BOOST_FOREACH(const JsObject::value_type& p, object) {
+        for (const auto& p : object) {
             result[p.first] = _ToValueType(p.second);
         }
         return result;
@@ -126,7 +125,7 @@ private:
     static VectorType _ArrayToVector(const JsArray& array) {
         VectorType result;
         result.reserve(array.size());
-        BOOST_FOREACH(const JsValue& value, array) {
+        for (const auto& value : array) {
             result.push_back(_ToValueType(value));
         }
         return result;
@@ -140,5 +139,7 @@ template <class ValueType, class MapType>
 ValueType JsConvertToContainerType(const JsValue& value) {
     return JsValueTypeConverter<ValueType, MapType>::Convert(value);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // JS_CONVERTER_H

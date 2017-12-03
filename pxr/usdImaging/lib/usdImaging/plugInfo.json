@@ -64,6 +64,11 @@
                         "isInternal": true,
                         "primTypeName": "Cylinder"
                     },
+                    "UsdImagingMaterialAdapter" : {
+                        "bases": ["UsdImagingPrimAdapter"],
+                        "isInternal": true,
+                        "primTypeName": "Material"
+                    },
                     "UsdImagingMeshAdapter": {
                         "bases": [
                             "UsdImagingGprimAdapter"
@@ -85,12 +90,45 @@
                         "isInternal": true,
                         "primTypeName": "Points"
                     },
+                    "UsdImagingPointInstancerAdapter": {
+                        "bases": [
+                            "UsdImagingPrimAdapter"
+                        ],
+                        "isInternal": true,
+                        "primTypeName": "PointInstancer"
+                    },
                     "UsdImagingSphereAdapter": {
                         "bases": [
                             "UsdImagingGprimAdapter"
                         ],
                         "isInternal": true,
                         "primTypeName": "Sphere"
+                    },
+                    "UsdImagingHydraMaterialAdapter" : {
+                        "bases": ["UsdImagingPrimAdapter"],
+                        "isInternal": true,
+                        "primTypeName": "HydraPbsSurface"
+                    },
+                    "UsdImagingDomeLightAdapter": {
+                        "bases": [
+                            "UsdImagingLightAdapter"
+                        ],
+                        "isInternal": true,
+                        "primTypeName": "DomeLight"
+                    },
+                    "UsdImagingRectLightAdapter": {
+                        "bases": [
+                            "UsdImagingLightAdapter"
+                        ],
+                        "isInternal": true,
+                        "primTypeName": "RectLight"
+                    },
+                    "UsdImagingSphereLightAdapter": {
+                        "bases": [
+                            "UsdImagingLightAdapter"
+                        ],
+                        "isInternal": true,
+                        "primTypeName": "SphereLight"
                     }
                 }
             },

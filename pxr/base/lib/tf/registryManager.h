@@ -24,114 +24,123 @@
 #ifndef TF_REGISTRYMANAGER_H
 #define TF_REGISTRYMANAGER_H
 
+/// \file tf/registryManager.h
+/// \ingroup group_tf_Initialization
+
+#include "pxr/pxr.h"
+
 #include "pxr/base/arch/attributes.h"
 #include "pxr/base/tf/preprocessorUtilsLite.h"
+#include "pxr/base/tf/api.h"
 
 #include <boost/function.hpp>
 #include <boost/noncopyable.hpp>
+#include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/stringize.hpp>
 
 #include <typeinfo>
 
-/*!
- * \file registryManager.h
- * \ingroup group_tf_Initialization
- */
+PXR_NAMESPACE_OPEN_SCOPE
 
-/*!
- * \class TfRegistryManager RegistryManager.h pxr/base/tf/registryManager.h
- * \ingroup group_tf_Initialization
- * \brief Manage initialization of registries.
- *
- * See \ref page_tf_RegistryManager for a detailed description.
- */
-
+/// \class TfRegistryManager
+/// \ingroup group_tf_Initialization
+///
+/// Manage initialization of registries.
+///
+/// See \ref page_tf_RegistryManager for a detailed description.
+///
 class TfRegistryManager : boost::noncopyable {
 public:
     // The type of a registration function.  The arguments are not used.
     typedef void (*RegistrationFunctionType)(void*, void*);
     typedef boost::function<void ()> UnloadFunctionType;
 
-    //! Return the singleton \c TfRegistryManager instance.
-    static TfRegistryManager& GetInstance();
+    /// Return the singleton \c TfRegistryManager instance.
+    TF_API static TfRegistryManager& GetInstance();
 
-    /*!
-     * \brief Request that any initialization for service \c T be performed.
-     *
-     * Calling \c SubscribeTo<T>() causes all existing \c
-     * TF_REGISTRY_FUNCTION() functions of type \c T to be run.  Once
-     * this call is made, when new code is dynamically loaded then any
-     * \c TF_REGISTRY_FUNCTION() functions of type \c T in the new code
-     * will automatically be run when the code is loaded.
-     */
+    /// Request that any initialization for service \c T be performed.
+    ///
+    /// Calling \c SubscribeTo<T>() causes all existing \c
+    /// TF_REGISTRY_FUNCTION() functions of type \c T to be run.  Once
+    /// this call is made, when new code is dynamically loaded then any
+    /// \c TF_REGISTRY_FUNCTION() functions of type \c T in the new code
+    /// will automatically be run when the code is loaded.
     template <class T>
     void SubscribeTo() {
         _SubscribeTo(typeid(T));
     }
 
-    /*!
-     * \brief Cancel any previous subscriptions to service \c T.
-     *
-     * After this call, newly added code will no longer have \c
-     * TF_REGISTRY_FUNCTION() functions of type \c T run.
-     */
+    /// Cancel any previous subscriptions to service \c T.
+    ///
+    /// After this call, newly added code will no longer have \c
+    /// TF_REGISTRY_FUNCTION() functions of type \c T run.
     template <class T>
     void UnsubscribeFrom() {
         _UnsubscribeFrom(typeid(T));
     }
 
-    /*!
-     * \brief Add an action to be performed at code unload time.
-     *
-     * When a \c TF_REGISTRY_FUNCTION() is run, it often needs to register an
-     * inverse action to be taken when the code containing that function is
-     * unloaded.  For example, a plugin that adds information to a registry will
-     * typically want to remove that information when the registry is unloaded.
-     *
-     * Calling \c AddFunctionForUnload() requests that the given function be run
-     * if the code from which the funtion is called is unloaded.  However, this
-     * is detectable only if this call is made from within the call chain of
-     * some \c TF_REGISTRY_FUNCTION() function.  In this case, \c
-     * AddFunctionForUnload() returns true.  Otherwise, false is returned and
-     * the function is never run.
-     *
-     * Note however that by default, no unload functions are run when code is
-     * being unloaded because exit() has been called.  This is an optimization,
-     * because most registries don't need to be deconstructed at exit time.
-     * This behavior can be changed by calling \c RunUnloadersAtExit().
-     */
-    bool AddFunctionForUnload(const UnloadFunctionType&);
+    /// Add an action to be performed at code unload time.
+    ///
+    /// When a \c TF_REGISTRY_FUNCTION() is run, it often needs to register an
+    /// inverse action to be taken when the code containing that function is
+    /// unloaded.  For example, a plugin that adds information to a registry
+    /// will typically want to remove that information when the registry is
+    /// unloaded.
+    ///
+    /// Calling \c AddFunctionForUnload() requests that the given function be
+    /// run if the code from which the funtion is called is unloaded.
+    /// However, this is detectable only if this call is made from within the
+    /// call chain of some \c TF_REGISTRY_FUNCTION() function.  In this case,
+    /// \c AddFunctionForUnload() returns true.  Otherwise, false is returned
+    /// and the function is never run.
+    ///
+    /// Note however that by default, no unload functions are run when code is
+    /// being unloaded because exit() has been called.  This is an
+    /// optimization, because most registries don't need to be deconstructed
+    /// at exit time. This behavior can be changed by calling \c
+    /// RunUnloadersAtExit().
+    TF_API bool AddFunctionForUnload(const UnloadFunctionType&);
 
-    /*!
-     * \brief Run unload functions program exit time.
-     *
-     * The functions added by \c AddFunctionForUnload() are normally not run
-     * when a program exits.  For debugging purposes (e.g. checking for memory
-     * leaks) it may be desirable to run the functions even at program exit
-     * time.  This call will force functions to be run at program exit time.
-     *
-     * Note that this call does not cause construction of the singleton
-     * \c TfRegistryManager object if it does not already exist.
-     */
-    static void RunUnloadersAtExit();
+    /// Run unload functions program exit time.
+    ///
+    /// The functions added by \c AddFunctionForUnload() are normally not run
+    /// when a program exits.  For debugging purposes (e.g. checking for
+    /// memory leaks) it may be desirable to run the functions even at program
+    /// exit time.  This call will force functions to be run at program exit
+    /// time.
+    ///
+    /// Note that this call does not cause construction of the singleton \c
+    /// TfRegistryManager object if it does not already exist.
+    TF_API static void RunUnloadersAtExit();
 
 private:
-    TfRegistryManager();
-    ~TfRegistryManager();
+    TF_API TfRegistryManager();
+    TF_API ~TfRegistryManager();
 
-    void _SubscribeTo(const std::type_info&);
-    void _UnsubscribeFrom(const std::type_info&);
+    TF_API void _SubscribeTo(const std::type_info&);
+    TF_API void _UnsubscribeFrom(const std::type_info&);
 };
+
+TF_API void Tf_RegistryInitCtor(char const *name);
+TF_API void Tf_RegistryInitDtor(char const *name);
+
+namespace {
+struct Tf_RegistryStaticInit {
+    Tf_RegistryStaticInit() {
+        Tf_RegistryInitCtor(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME));
+    }
+    ~Tf_RegistryStaticInit() {
+        Tf_RegistryInitDtor(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME));
+    }
+};
+}
 
 // Private class used to indicate the library has finished registering
 // functions, to indicate that the library is being unloaded and to
 // add functions to the registry.
 class Tf_RegistryInit {
 public:
-    Tf_RegistryInit(const char* name);
-    ~Tf_RegistryInit();
-
-    static void Add(const char* libName,
+    TF_API static void Add(const char* libName,
                     TfRegistryManager::RegistrationFunctionType func,
                     const char* typeName);
     template <class T, class U>
@@ -141,171 +150,117 @@ public:
     {
         Add(libName,(TfRegistryManager::RegistrationFunctionType)func,typeName);
     }
-
-private:
-    const char* _name;
 };
 
-#if defined(ARCH_COMPILER_GCC) || defined(ARCH_COMPILER_CLANG)
+// The ARCH_CONSTRUCTOR priority for registering registry functions.
+#define TF_REGISTRY_PRIORITY 100
 
-// See registryManager.cpp for details.  We use priority 200 because we
-// want to run before C++ constructors of objects at global scope and
-// because priorities under 100 are reserved.
-#   define TF_REGISTRY_ADD_ATTRIBUTES ARCH_USED_FUNCTION ARCH_CONSTRUCTOR(200)
-#   define TF_REGISTRY_LOAD_MARKER static Tf_RegistryInit tf_registry_init(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME))
-//#  define TF_REGISTRY_LOAD_MARKER ARCH_HIDDEN __attribute__((weak)) Tf_RegistryInit tf_registry_init(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME))
-
-#else
-
-#error No support for TfRegistryManager.
-
-#endif
-
-// Private.
-TF_REGISTRY_LOAD_MARKER;
-
-
-// ---
-// Unique name for function called to add the registry function.  This will
-// be called by the dynamic loader so it should have type void(*)(void).
-#define TF_REGISTRY_ADDER_SIGNATURE(KEY_TYPE, TAG) \
-static void TF_PP_CAT(_Tf_RegistryAdd_, TF_PP_CAT(KEY_TYPE, TF_PP_CAT(_, TAG)))()
+//
+// Macros for adding registry functions outside class templates.
+//
 
 // Define a registry function outside of a template.  Follow the macro with
 // the body of the function inside braces.  KEY_TYPE and TAG must be types.
-// XXX -- Note that we're taking arguments to our "constructor".  We don't
-//        use these arguments and the dynamic loader will not supply them.
-//        This is probably not portable.  An alternative might be to use
-//        a static function in a template class parameterized by the two
-//        types.
-#define TF_REGISTRY_DEFINE_WITH_TYPE(KEY_TYPE, TAG) \
-TF_REGISTRY_ADD_ATTRIBUTES static void _Tf_RegistryAdd(KEY_TYPE*, TAG*); \
-static void _Tf_RegistryFunction(KEY_TYPE*, TAG*); \
-static void _Tf_RegistryAdd(KEY_TYPE*, TAG*) \
-{ \
-    Tf_RegistryInit::Add(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME), \
-                         (void(*)(KEY_TYPE*, TAG*))_Tf_RegistryFunction, \
-                         BOOST_PP_STRINGIZE(KEY_TYPE)); \
-} \
-static void _Tf_RegistryFunction(KEY_TYPE*, TAG*)
-
+#define TF_REGISTRY_DEFINE_WITH_TYPE(KEY_TYPE, TAG)                            \
+    static void _Tf_RegistryFunction(KEY_TYPE*, TAG*);                         \
+    ARCH_CONSTRUCTOR(BOOST_PP_CAT(_Tf_RegistryAdd, __LINE__),                  \
+                     TF_REGISTRY_PRIORITY, KEY_TYPE*, TAG*)                    \
+    {                                                                          \
+        Tf_RegistryInit::Add(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME),         \
+                             (void(*)(KEY_TYPE*, TAG*))_Tf_RegistryFunction,   \
+                             BOOST_PP_STRINGIZE(KEY_TYPE));                    \
+    }                                                                          \
+    _ARCH_ENSURE_PER_LIB_INIT(Tf_RegistryStaticInit, _tfRegistryInit);         \
+    static void _Tf_RegistryFunction(KEY_TYPE*, TAG*)
+    
 // Define a registry function outside of a template.  Follow the macro with
 // the body of the function inside braces.  KEY_TYPE must be a type and NAME
 // must be a valid C++ name.
-#define TF_REGISTRY_DEFINE(KEY_TYPE, NAME) \
-TF_REGISTRY_ADD_ATTRIBUTES TF_REGISTRY_ADDER_SIGNATURE(KEY_TYPE, NAME); \
-static void TF_PP_CAT(_Tf_RegistryFunction_, TF_PP_CAT(KEY_TYPE, TF_PP_CAT(_, NAME)))(void*, void*); \
-TF_REGISTRY_ADDER_SIGNATURE(KEY_TYPE, NAME) \
-{ \
-    Tf_RegistryInit::Add(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME), \
-                         TF_PP_CAT(_Tf_RegistryFunction_, TF_PP_CAT(KEY_TYPE, TF_PP_CAT(_, NAME))), \
-                         BOOST_PP_STRINGIZE(KEY_TYPE)); \
-} \
-static void TF_PP_CAT(_Tf_RegistryFunction_, TF_PP_CAT(KEY_TYPE, TF_PP_CAT(_, NAME)))(void*, void*)
+#define TF_REGISTRY_DEFINE(KEY_TYPE, NAME)                                     \
+    static void BOOST_PP_CAT(_Tf_RegistryFunction, NAME)(KEY_TYPE*, void*);    \
+    ARCH_CONSTRUCTOR(BOOST_PP_CAT(_Tf_RegistryAdd, NAME),                      \
+                     TF_REGISTRY_PRIORITY, KEY_TYPE*)                          \
+    {                                                                          \
+        Tf_RegistryInit::Add(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME),         \
+                             (void(*)(KEY_TYPE*, void*))                       \
+                             BOOST_PP_CAT(_Tf_RegistryFunction, NAME),         \
+                             BOOST_PP_STRINGIZE(KEY_TYPE));                    \
+    }                                                                          \
+    _ARCH_ENSURE_PER_LIB_INIT(Tf_RegistryStaticInit, _tfRegistryInit);         \
+    static void BOOST_PP_CAT(_Tf_RegistryFunction, NAME)(KEY_TYPE*, void*)
 
-//
-// Macros for adding registry functions inside class templates.
-//
 
-// Define a registry function inline in a template.  Follow the macro with
-// the body of the function inside braces.
-#define TF_REGISTRY_TEMPLATE_DEFINE(KEY_TYPE, TAG) \
-TF_REGISTRY_ADD_ATTRIBUTES \
-TF_REGISTRY_ADDER_SIGNATURE(KEY_TYPE, TAG) \
-{ \
-    Tf_RegistryInit::Add(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME), \
-                         (void(*)(KEY_TYPE*, TAG*))_Tf_RegistryFunction, \
-                         BOOST_PP_STRINGIZE(KEY_TYPE)); \
-} \
-static ARCH_HIDDEN void _Tf_RegistryFunction(KEY_TYPE*, TAG*)
-
-// Declare a registry function in a template.
-// Use \c TF_REGISTRY_TEMPLATE_SIGNATURE to define the function out-of-line,
-// e.g. template<> void MyTemplateClass<MyType>::TF_REGISTRY_TEMPLATE_SIGNATURE(Key, Tag)
-#define TF_REGISTRY_TEMPLATE_DECLARE(KEY_TYPE, TAG) \
-static ARCH_HIDDEN void _Tf_RegistryFunction(KEY_TYPE*, TAG*); \
-TF_REGISTRY_ADD_ATTRIBUTES \
-TF_REGISTRY_ADDER_SIGNATURE(KEY_TYPE, TAG) \
-{ \
-    Tf_RegistryInit::Add(BOOST_PP_STRINGIZE(MFB_ALT_PACKAGE_NAME), \
-                         (void(*)(KEY_TYPE*, TAG*))_Tf_RegistryFunction, \
-                         BOOST_PP_STRINGIZE(KEY_TYPE)); \
-}
-
-// Function name and signature for registry function in a template.
-#define TF_REGISTRY_TEMPLATE_SIGNATURE(KEY_TYPE, TAG) \
-_Tf_RegistryFunction(KEY_TYPE*, TAG*)
-
-/*!
- * \brief Define a function that is called on demand by \c TfRegistryManager.
- *
- * This is a simpler form of TF_REGISTRY_FUNCTION_WITH_TAG() that provides
- * a tag for you, based on the MFB package, file name, and line number being
- * compiled.  For most cases (private registry functions inside .cpp files)
- * this should do.
- *
- * A very common use is to symbolically define enum names (see \c TfEnum):
- * \code
- * TF_REGISTRY_FUNCTION(TfEnum)
- * {
- *        // Bit-depth types.
- *        TF_ADD_ENUM_NAME(ELEM_BITDEPTH_8);
- *        TF_ADD_ENUM_NAME(ELEM_BITDEPTH_10);
- *        TF_ADD_ENUM_NAME(ELEM_BITDEPTH_32);
- *
- *        // Destination types.
- *        TF_ADD_ENUM_NAME(ELEM_DESTINATION_DISKFARM);
- *        TF_ADD_ENUM_NAME(ELEM_DESTINATION_JOBDIR);
- * 
- *        // Renderer types.
- *        TF_ADD_ENUM_NAME(ELEM_RENDERER_GRAIL);
- *        TF_ADD_ENUM_NAME(ELEM_RENDERER_PRMAN);
- * }
- * \endcode
- */
+/// Define a function that is called on demand by \c TfRegistryManager.
+///
+/// This is a simpler form of TF_REGISTRY_FUNCTION_WITH_TAG() that provides
+/// a tag for you, based on the MFB package, file name, and line number being
+/// compiled.  For most cases (private registry functions inside .cpp files)
+/// this should do.
+///
+/// A very common use is to symbolically define enum names (see \c TfEnum):
+/// \code
+/// TF_REGISTRY_FUNCTION(TfEnum)
+/// {
+///        // Bit-depth types.
+///        TF_ADD_ENUM_NAME(ELEM_BITDEPTH_8);
+///        TF_ADD_ENUM_NAME(ELEM_BITDEPTH_10);
+///        TF_ADD_ENUM_NAME(ELEM_BITDEPTH_32);
+///
+///        // Destination types.
+///        TF_ADD_ENUM_NAME(ELEM_DESTINATION_DISKFARM);
+///        TF_ADD_ENUM_NAME(ELEM_DESTINATION_JOBDIR);
+/// 
+///        // Renderer types.
+///        TF_ADD_ENUM_NAME(ELEM_RENDERER_GRAIL);
+///        TF_ADD_ENUM_NAME(ELEM_RENDERER_PRMAN);
+/// }
+/// \endcode
+///
+/// \hideinitializer
 #define TF_REGISTRY_FUNCTION(KEY_TYPE) \
-    TF_REGISTRY_FUNCTION_WITH_TAG(KEY_TYPE, __LINE__)
+    TF_REGISTRY_DEFINE(KEY_TYPE, __LINE__)
 
-/*!
- * \brief Define a function that is called on demand by \c TfRegistryManager.
- *
- * Here is an example of using this macro:
- * \code
- * #include "pxr/base/tf/registryManager.h"
- *
- * TF_REGISTRY_FUNCTION_WITH_TAG(XyzRegistry, MyTag)
- * {
- *      // calls to, presumably, XyzRegistry:
- *      ...
- * }
- *\endcode
- *
- * Given the above, a call to \c TfRegistryManager::SubscribeTo<XyzRegistry>()
- * will cause the above function to be immediately run.  (If the above function
- * has not yet been loaded, but is loaded in the future, it will be run then.)
- * The second type, \c MyType, is unimportant, but cannot be repeated with the
- * first type (i.e. there can be at most one call to \c TF_REGISTRY_FUNCTION()
- * for a given pair of types).
- *
- * In contrast to the typical static-constructor design, the code within a
- * TF_REGISTRY_FUNCTION() function is (usually) not run before main();
- * specifically, it is not run unless and until a call to SubscribeTo<T>()
- * occurs.  This is important: if there are no subscribers, the code may never
- * be run.
- *
- * Note two restrictions: the type-names \p KEY_TYPE and \c TAG passed
- * to this macro must be untemplated, and not qualified with a
- * namespace. (Translation: the name as given must consist solely of letters and
- * numbers: no "\<", "\>" or ":" characters are allowed.)  KEY_TYPE may be inside
- * a namespace but must not be explicitly qualified; you must use 'using
- * namespace &lt;foo\>::KEY_TYPE' before calling this macro.  Every use of \c
- * TF_REGISTRY_FUNCTION() must use a different pair for \c KEY_TYPE and \c
- * TAG or a multiply defined symbol will result at link time.  Note
- * that this means the same KEY_TYPE in two or more namespaces may not be
- * registered in more than one namespace.
- *
- */
+/// Define a function that is called on demand by \c TfRegistryManager.
+///
+/// Here is an example of using this macro:
+/// \code
+/// #include "pxr/base/tf/registryManager.h"
+///
+/// TF_REGISTRY_FUNCTION_WITH_TAG(XyzRegistry, MyTag)
+/// {
+///      // calls to, presumably, XyzRegistry:
+///      ...
+/// }
+///\endcode
+///
+/// Given the above, a call to \c TfRegistryManager::SubscribeTo<XyzRegistry>()
+/// will cause the above function to be immediately run.  (If the above function
+/// has not yet been loaded, but is loaded in the future, it will be run then.)
+/// The second type, \c MyType, is unimportant, but cannot be repeated with the
+/// first type (i.e. there can be at most one call to \c TF_REGISTRY_FUNCTION()
+/// for a given pair of types).
+///
+/// In contrast to the typical static-constructor design, the code within a
+/// TF_REGISTRY_FUNCTION() function is (usually) not run before main();
+/// specifically, it is not run unless and until a call to SubscribeTo<T>()
+/// occurs.  This is important: if there are no subscribers, the code may never
+/// be run.
+///
+/// Note two restrictions: the type-names \p KEY_TYPE and \c TAG passed
+/// to this macro must be untemplated, and not qualified with a
+/// namespace. (Translation: the name as given must consist solely of letters and
+/// numbers: no "\<", "\>" or ":" characters are allowed.)  KEY_TYPE may be inside
+/// a namespace but must not be explicitly qualified; you must use 'using
+/// namespace &lt;foo\>::KEY_TYPE' before calling this macro.  Every use of \c
+/// TF_REGISTRY_FUNCTION() must use a different pair for \c KEY_TYPE and \c
+/// TAG or a multiply defined symbol will result at link time.  Note
+/// that this means the same KEY_TYPE in two or more namespaces may not be
+/// registered in more than one namespace.
+///
+/// \hideinitializer
 #define TF_REGISTRY_FUNCTION_WITH_TAG(KEY_TYPE, TAG) \
-    TF_REGISTRY_DEFINE(KEY_TYPE, TAG)
+    TF_REGISTRY_DEFINE(KEY_TYPE, BOOST_PP_CAT(TAG, __LINE__))
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // TF_REGISTRYMANAGER_H

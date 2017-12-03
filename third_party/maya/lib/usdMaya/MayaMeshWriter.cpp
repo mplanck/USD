@@ -21,46 +21,56 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/MayaMeshWriter.h"
 
 #include "usdMaya/meshUtil.h"
 
+#include "pxr/base/gf/vec3f.h"
 #include "pxr/usd/usdGeom/mesh.h"
 #include "pxr/usd/usdGeom/pointBased.h"
 #include "pxr/usd/usdUtils/pipeline.h"
 
-#include <maya/MFloatVectorArray.h>
 #include <maya/MUintArray.h>
-#include <maya/MItMeshPolygon.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+
+const GfVec2f MayaMeshWriter::_DefaultUV = GfVec2f(-1.0e30);
+
+const GfVec3f MayaMeshWriter::_ShaderDefaultRGB = GfVec3f(0.5);
+const float MayaMeshWriter::_ShaderDefaultAlpha = 0.0;
+
+const GfVec3f MayaMeshWriter::_ColorSetDefaultRGB = GfVec3f(1.0);
+const float MayaMeshWriter::_ColorSetDefaultAlpha = 1.0;
+
 
 MayaMeshWriter::MayaMeshWriter(
-        MDagPath & iDag, 
-        UsdStageRefPtr stage, 
-        const JobExportArgs & iArgs) :
-    MayaTransformWriter(iDag, stage, iArgs)
+        const MDagPath & iDag,
+        const SdfPath& uPath,
+        bool instanceSource,
+        usdWriteJobCtx& jobCtx) :
+    MayaTransformWriter(iDag, uPath, instanceSource, jobCtx)
 {
-}
-
-
-//virtual 
-UsdPrim MayaMeshWriter::write(const UsdTimeCode &usdTime)
-{
-
     if ( !isMeshValid() ) {
-        return UsdPrim();
+        return;
     }
 
     // Get schema
     UsdGeomMesh primSchema = UsdGeomMesh::Define(getUsdStage(), getUsdPath());
     TF_AXIOM(primSchema);
-    UsdPrim meshPrim = primSchema.GetPrim();
-    TF_AXIOM(meshPrim);
-
-    // Write the attrs
-    writeMeshAttrs(usdTime, primSchema);
-    return meshPrim;
+    mUsdPrim = primSchema.GetPrim();
+    TF_AXIOM(mUsdPrim);
 }
 
+//virtual 
+void MayaMeshWriter::write(const UsdTimeCode &usdTime)
+{
+    UsdGeomMesh primSchema(mUsdPrim);
+    // Write the attrs
+    writeMeshAttrs(usdTime, primSchema);
+}
 
 // virtual
 bool MayaMeshWriter::writeMeshAttrs(const UsdTimeCode &usdTime, UsdGeomMesh &primSchema)
@@ -77,12 +87,14 @@ bool MayaMeshWriter::writeMeshAttrs(const UsdTimeCode &usdTime, UsdGeomMesh &pri
         return true; 
     }
 
-    MFnMesh lMesh( getDagPath(), &status );
-    if ( !status )
-    {
-        MGlobal::displayError( "MFnMesh() failed for MayaMeshWriter" );
+    MFnMesh lMesh(getDagPath(), &status);
+    if (!status) {
+        MGlobal::displayError(
+            "MayaMeshWriter: MFnMesh() failed for mesh at dagPath: " +
+            getDagPath().fullPathName());
         return false;
     }
+
     unsigned int numVertices = lMesh.numVertices();
     unsigned int numPolygons = lMesh.numPolygons();
 
@@ -123,37 +135,21 @@ bool MayaMeshWriter::writeMeshAttrs(const UsdTimeCode &usdTime, UsdGeomMesh &pri
 
     // Read usdSdScheme attribute. If not set, we default to defaultMeshScheme
     // flag that can be user defined and initialized to catmullClark
-    TfToken sdScheme = PxrUsdMayaMeshUtil::getSubdivScheme(lMesh, getArgs().defaultMeshScheme);    
+    TfToken sdScheme = PxrUsdMayaMeshUtil::getSubdivScheme(lMesh, getArgs().defaultMeshScheme);
     primSchema.CreateSubdivisionSchemeAttr(VtValue(sdScheme), true);
 
-    // Polygonal Mesh Case
-    if (sdScheme==UsdGeomTokens->none) {
-        // Support for standard USD bool and with Mojito bool tag
-        TfToken normalInterp=PxrUsdMayaMeshUtil::getEmitNormals(lMesh, UsdGeomTokens->none);
-        
-        if (normalInterp==UsdGeomTokens->faceVarying) {
-            // Get References to members of meshData object
-            MFloatVectorArray normalArray;
-            MFloatVectorArray vertexNormalArray;
- 
-            lMesh.getNormals(normalArray, MSpace::kObject);
+    if (sdScheme == UsdGeomTokens->none) {
+        // Polygonal Mesh Case
+        if (PxrUsdMayaMeshUtil::getEmitNormals(lMesh, sdScheme)) {
+            VtArray<GfVec3f> meshNormals;
+            TfToken normalInterp;
 
-            // Iterate through each face in the mesh.
-            vertexNormalArray.setLength(lMesh.numFaceVertices());
-            VtArray<GfVec3f> meshNormals(lMesh.numFaceVertices());
-            size_t faceVertIdx = 0;
-            for (MItMeshPolygon faceIter(getDagPath()); !faceIter.isDone(); faceIter.next()) {
-                // Iterate through each face-vertex.
-                for (size_t locVertIdx = 0; locVertIdx < faceIter.polygonVertexCount();
-                        ++locVertIdx, ++faceVertIdx) {
-                    int index=faceIter.normalIndex(locVertIdx);
-                    for (int j=0;j<3;j++) {
-                        meshNormals[faceVertIdx][j]=normalArray[index][j];
-                    }
-                }
+            if (PxrUsdMayaMeshUtil::GetMeshNormals(lMesh,
+                                                   &meshNormals,
+                                                   &normalInterp)) {
+                primSchema.GetNormalsAttr().Set(meshNormals, usdTime);
+                primSchema.SetNormalsInterpolation(normalInterp);
             }
-            primSchema.GetNormalsAttr().Set(meshNormals, usdTime);
-            primSchema.SetNormalsInterpolation(normalInterp);
         }
     } else {
         TfToken sdInterpBound = PxrUsdMayaMeshUtil::getSubdivInterpBoundary(
@@ -161,13 +157,15 @@ bool MayaMeshWriter::writeMeshAttrs(const UsdTimeCode &usdTime, UsdGeomMesh &pri
 
         primSchema.CreateInterpolateBoundaryAttr(VtValue(sdInterpBound), true);
         
-        TfToken sdFVInterpBound = PxrUsdMayaMeshUtil::getSubdivFVInterpBoundary(
-            lMesh);
+        TfToken sdFVLinearInterpolation =
+            PxrUsdMayaMeshUtil::getSubdivFVLinearInterpolation(lMesh);
 
-        primSchema.CreateFaceVaryingLinearInterpolationAttr(
-            VtValue(sdFVInterpBound), true);
+        if (!sdFVLinearInterpolation.IsEmpty()) {
+            primSchema.CreateFaceVaryingLinearInterpolationAttr(
+                VtValue(sdFVLinearInterpolation), true);
+        }
 
-        assignSubDivTagsToUSDPrim( lMesh, primSchema);
+        assignSubDivTagsToUSDPrim(lMesh, primSchema);
     }
 
     // Holes - we treat InvisibleFaces as holes
@@ -186,132 +184,194 @@ bool MayaMeshWriter::writeMeshAttrs(const UsdTimeCode &usdTime, UsdGeomMesh &pri
     if (getArgs().exportMeshUVs) {
         status = lMesh.getUVSetNames(uvSetNames);
     }
-    for (unsigned int i=0; i < uvSetNames.length(); i++) {
-        // Initialize the VtArray to the max possible size (facevarying)
-        VtArray<GfVec2f> uvValues(numFaceVertices);
-        TfToken interpolation=TfToken();
-        // Gather UV data and interpolation into a Vec2f VtArray and try to compress if possible
-        if (_GetMeshUVSetData(lMesh, uvSetNames[i], &uvValues, &interpolation) == MS::kSuccess) {
-        
-            // XXX:bug 118447
-            // We should be able to configure the UV map name that triggers this
-            // behavior, and the name to which it exports.
-            // The UV Set "map1" is renamed st. This is a Pixar/USD convention
-            TfToken setName(uvSetNames[i].asChar());
-            if (setName == "map1") setName=UsdUtilsGetPrimaryUVSetName();
-       
-            // Create the primvar and set the values
-            UsdGeomPrimvar uvSet = 
-                primSchema.CreatePrimvar(setName, SdfValueTypeNames->Float2Array, interpolation);
-            uvSet.Set( uvValues ); // not animatable
+    for (unsigned int i = 0; i < uvSetNames.length(); ++i) {
+        VtArray<GfVec2f> uvValues;
+        TfToken interpolation;
+        VtArray<int> assignmentIndices;
+
+        if (!_GetMeshUVSetData(lMesh,
+                                  uvSetNames[i],
+                                  &uvValues,
+                                  &interpolation,
+                                  &assignmentIndices)) {
+            continue;
         }
+
+        int unassignedValueIndex = -1;
+        PxrUsdMayaUtil::AddUnassignedUVIfNeeded(&uvValues,
+                                                &assignmentIndices,
+                                                &unassignedValueIndex,
+                                                _DefaultUV);
+
+        // XXX:bug 118447
+        // We should be able to configure the UV map name that triggers this
+        // behavior, and the name to which it exports.
+        // The UV Set "map1" is renamed st. This is a Pixar/USD convention.
+        TfToken setName(uvSetNames[i].asChar());
+        if (setName == "map1") {
+            setName = UsdUtilsGetPrimaryUVSetName();
+        }
+
+        _createUVPrimVar(primSchema,
+                         setName,
+                         uvValues,
+                         interpolation,
+                         assignmentIndices,
+                         unassignedValueIndex);
     }
-    
+
     // == Gather ColorSets
     MStringArray colorSetNames;
     if (getArgs().exportColorSets) {
         status = lMesh.getColorSetNames(colorSetNames);
     }
-    // shaderColor is used in our pipeline as displayColor.
-    // shaderColor is used to fill faces where the colorset is not assigned
-    MColorArray shaderColors;
-    MObjectArray shaderObjs;
-    
-    VtArray<GfVec3f> shadersRGBData;
-    TfToken shadersRGBInterp;
-    VtArray<float> shadersAlphaData;
-    TfToken shadersAlphaInterp;
 
-    // If exportDisplayColor is set to true or we have color sets,
-    // gather color & opacity from the shader including per face
-    // assignment. Color set require this to initialize unauthored/unpainted faces 
-    if (getArgs().exportDisplayColor or colorSetNames.length()>0) {
-        PxrUsdMayaUtil::GetLinearShaderColor(lMesh, numPolygons, 
-                &shadersRGBData, &shadersRGBInterp, 
-                &shadersAlphaData, &shadersAlphaInterp);
+    VtArray<GfVec3f> shadersRGBData;
+    VtArray<float> shadersAlphaData;
+    TfToken shadersInterpolation;
+    VtArray<int> shadersAssignmentIndices;
+
+    // If we're exporting displayColor or we have color sets, gather colors and
+    // opacities from the shaders assigned to the mesh and/or its faces.
+    // If we find a displayColor color set, the shader colors and opacities
+    // will be used to fill in unauthored/unpainted faces in the color set.
+    if (getArgs().exportDisplayColor || colorSetNames.length() > 0) {
+        PxrUsdMayaUtil::GetLinearShaderColor(lMesh,
+                                             &shadersRGBData,
+                                             &shadersAlphaData,
+                                             &shadersInterpolation,
+                                             &shadersAssignmentIndices);
     }
 
-    for (unsigned int i=0; i < colorSetNames.length(); i++) {
+    for (unsigned int i=0; i < colorSetNames.length(); ++i) {
 
-        bool isDisplayColor=false;
+        bool isDisplayColor = false;
 
-        if (colorSetNames[i]=="displayColor") {
-            if (not getArgs().exportDisplayColor)
+        if (colorSetNames[i] == PxrUsdMayaMeshColorSetTokens->DisplayColorColorSetName.GetText()) {
+            if (!getArgs().exportDisplayColor) {
                 continue;
+            }
             isDisplayColor=true;
         }
         
-        if (colorSetNames[i]=="displayOpacity") {
-            MGlobal::displayWarning("displayOpacity on mesh:" + lMesh.fullPathName() + 
-            " is a reserved PrimVar name in USD. Skipping...");
+        if (colorSetNames[i] == PxrUsdMayaMeshColorSetTokens->DisplayOpacityColorSetName.GetText()) {
+            MGlobal::displayWarning("Mesh \"" + lMesh.fullPathName() +
+                "\" has a color set named \"" +
+                MString(PxrUsdMayaMeshColorSetTokens->DisplayOpacityColorSetName.GetText()) +
+                "\" which is a reserved Primvar name in USD. Skipping...");
             continue;
         }
 
         VtArray<GfVec3f> RGBData;
-        TfToken RGBInterp;
-        VtArray<GfVec4f> RGBAData;
-        TfToken RGBAInterp;
         VtArray<float> AlphaData;
-        TfToken AlphaInterp;
+        TfToken interpolation;
+        VtArray<int> assignmentIndices;
+        int unassignedValueIndex = -1;
         MFnMesh::MColorRepresentation colorSetRep;
-        bool clamped=false;
+        bool clamped = false;
 
-        // If displayColor uses shaderValues for non authored areas
-        // and allow RGB and Alpha to have different interpolation
-        // For all other colorSets the non authored values are set 
-        // to (1,1,1,1) and RGB and Alpha will have the same interplation
-        // since they will be emitted as a Vec4f
-        if (not _GetMeshColorSetData( lMesh, colorSetNames[i],
-                                        isDisplayColor,
-                                        shadersRGBData, shadersAlphaData,
-                                        &RGBData, &RGBInterp,
-                                        &RGBAData, &RGBAInterp,
-                                        &AlphaData, &AlphaInterp,
-                                        &colorSetRep, &clamped)) {
+        if (!_GetMeshColorSetData(lMesh,
+                                     colorSetNames[i],
+                                     isDisplayColor,
+                                     shadersRGBData,
+                                     shadersAlphaData,
+                                     shadersAssignmentIndices,
+                                     &RGBData,
+                                     &AlphaData,
+                                     &interpolation,
+                                     &assignmentIndices,
+                                     &colorSetRep,
+                                     &clamped)) {
             MGlobal::displayWarning("Unable to retrieve colorSet data: " +
-                    colorSetNames[i] + " on mesh: "+ lMesh.fullPathName() + ". Skipping...");
+                colorSetNames[i] + " on mesh: " + lMesh.fullPathName() +
+                ". Skipping...");
             continue;
         }
 
+        PxrUsdMayaUtil::AddUnassignedColorAndAlphaIfNeeded(
+            &RGBData,
+            &AlphaData,
+            &assignmentIndices,
+            &unassignedValueIndex,
+            _ColorSetDefaultRGB,
+            _ColorSetDefaultAlpha);
+
         if (isDisplayColor) {
             // We tag the resulting displayColor/displayOpacity primvar as
-            // authored to make sure we reconstruct the colorset on import
-            // The RGB is also convererted From DisplayToLinear
-            
-            
-            _setDisplayPrimVar( primSchema, colorSetRep,
-                                RGBData, RGBInterp,
-                                AlphaData, AlphaInterp,
-                                clamped, true);
+            // authored to make sure we reconstruct the color set on import.
+            _addDisplayPrimvars(primSchema,
+                                colorSetRep,
+                                RGBData,
+                                AlphaData,
+                                interpolation,
+                                assignmentIndices,
+                                unassignedValueIndex,
+                                clamped,
+                                true);
         } else {
             TfToken colorSetNameToken = TfToken(
-                    PxrUsdMayaUtil::SanitizeColorSetName(
-                        std::string(colorSetNames[i].asChar())));
+                PxrUsdMayaUtil::SanitizeColorSetName(
+                    std::string(colorSetNames[i].asChar())));
             if (colorSetRep == MFnMesh::kAlpha) {
-                    _createAlphaPrimVar(primSchema, colorSetNameToken,
-                        AlphaData, AlphaInterp, clamped);
+                _createAlphaPrimVar(primSchema,
+                                    colorSetNameToken,
+                                    AlphaData,
+                                    interpolation,
+                                    assignmentIndices,
+                                    unassignedValueIndex,
+                                    clamped);
             } else if (colorSetRep == MFnMesh::kRGB) {
-                    _createRGBPrimVar(primSchema, colorSetNameToken,
-                        RGBData, RGBInterp, clamped);
+                _createRGBPrimVar(primSchema,
+                                  colorSetNameToken,
+                                  RGBData,
+                                  interpolation,
+                                  assignmentIndices,
+                                  unassignedValueIndex,
+                                  clamped);
             } else if (colorSetRep == MFnMesh::kRGBA) {
-                    _createRGBAPrimVar(primSchema, colorSetNameToken,
-                        RGBAData, RGBAInterp, clamped);
+                _createRGBAPrimVar(primSchema,
+                                   colorSetNameToken,
+                                   RGBData,
+                                   AlphaData,
+                                   interpolation,
+                                   assignmentIndices,
+                                   unassignedValueIndex,
+                                   clamped);
             }
         }
     }
-    // Set displayColor and displayOpacity only if they are NOT authored already
-    // Since this primvar will come from the shader and not a colorset,
-    // we are not adding the clamp attribute as custom data
-    // If a displayColor/displayOpacity is added, it's not considered authored
-    // we don't need to reconstruct this as a colorset since it orgininated
-    // from bound shader[s], so the authored flag is set to false
-    // Given that this RGB is for display, we do DisplayToLinear conversion
+
+    // _addDisplayPrimvars() will only author displayColor and displayOpacity
+    // if no authored opinions exist, so the code below only has an effect if
+    // we did NOT find a displayColor color set above.
     if (getArgs().exportDisplayColor) {
-        _setDisplayPrimVar( primSchema, MFnMesh::kRGBA,
-                                shadersRGBData, shadersRGBInterp,
-                                shadersAlphaData, shadersAlphaInterp,
-                                false, false);
+        // Using the shader default values (an alpha of zero, in particular)
+        // results in Gprims rendering the same way in usdview as they do in
+        // Maya (i.e. unassigned components are invisible).
+        int unassignedValueIndex = -1;
+        PxrUsdMayaUtil::AddUnassignedColorAndAlphaIfNeeded(
+                &shadersRGBData,
+                &shadersAlphaData,
+                &shadersAssignmentIndices,
+                &unassignedValueIndex,
+                _ShaderDefaultRGB,
+                _ShaderDefaultAlpha);
+
+        // Since these colors come from the shaders and not a colorset, we are
+        // not adding the clamp attribute as custom data. We also don't need to
+        // reconstruct a color set from them on import since they originated
+        // from the bound shader(s), so the authored flag is set to false.
+        _addDisplayPrimvars(primSchema,
+                            MFnMesh::kRGBA,
+                            shadersRGBData,
+                            shadersAlphaData,
+                            shadersInterpolation,
+                            shadersAssignmentIndices,
+                            unassignedValueIndex,
+                            false,
+                            false);
     }
+
     return true;
 }
 
@@ -320,10 +380,11 @@ bool MayaMeshWriter::isMeshValid()
     MStatus status = MS::kSuccess;
 
     // Sanity checks
-    MFnMesh lMesh( getDagPath(), &status );
-    if ( !status )
-    {
-        MGlobal::displayError( "MFnMesh() failed for MayaMeshWriter" );
+    MFnMesh lMesh(getDagPath(), &status);
+    if (!status) {
+        MGlobal::displayError(
+            "MayaMeshWriter: MFnMesh() failed for mesh at dagPath: " +
+            getDagPath().fullPathName());
         return false;
     }
 
@@ -350,3 +411,6 @@ MayaMeshWriter::exportsGprims() const
     return true;
 }
     
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

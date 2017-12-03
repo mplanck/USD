@@ -23,4 +23,48 @@
 //
 #include "pxr/usd/usd/tokens.h"
 
-TF_DEFINE_PUBLIC_TOKENS(UsdTokens, USD_TOKENS);
+PXR_NAMESPACE_OPEN_SCOPE
+
+UsdTokensType::UsdTokensType() :
+    clipActive("clipActive", TfToken::Immortal),
+    clipAssetPaths("clipAssetPaths", TfToken::Immortal),
+    clipManifestAssetPath("clipManifestAssetPath", TfToken::Immortal),
+    clipPrimPath("clipPrimPath", TfToken::Immortal),
+    clips("clips", TfToken::Immortal),
+    clipSets("clipSets", TfToken::Immortal),
+    clipTemplateAssetPath("clipTemplateAssetPath", TfToken::Immortal),
+    clipTemplateEndTime("clipTemplateEndTime", TfToken::Immortal),
+    clipTemplateStartTime("clipTemplateStartTime", TfToken::Immortal),
+    clipTemplateStride("clipTemplateStride", TfToken::Immortal),
+    clipTimes("clipTimes", TfToken::Immortal),
+    collection("collection", TfToken::Immortal),
+    exclude("exclude", TfToken::Immortal),
+    expandPrims("expandPrims", TfToken::Immortal),
+    expandPrimsAndProperties("expandPrimsAndProperties", TfToken::Immortal),
+    expansionRule("expansionRule", TfToken::Immortal),
+    explicitOnly("explicitOnly", TfToken::Immortal),
+    allTokens({
+        clipActive,
+        clipAssetPaths,
+        clipManifestAssetPath,
+        clipPrimPath,
+        clips,
+        clipSets,
+        clipTemplateAssetPath,
+        clipTemplateEndTime,
+        clipTemplateStartTime,
+        clipTemplateStride,
+        clipTimes,
+        collection,
+        exclude,
+        expandPrims,
+        expandPrimsAndProperties,
+        expansionRule,
+        explicitOnly
+    })
+{
+}
+
+TfStaticData<UsdTokensType> UsdTokens;
+
+PXR_NAMESPACE_CLOSE_SCOPE

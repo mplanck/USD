@@ -24,6 +24,8 @@
 #ifndef GLF_IMAGE_REGISTRY_H
 #define GLF_IMAGE_REGISTRY_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
 #include "pxr/base/tf/singleton.h"
 #include "pxr/base/tf/token.h"
 
@@ -32,20 +34,23 @@
 
 #include <string>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class GlfImage> GlfImageSharedPtr;
 
 class GlfRankedTypeMap;
 
-///
 /// \class GlfImageRegistry
-/// \brief Manages plugin registration and loading for GlfImage subclasses
+///
+/// Manages plugin registration and loading for GlfImage subclasses.
 ///
 class GlfImageRegistry : public TfSingleton<GlfImageRegistry> {
 public:
-    static GlfImageRegistry& GetInstance() {
-        return TfSingleton<GlfImageRegistry>::GetInstance();
-    }
+    GLF_API
+    static GlfImageRegistry& GetInstance();
 
+    GLF_API
     bool IsSupportedImageFile(std::string const & filename);
 
 private:
@@ -56,7 +61,6 @@ private:
                                 TfType const & type,
                                 int precedence);
 
-protected:
     friend class GlfImage;
 
     GlfImageSharedPtr _ConstructImage(std::string const & filename);
@@ -64,5 +68,7 @@ protected:
 private:
     boost::scoped_ptr<GlfRankedTypeMap> _typeMap;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // GLF_IMAGE_REGISTRY_H

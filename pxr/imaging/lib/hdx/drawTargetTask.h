@@ -24,47 +24,54 @@
 #ifndef HDX_DRAW_TARGET_TASK_H
 #define HDX_DRAW_TARGET_TASK_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hdx/api.h"
 #include "pxr/imaging/hdx/version.h"
+#include "pxr/imaging/hdx/drawTargetRenderPass.h"
+
 #include "pxr/imaging/hd/task.h"
-#include "pxr/imaging/hd/drawTargetRenderPass.h"
 
 #include "pxr/base/gf/vec2f.h"
 #include "pxr/base/gf/vec4f.h"
 
-typedef boost::weak_ptr<class HdDrawTarget> HdDrawTargetWeakPtr;
-typedef std::unique_ptr<HdDrawTargetRenderPass> HdDrawTargetRenderPassUniquePtr;
+PXR_NAMESPACE_OPEN_SCOPE
+
+class HdStDrawTarget;
+
+
+typedef std::unique_ptr<HdxDrawTargetRenderPass> HdxDrawTargetRenderPassUniquePtr;
+typedef boost::shared_ptr<class HdxSimpleLightingShader> HdxSimpleLightingShaderSharedPtr;
 
 // Not strictly necessary here.
 // But without it, would require users of the class to include it anyway
 
 class HdxDrawTargetTask  : public HdSceneTask {
 public:
+    HDX_API
     HdxDrawTargetTask(HdSceneDelegate* delegate, SdfPath const& id);
     virtual ~HdxDrawTargetTask() = default;
 
 protected:
     /// Sync the render pass resources
+    HDX_API
     virtual void _Sync(HdTaskContext* ctx);
 
     /// Execute render pass task
+    HDX_API
     virtual void _Execute(HdTaskContext* ctx);
 
 private:
-    // Uses unique_ptr for pass to avoid copy constructor
-    // use by std::vector::reserve().
-
     struct RenderPassInfo {
-        HdDrawTargetRenderPassUniquePtr pass;
-        HdDrawTargetWeakPtr             target;
-        unsigned int                    version;
+        HdRenderPassStateSharedPtr        renderPassState;
+        HdxSimpleLightingShaderSharedPtr  simpleLightingShader;
+        const HdStDrawTarget             *target;
+        unsigned int                      version;
     };
-
-    bool     _enableDrawTargets;
     unsigned _currentDrawTargetSetVersion;
 
-
-    typedef std::vector< RenderPassInfo > RenderPassArray;
-    RenderPassArray _renderPasses;
+    typedef std::vector< RenderPassInfo > RenderPassInfoArray;
+    RenderPassInfoArray _renderPassesInfo;
+    std::vector< HdxDrawTargetRenderPassUniquePtr > _renderPasses;
 
     // Raster State - close match to render task
     // but doesn't have enableHardwareShading
@@ -103,13 +110,12 @@ private:
 struct HdxDrawTargetTaskParams
 {
     HdxDrawTargetTaskParams()
-        : enableDrawTargets(false)
-        , overrideColor(0.0)
+        : overrideColor(0.0)
         , wireframeColor(0.0)
         , enableLighting(false)
         , alphaThreshold(0.0)
         , tessLevel(1.0)
-        , drawingRange(0.0)
+        , drawingRange(0.9, -1.0)
         , depthBiasUseDefault(true)
         , depthBiasEnable(false)
         , depthBiasConstantFactor(0.0f)
@@ -121,8 +127,6 @@ struct HdxDrawTargetTaskParams
         , hullVisibility(false)
         , surfaceVisibility(true)
         {}
-
-    bool enableDrawTargets;
 
 //    ClipPlanesVector clipPlanes;
     GfVec4f overrideColor;
@@ -155,8 +159,14 @@ struct HdxDrawTargetTaskParams
 };
 
 // VtValue requirements
+HDX_API
 std::ostream& operator<<(std::ostream& out, const HdxDrawTargetTaskParams& pv);
+HDX_API
 bool operator==(const HdxDrawTargetTaskParams& lhs, const HdxDrawTargetTaskParams& rhs);
+HDX_API
 bool operator!=(const HdxDrawTargetTaskParams& lhs, const HdxDrawTargetTaskParams& rhs);
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // HDX_DRAW_TARGET_TASK_H

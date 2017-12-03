@@ -22,12 +22,11 @@
 // language governing permissions and limitations under the Apache License.
 //
 #include "pxr/usd/usdGeom/curves.h"
-
 #include "pxr/usd/usd/schemaBase.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/usd/sdf/primSpec.h"
 
+#include "pxr/usd/usd/pyConversions.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include "pxr/base/tf/pyUtils.h"
@@ -38,6 +37,10 @@
 #include <string>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 #define WRAP_CUSTOM                                                     \
     template <class Cls> static void _CustomWrapCode(Cls &_class)
@@ -60,6 +63,8 @@ _CreateWidthsAttr(UsdGeomCurves &self,
         UsdPythonToSdfType(defaultVal, SdfValueTypeNames->FloatArray), writeSparsely);
 }
 
+} // anonymous namespace
+
 void wrapUsdGeomCurves()
 {
     typedef UsdGeomCurves This;
@@ -75,6 +80,13 @@ void wrapUsdGeomCurves()
         .def("Get", &This::Get, (arg("stage"), arg("path")))
         .staticmethod("Get")
 
+        .def("IsConcrete",
+            static_cast<bool (*)(void)>( [](){ return This::IsConcrete; }))
+        .staticmethod("IsConcrete")
+
+        .def("IsTyped",
+            static_cast<bool (*)(void)>( [](){ return This::IsTyped; } ))
+        .staticmethod("IsTyped")
 
         .def("GetSchemaAttributeNames",
              &This::GetSchemaAttributeNames,
@@ -120,8 +132,14 @@ void wrapUsdGeomCurves()
 // }
 //
 // Of course any other ancillary or support code may be provided.
+// 
+// Just remember to wrap code in the appropriate delimiters:
+// 'namespace {', '}'.
+//
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
+
+namespace {
 
 static TfPyObjWrapper 
 _ComputeExtent(object points, object widths) {
@@ -134,12 +152,12 @@ _ComputeExtent(object points, object widths) {
         SdfValueTypeNames->FloatArray);
 
     // Check Proper conversion to VtVec3fArray
-    if (not pointsAsVtValue.IsHolding<VtVec3fArray>()) {
+    if (!pointsAsVtValue.IsHolding<VtVec3fArray>()) {
         TF_CODING_ERROR("Improper value for 'points'");
         return object();
     }
 
-    if (not widthsAsVtValue.IsHolding<VtFloatArray>()) {
+    if (!widthsAsVtValue.IsHolding<VtFloatArray>()) {
         TF_CODING_ERROR("Improper value for 'widths'");
         return object();
     }
@@ -167,3 +185,5 @@ WRAP_CUSTOM {
         .staticmethod("ComputeExtent")
         ;
 }
+
+} // anonymous namespace 

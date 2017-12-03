@@ -26,28 +26,37 @@
 #include "pxr/imaging/hdx/tokens.h"
 #include "pxr/imaging/hdx/debugCodes.h"
 
-#include "pxr/imaging/hd/camera.h"
+#include "pxr/imaging/hdSt/camera.h"
+#include "pxr/imaging/hdSt/glslfxShader.h"
+
 #include "pxr/imaging/hd/changeTracker.h"
+#include "pxr/imaging/hd/package.h"
 #include "pxr/imaging/hd/renderIndex.h"
 #include "pxr/imaging/hd/renderPassShader.h"
 #include "pxr/imaging/hd/renderPassState.h"
 #include "pxr/imaging/hd/sceneDelegate.h"
-#include "pxr/imaging/hd/surfaceShader.h"
 
 #include "pxr/imaging/cameraUtil/conformWindow.h"
 
-#include "pxr/base/gf/frustum.h"
+#include <mutex>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+HdShaderCodeSharedPtr HdxRenderSetupTask::_overrideShader;
 
 HdxRenderSetupTask::HdxRenderSetupTask(HdSceneDelegate* delegate, SdfPath const& id)
     : HdSceneTask(delegate, id)
+    , _renderPassState()
+    , _colorRenderPassShader()
+    , _idRenderPassShader()
     , _viewport()
     , _camera()
+    , _renderTags()    
 {
     _colorRenderPassShader.reset(
         new HdRenderPassShader(HdxPackageRenderPassShader()));
     _idRenderPassShader.reset(
         new HdRenderPassShader(HdxPackageRenderPassIdShader()));
-
     _renderPassState.reset(
         new HdRenderPassState(_colorRenderPassShader));
 }
@@ -56,26 +65,27 @@ void
 HdxRenderSetupTask::_Execute(HdTaskContext* ctx)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
     // set raster state to TaskContext
     (*ctx)[HdxTokens->renderPassState] = VtValue(_renderPassState);
+    (*ctx)[HdxTokens->renderTags] = VtValue(_renderTags);
 }
 
 void
 HdxRenderSetupTask::_Sync(HdTaskContext* ctx)
 {
     HD_TRACE_FUNCTION();
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 
-    HdChangeTracker::DirtyBits bits = _GetTaskDirtyBits();
+    HdDirtyBits bits = _GetTaskDirtyBits();
 
     // XXX: for compatibility.
     if (bits & HdChangeTracker::DirtyParams) {
         HdxRenderTaskParams params;
 
         // if HdxRenderTaskParams is set, it's using old API
-        if (not _GetSceneDelegateValue(HdTokens->params, &params)) {
+        if (!_GetSceneDelegateValue(HdTokens->params, &params)) {
             return;
         }
 
@@ -96,10 +106,13 @@ HdxRenderSetupTask::Sync(HdxRenderTaskParams const &params)
     _renderPassState->SetDrawingRange(params.drawingRange);
     _renderPassState->SetCullStyle(params.cullStyle);
     if (params.enableHardwareShading) {
-        _renderPassState->SetOverrideShader(HdShaderSharedPtr());
+        _renderPassState->SetOverrideShader(HdShaderCodeSharedPtr());
     } else {
-        _renderPassState->SetOverrideShader(
-            GetDelegate()->GetRenderIndex().GetShaderFallback());
+        if (!_overrideShader) {
+            _CreateOverrideShader();
+        }
+
+        _renderPassState->SetOverrideShader(_overrideShader);
     }
     if (params.enableIdRender) {
         _renderPassState->SetRenderPassShader(_idRenderPassShader);
@@ -119,68 +132,76 @@ HdxRenderSetupTask::Sync(HdxRenderTaskParams const &params)
     _renderPassState->SetDepthFunc(params.depthFunc);
 
     // alpha to coverage
-    // XXX:  Long-term ALpha to Coverage will be a render style on the
+    // XXX:  Long-term Alpha to Coverage will be a render style on the
     // task.  However, as there isn't a fallback we current force it
     // enabled, unless a client chooses to manage the setting itself (aka usdImaging).
     _renderPassState->SetAlphaToCoverageUseDefault(
         GetDelegate()->IsEnabled(HdxOptionTokens->taskSetAlphaToCoverage));
     _renderPassState->SetAlphaToCoverageEnabled(
-        not TfDebug::IsEnabled(HDX_DISABLE_ALPHA_TO_COVERAGE));
+        !TfDebug::IsEnabled(HDX_DISABLE_ALPHA_TO_COVERAGE));
 
     _viewport = params.viewport;
 
-    _camera = GetDelegate()->GetRenderIndex().GetCamera(params.camera);
+    _renderTags = params.renderTags;
+
+    const HdRenderIndex &renderIndex = GetDelegate()->GetRenderIndex();
+    _camera = static_cast<const HdStCamera *>(
+                renderIndex.GetSprim(HdPrimTypeTokens->camera,
+                                     params.camera));
 }
 
 void
 HdxRenderSetupTask::SyncCamera()
 {
-    if (_camera and _renderPassState) {
-        GfMatrix4d modelViewMatrix, projectionMatrix;
+    if (_camera && _renderPassState) {
+        VtValue modelViewVt  = _camera->Get(HdStCameraTokens->worldToViewMatrix);
+        VtValue projectionVt = _camera->Get(HdStCameraTokens->projectionMatrix);
+        GfMatrix4d modelView = modelViewVt.Get<GfMatrix4d>();
+        GfMatrix4d projection= projectionVt.Get<GfMatrix4d>();
 
-        // XXX This code will be removed when we drop support for
-        // storing frustum in the render index
-        VtValue frustumVt = _camera->Get(HdTokens->cameraFrustum);
-
-        if(frustumVt.IsHolding<GfFrustum>()) {
-
-            // Extract the window policy to adjust the frustum correctly
-            VtValue windowPolicy = _camera->Get(HdTokens->windowPolicy);
-            if (not TF_VERIFY(windowPolicy.IsHolding<CameraUtilConformWindowPolicy>())) {
-                return;
-            }
-
-            CameraUtilConformWindowPolicy policy = 
+        // If there is a window policy available in this camera
+        // we will extract it and adjust the projection accordingly.
+        VtValue windowPolicy = _camera->Get(HdStCameraTokens->windowPolicy);
+        if (windowPolicy.IsHolding<CameraUtilConformWindowPolicy>()) {
+            const CameraUtilConformWindowPolicy policy = 
                 windowPolicy.Get<CameraUtilConformWindowPolicy>();
 
-            // Extract the frustum and calculate the correctly fitted/cropped
-            // viewport
-            GfFrustum frustum = ComputeFittedFrustum(frustumVt.Get<GfFrustum>(), 
-                                                     policy, _viewport);
-
-            // Now that we have the actual frustum let's calculate the matrices
-            // so we can upload them to the gpu via the raster state
-            modelViewMatrix = frustum.ComputeViewMatrix();;
-            projectionMatrix = frustum.ComputeProjectionMatrix();
-        } else {
-            VtValue modelViewMatrixVt = _camera->Get(HdShaderTokens->worldToViewMatrix);
-            VtValue projectionMatrixVt = _camera->Get(HdShaderTokens->projectionMatrix);
-
-            modelViewMatrix = modelViewMatrixVt.Get<GfMatrix4d>();
-            projectionMatrix = projectionMatrixVt.Get<GfMatrix4d>();
+            projection = CameraUtilConformedWindow(projection, policy,
+                _viewport[3] != 0.0 ? _viewport[2] / _viewport[3] : 1.0);
         }
 
-        const VtValue &vClipPlanes = _camera->Get(HdTokens->clipPlanes);
+        const VtValue &vClipPlanes = _camera->Get(HdStCameraTokens->clipPlanes);
         const HdRenderPassState::ClipPlanesVector &clipPlanes =
             vClipPlanes.Get<HdRenderPassState::ClipPlanesVector>();
 
         // sync render pass state
-        _renderPassState->SetCamera(modelViewMatrix, projectionMatrix, _viewport);
+        _renderPassState->SetCamera(modelView, projection, _viewport);
         _renderPassState->SetClipPlanes(clipPlanes);
-        _renderPassState->Sync();
+        _renderPassState->Sync(
+            GetDelegate()->GetRenderIndex().GetResourceRegistry());
     }
 }
 
+void
+HdxRenderSetupTask::_CreateOverrideShader()
+{
+    static std::mutex shaderCreateLock;
+
+    while (!_overrideShader) {
+        std::lock_guard<std::mutex> lock(shaderCreateLock);
+        {
+            if (!_overrideShader) {
+                GlfGLSLFXSharedPtr glslfx =
+                        GlfGLSLFXSharedPtr(
+                               new GlfGLSLFX(HdPackageFallbackSurfaceShader()));
+
+                _overrideShader =
+                              HdShaderCodeSharedPtr(
+                                        new HdStGLSLFXShader(glslfx));
+            }
+        }
+    }
+}
 
 // --------------------------------------------------------------------------- //
 // VtValue Requirements
@@ -207,35 +228,40 @@ std::ostream& operator<<(std::ostream& out, const HdxRenderTaskParams& pv)
         << pv.hullVisibility << " "
         << pv.surfaceVisibility << " "
         << pv.camera << " "
-        << pv.viewport
-        ;
+        << pv.viewport << " ";
+        TF_FOR_ALL(rt, pv.renderTags) {
+            out << *rt << " ";
+        }
     return out;
 }
 
 bool operator==(const HdxRenderTaskParams& lhs, const HdxRenderTaskParams& rhs) 
 {
-    return lhs.overrideColor           == rhs.overrideColor           and
-           lhs.wireframeColor          == rhs.wireframeColor          and
-           lhs.enableLighting          == rhs.enableLighting          and
-           lhs.enableIdRender          == rhs.enableIdRender          and
-           lhs.alphaThreshold          == rhs.alphaThreshold          and
-           lhs.tessLevel               == rhs.tessLevel               and
-           lhs.drawingRange            == rhs.drawingRange            and
-           lhs.enableHardwareShading   == rhs.enableHardwareShading   and
-           lhs.depthBiasEnable         == rhs.depthBiasEnable         and
-           lhs.depthBiasConstantFactor == rhs.depthBiasConstantFactor and
-           lhs.depthBiasSlopeFactor    == rhs.depthBiasSlopeFactor    and
-           lhs.depthFunc               == rhs.depthFunc               and
-           lhs.cullStyle               == rhs.cullStyle               and
-           lhs.geomStyle               == rhs.geomStyle               and
-           lhs.complexity              == rhs.complexity              and
-           lhs.hullVisibility          == rhs.hullVisibility          and
-           lhs.surfaceVisibility       == rhs.surfaceVisibility       and
-           lhs.camera                  == rhs.camera                  and
-           lhs.viewport                == rhs.viewport;
+    return lhs.overrideColor           == rhs.overrideColor           && 
+           lhs.wireframeColor          == rhs.wireframeColor          && 
+           lhs.enableLighting          == rhs.enableLighting          && 
+           lhs.enableIdRender          == rhs.enableIdRender          && 
+           lhs.alphaThreshold          == rhs.alphaThreshold          && 
+           lhs.tessLevel               == rhs.tessLevel               && 
+           lhs.drawingRange            == rhs.drawingRange            && 
+           lhs.enableHardwareShading   == rhs.enableHardwareShading   && 
+           lhs.depthBiasEnable         == rhs.depthBiasEnable         && 
+           lhs.depthBiasConstantFactor == rhs.depthBiasConstantFactor && 
+           lhs.depthBiasSlopeFactor    == rhs.depthBiasSlopeFactor    && 
+           lhs.depthFunc               == rhs.depthFunc               && 
+           lhs.cullStyle               == rhs.cullStyle               && 
+           lhs.geomStyle               == rhs.geomStyle               && 
+           lhs.complexity              == rhs.complexity              && 
+           lhs.hullVisibility          == rhs.hullVisibility          && 
+           lhs.surfaceVisibility       == rhs.surfaceVisibility       && 
+           lhs.camera                  == rhs.camera                  && 
+           lhs.viewport                == rhs.viewport                &&
+           lhs.renderTags              == rhs.renderTags;
 }
 
 bool operator!=(const HdxRenderTaskParams& lhs, const HdxRenderTaskParams& rhs) 
 {
-    return not(lhs == rhs);
+    return !(lhs == rhs);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

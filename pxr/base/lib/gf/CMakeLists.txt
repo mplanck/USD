@@ -4,23 +4,19 @@ set(CMAKE_INCLUDE_CURRENT_DIR OFF)
 set(PXR_PREFIX pxr/base)
 set(PXR_PACKAGE gf)
 
-pxr_shared_library(gf
+pxr_library(gf
     LIBRARIES
         arch
         tf
-        ${OPENEXR_Half_LIBRARY}
-
-    INCLUDE_DIRS
-        ${OPENEXR_INCLUDE_DIRS}
 
     PUBLIC_CLASSES
         bbox3d
         camera
-        colorRamp
         frustum
         gamma
         half
         homogeneous
+        ilmbase_half
         interval
         line
         line2d
@@ -36,7 +32,6 @@ pxr_shared_library(gf
         matrix4d
         multiInterval
         plane
-        pyBufferUtils
         quatd
         quatf
         quath
@@ -49,8 +44,6 @@ pxr_shared_library(gf
         range3f
         ray
         rect2i
-        rgb
-        rgba
         rotation
         size2
         size3
@@ -68,7 +61,11 @@ pxr_shared_library(gf
         vec4h
         vec4i
 
+    PYTHON_PUBLIC_CLASSES
+        pyBufferUtils
+
     PUBLIC_HEADERS
+        api.h
         declare.h
         limits.h
         traits.h
@@ -76,14 +73,17 @@ pxr_shared_library(gf
     PRIVATE_CLASSES
         ostreamHelpers
 
-    CPPFILES
+    PRIVATE_HEADERS
+        ilmbase_eLut.h
+        ilmbase_toFloat.h
+
+    PYTHON_CPPFILES
         moduleDeps.cpp
 
     PYMODULE_CPPFILES
         module.cpp
         wrapBBox3d.cpp
         wrapCamera.cpp
-        wrapColorRamp.cpp
         wrapFrustum.cpp
         wrapGamma.cpp
         wrapHalf.cpp
@@ -112,8 +112,6 @@ pxr_shared_library(gf
         wrapRange3d.cpp
         wrapRange3f.cpp
         wrapRay.cpp
-        wrapRGB.cpp
-        wrapRGBA.cpp
         wrapRect2i.cpp
         wrapRotation.cpp
         wrapSize2.cpp
@@ -132,7 +130,7 @@ pxr_shared_library(gf
         wrapVec4h.cpp
         wrapVec4i.cpp
 
-    PYTHON_FILES
+    PYMODULE_FILES
         __init__.py
 )
 
@@ -141,9 +139,9 @@ pxr_shared_library(gf
 # generate them. If not, a diff displaying the difference will be printed to
 # stdout and the build will fail.
 if (NOT ${PXR_VALIDATE_GENERATED_CODE})
-    message(WARNING "Skipping validation of gf generated code because PXR_VALIDATE_GENERATED_CODE=OFF")
+    message(STATUS "Skipping validation of gf generated code because PXR_VALIDATE_GENERATED_CODE=OFF")
 elseif(NOT JINJA2_FOUND)
-    message(WARNING "Skipping validation of gf generated code because of missing dependency: jinja2")
+    message(STATUS "Skipping validation of gf generated code because of missing dependency: jinja2")
 else()
     add_custom_command(
         TARGET gf 
@@ -166,7 +164,6 @@ pxr_build_test(testGfHardToReach
 pxr_test_scripts(
     testenv/testGfBBox3d.py
     testenv/testGfCamera.py
-    testenv/testGfColorRamp.py
     testenv/testGfDecomposeRotation.py
     testenv/testGfFrustum.py
     testenv/testGfGamma.py
@@ -182,7 +179,6 @@ pxr_test_scripts(
     testenv/testGfRange.py
     testenv/testGfRay.py
     testenv/testGfRect2i.py
-    testenv/testGfRGB.py
     testenv/testGfRotation.py
     testenv/testGfSize.py
     testenv/testGfTransform.py
@@ -193,18 +189,16 @@ pxr_register_test(testGfBBox3d
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfBBox3d"
 )
-pxr_register_test(testGfColorRamp
-    PYTHON
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfColorRamp"
-)
 pxr_register_test(testGfDecomposeRotation
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfDecomposeRotation"
 )
-pxr_register_test(testGfFrustum
-    PYTHON
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfFrustum"
-)
+if (NOT APPLE)
+    pxr_register_test(testGfFrustum
+        PYTHON
+        COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfFrustum"
+    )
+endif()
 pxr_register_test(testGfGamma
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfGamma"
@@ -259,10 +253,6 @@ pxr_register_test(testGfRay
 pxr_register_test(testGfRect2i
     PYTHON
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfRect2i"
-)
-pxr_register_test(testGfRGB
-    PYTHON
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testGfRGB"
 )
 pxr_register_test(testGfRotation
     PYTHON

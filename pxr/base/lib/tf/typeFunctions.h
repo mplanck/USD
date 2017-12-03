@@ -24,30 +24,32 @@
 #ifndef TF_TYPEFUNCTIONS_H
 #define TF_TYPEFUNCTIONS_H
 
+/// \file tf/typeFunctions.h
+/// \ingroup group_tf_Internal
+
+#include "pxr/pxr.h"
+
 #include <memory>
 
-/*!
- * \file typeFunctions.h
- * \ingroup group_tf_Internal
- */
+PXR_NAMESPACE_OPEN_SCOPE
 
-/*!
- * \class TfTypeFunctions typeFunctions.h pxr/base/tf/typeFunctions.h
- * \ingroup group_tf_Internal
- * \brief Implements assorted functions based on compile-time type information.
- *
- * TfTypeFunctions<T>::GetRawPtr(T* tPtr) returns tPtr.  A smart-pointer
- * class, such as \c TfRefPtr, may specialize this function to have different
- * behavior.  Note that for a non-pointer type, this returns the address of the
- * object, which allows one to uniformly apply the -> operator for member function
- * calls.
- *
- * TfTypeFunctions<T>::ConstructFromRawPtr(T* tPtr) returns tPtr.  Pointer-like
- * objects should specialize this function so that given a raw pointer of type T*,
- * they return a smart pointer pointing to that object (see refPtr.h for an example).
- * Essentially, this is the inverse of TfTypeFunctions<T>::GetRawPtr.
- */
-
+/// \class TfTypeFunctions
+/// \ingroup group_tf_Internal
+///
+/// Implements assorted functions based on compile-time type information.
+///
+/// TfTypeFunctions<T>::GetRawPtr(T* tPtr) returns tPtr.  A smart-pointer
+/// class, such as \c TfRefPtr, may specialize this function to have different
+/// behavior.  Note that for a non-pointer type, this returns the address of
+/// the object, which allows one to uniformly apply the -> operator for member
+/// function calls.
+///
+/// TfTypeFunctions<T>::ConstructFromRawPtr(T* tPtr) returns tPtr.
+/// Pointer-like objects should specialize this function so that given a raw
+/// pointer of type T*, they return a smart pointer pointing to that object
+/// (see refPtr.h for an example). Essentially, this is the inverse of
+/// TfTypeFunctions<T>::GetRawPtr.
+///
 template <class T, class ENABLE = void>
 struct TfTypeFunctions {
 #if 0
@@ -100,42 +102,14 @@ struct TfTypeFunctions<const T*> {
     static void Class_Object_MUST_Be_Passed_By_Address() { }
 };
 
-template <class T>
-struct TfTypeFunctions<std::auto_ptr<T> > {
-    static T* GetRawPtr(std::auto_ptr<T>& t) {
-        return t.get();
-    }
-
-    static bool IsNull(std::auto_ptr<T>& ptr) {
-        return !ptr.get();
-    }
-
-    static void Class_Object_MUST_Be_Passed_By_Address() { }
-    static void Class_Object_MUST_Not_Be_Const() { }
-};
-
-template <class T>
-struct TfTypeFunctions<std::auto_ptr<const T> > {
-    static const T* GetRawPtr(std::auto_ptr<const T>& t) {
-        return t.get();
-    }
-
-    static bool IsNull(std::auto_ptr<const T>& ptr) {
-        return !ptr.get();
-    }
-
-    static void Class_Object_MUST_Be_Passed_By_Address() { }
-};
-
-/*!
- * \class TfCopyIfNotReference typeFunctions.h pxr/base/tf/typeFunctions.h
- * \ingroup group_tf_Internal
- *
- * \c TfCopyIfNotReference<T>::Apply(v) is used to return a pointer to the
- * value \p v.  If \c T is a non-reference type, then the value returned
- * points to newly constructed dynamic space, which the caller must free.
- * Otherwise, the returned value is the address of \p v.
- */
+/// \class TfCopyIfNotReference
+/// \ingroup group_tf_Internal
+///
+/// \c TfCopyIfNotReference<T>::Apply(v) is used to return a pointer to the
+/// value \p v.  If \c T is a non-reference type, then the value returned
+/// points to newly constructed dynamic space, which the caller must free.
+/// Otherwise, the returned value is the address of \p v.
+///
 template <class T>
 struct TfCopyIfNotReference
 {
@@ -152,4 +126,6 @@ struct TfCopyIfNotReference<T&>
     }
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // TF_TYPEFUNCTIONS_H

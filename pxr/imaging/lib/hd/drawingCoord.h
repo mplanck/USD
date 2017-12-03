@@ -24,8 +24,14 @@
 #ifndef HD_DRAWING_COORD_H
 #define HD_DRAWING_COORD_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
-#include "pxr/imaging/hd/bufferArrayRange.h"
+#include "pxr/base/tf/diagnostic.h"
+#include <stdint.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 // DrawingCoord is a bundle of buffer array ranges that are used for drawing.
 //
@@ -41,38 +47,35 @@
 // g. FaceVarying Primvars (optional)
 //
 
-/*
-  HdDrawingCoord is a tiny 6-integers entity which provides a mapping
-  between the client facing interface to the actual internal location stored
-  in the HdBufferArrayRangeContainer, which is owned by rprim.
-
-  Having this indirection provides a recipe for how to configure
-  a drawing coordinate, which is a bundle of HdBufferArrayRanges, while
-  they are shared or not shared across different representations
-  constructed on the same prim.
-
-
-     HullRepr --------- Rprim --------- RefinedRepr
-        |                 |                  |
-     DrawItem             |              DrawItem
-        |                 |                  |
-   DrawingCoord       Container        DrawingCoord
-      constant -------> [ 0 ] <------    constant
-      vertex   -------> [ 1 ]
-      topology -------> [ 2 ]
-                        [ 3 ]
-                        [ 4 ]
-                        [ 5 ]
-                        [ 6 ] <------    vertex   (refined)
-                        [ 7 ] <------    topology (refined)
-                         ...
-  instance level=0 ---> [ k ]
-  instance level=1 ---> [k+1]
-  instance level=2 ---> [k+2]
-                         ...
-
- */
-
+/// \class HdDrawingCoord
+///
+/// A tiny 6-integers entity which provides a mapping between the client
+/// facing interface to the actual internal location stored in the
+/// HdBufferArrayRangeContainer, which is owned by rprim.
+///
+/// Having this indirection provides a recipe for how to configure
+/// a drawing coordinate, which is a bundle of HdBufferArrayRanges, while
+/// they are shared or not shared across different representations
+/// constructed on the same prim.
+///
+///    HullRepr --------- Rprim --------- RefinedRepr
+///       |                 |                  |
+///    DrawItem             |              DrawItem
+///       |                 |                  |
+///  DrawingCoord       Container        DrawingCoord
+///     constant -------> [ 0 ] <------    constant
+///     vertex   -------> [ 1 ]
+///     topology -------> [ 2 ]
+///                       [ 3 ]
+///                       [ 4 ]
+///                       [ 5 ]
+///                       [ 6 ] <------    vertex   (refined)
+///                       [ 7 ] <------    topology (refined)
+///                        ...
+/// instance level=0 ---> [ k ]
+/// instance level=1 ---> [k+1]
+/// instance level=2 ---> [k+2]
+///
 class HdDrawingCoord {
 public:
     static const int CustomSlotsBegin = 6;
@@ -130,5 +133,8 @@ private:
     int8_t _instancePrimVarNumLevels;
     int8_t _instancePrimVar;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_DRAWING_COORD_H

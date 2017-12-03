@@ -24,45 +24,37 @@
 #ifndef ARCH_MATH_H
 #define ARCH_MATH_H
 
-/*!
- * \file math.h
- * \brief Architecture-specific math function calls.
- * \ingroup group_arch_Math
- */
+/// \file arch/math.h
+/// \ingroup group_arch_Math
+/// Architecture-specific math function calls.
 
+#include "pxr/pxr.h"
 #include "pxr/base/arch/defines.h"
 #include "pxr/base/arch/inttypes.h"
-#include <math.h>
-#include <cmath>
 
-#if defined(ARCH_OS_WINDOWS)
-#include <float.h>
+#include <cmath>
+#if !defined(M_PI)
+#define M_PI 3.14159265358979323846
 #endif
 
-/*!
- * \brief This is the smallest value e such that 1+e^2 == 1, using floats.
- * \ingroup group_arch_Math
- */
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// \addtogroup group_arch_Math
+///@{
 
 #if defined (ARCH_CPU_INTEL) || defined(doxygen)
-/*
- * True for all IEEE754 chipsets.
- */
+
+/// This is the smallest value e such that 1+e^2 == 1, using floats.
+/// True for all IEEE754 chipsets.
 #define ARCH_MIN_FLOAT_EPS_SQR      0.000244141F
 
-/*!
- * \brief Three-valued sign.  Return 1 if val > 0, 0 if val == 0, or -1 if val <
- * 0;
- */
+/// Three-valued sign.  Return 1 if val > 0, 0 if val == 0, or -1 if val < 0.
 inline long ArchSign(long val) {
     return (val > 0) - (val < 0);
 }
 
-/*!
- * \brief Returns The IEEE-754 bit pattern of the specified single precision
- * value as a 32-bit unsigned integer.
- * \ingroup group_arch_Math
- */
+/// Returns The IEEE-754 bit pattern of the specified single precision value
+/// as a 32-bit unsigned integer.
 inline uint32_t ArchFloatToBitPattern(float v) {
     union {
         float _float;
@@ -72,11 +64,8 @@ inline uint32_t ArchFloatToBitPattern(float v) {
     return value._uint;
 }
 
-/*!
- * \brief Returns The single precision floating point value corresponding to
- * the given IEEE-754 bit pattern.
- * \ingroup group_arch_Math
- */
+/// Returns The single precision floating point value corresponding to the
+/// given IEEE-754 bit pattern.
 inline float ArchBitPatternToFloat(uint32_t v) {
     union {
         uint32_t _uint;
@@ -86,11 +75,8 @@ inline float ArchBitPatternToFloat(uint32_t v) {
     return value._float;
 }
 
-/*!
- * \brief Returns The IEEE-754 bit pattern of the specified double precision
- * value as a 64-bit unsigned integer.
- * \ingroup group_arch_Math
- */
+/// Returns The IEEE-754 bit pattern of the specified double precision value
+/// as a 64-bit unsigned integer.
 inline uint64_t ArchDoubleToBitPattern(double v) {
     union {
         double _double;
@@ -100,11 +86,8 @@ inline uint64_t ArchDoubleToBitPattern(double v) {
     return value._uint;
 }
 
-/*!
- * \brief Returns The double precision floating point value corresponding to
- * the given IEEE-754 bit pattern.
- * \ingroup group_arch_Math
- */
+/// Returns The double precision floating point value corresponding to the
+/// given IEEE-754 bit pattern.
 inline double ArchBitPatternToDouble(uint64_t v) {
     union {
         uint64_t _uint;
@@ -118,23 +101,12 @@ inline double ArchBitPatternToDouble(uint64_t v) {
 #error Unknown system architecture.
 #endif
 
-
-/*
- * A bunch of math functions operating on floats.
- */
-
 #if defined(ARCH_OS_LINUX) || defined(doxygen)
 
-/*!
- * \brief Computes the sine and cosine of the specified value as a float.
- * \ingroup group_arch_Math
- */
+/// Computes the sine and cosine of the specified value as a float.
 inline void ArchSinCosf(float v, float *s, float *c) { sincosf(v, s, c); }
 
-/*!
- * \brief Computes the sine and cosine of the specified value as a double.
- * \ingroup group_arch_Math
- */
+/// Computes the sine and cosine of the specified value as a double.
 inline void ArchSinCos(double v, double *s, double *c) { sincos(v, s, c); }
 
 #elif defined(ARCH_OS_DARWIN) || defined(ARCH_OS_WINDOWS)
@@ -151,5 +123,9 @@ inline void ArchSinCos(double v, double *s, double *c) {
 #else
 #error Unknown architecture.
 #endif
+
+///@}
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // ARCH_MATH_H

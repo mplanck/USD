@@ -21,16 +21,20 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/arch/demangle.h"
-#include "pxr/base/tf/pyObjWrapper.h"
-#include "pxr/base/tf/pyUtils.h"
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/vt/streamOut.h"
 
-#include <double-conversion/double-conversion.h>
-#include <double-conversion/utils.h>
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
+#include "pxr/base/tf/pyObjWrapper.h"
+#include "pxr/base/tf/pyUtils.h"
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 #include <iostream>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 std::ostream &
 Vt_StreamOutGeneric(std::type_info const &type,
@@ -65,50 +69,16 @@ VtStreamOut(signed char const &val, std::ostream &stream)
     return stream << static_cast<int>(val);
 }
 
-static double_conversion::DoubleToStringConverter const &
-_GetDoubleToStringConverter() {
-    static double_conversion::DoubleToStringConverter
-        converter(double_conversion::DoubleToStringConverter::NO_FLAGS,
-                  "inf", 
-                  "nan",
-                  'e',
-                  /* decimal_in_shortest_low */ -6,
-                  /* deciaml_in_shortest_high */ 21,
-                  /* max_leading_padding_zeroes_in_precision_mode */ 0,
-                  /* max_trailing_padding_zeroes_in_precision_mode */ 0);
-    return converter;
-}
-
 std::ostream &
 VtStreamOut(float const &val, std::ostream &stream)
 {
-    double_conversion::DoubleToStringConverter const &conv =
-        _GetDoubleToStringConverter();
-    static const int bufSize = 128;
-    char buf[bufSize];
-    double_conversion::StringBuilder builder(buf, bufSize);
-    // This should only fail if we provide an insufficient buffer.
-    TF_VERIFY(conv.ToShortestSingle(val, &builder), "double_conversion failed");
-    return stream << builder.Finalize();
+    return stream << TfStreamFloat(val);
 }
 
 std::ostream &
 VtStreamOut(double const &val, std::ostream &stream)
 {
-    double_conversion::DoubleToStringConverter const &conv =
-        _GetDoubleToStringConverter();
-    static const int bufSize = 128;
-    char buf[bufSize];
-    double_conversion::StringBuilder builder(buf, bufSize);
-    // This should only fail if we provide an insufficient buffer.
-    TF_VERIFY(conv.ToShortest(val, &builder), "double_conversion failed");
-    return stream << builder.Finalize();
-}
-
-std::ostream &
-VtStreamOut(TfPyObjWrapper const &obj, std::ostream &stream)
-{
-    return stream << TfPyObjectRepr(obj.Get());
+    return stream << TfStreamDouble(val);
 }
 
 namespace {
@@ -146,3 +116,13 @@ VtStreamOutArray(
 {
     _vtStreamArray(i, size, reserved, out);
 }
+
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
+std::ostream &
+VtStreamOut(TfPyObjWrapper const &obj, std::ostream &stream)
+{
+    return stream << TfPyObjectRepr(obj.Get());
+}
+#endif // PXR_PYTHON_SUPPORT_ENABLED
+
+PXR_NAMESPACE_CLOSE_SCOPE

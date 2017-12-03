@@ -24,45 +24,33 @@
 #ifndef ARCH_SYSTEMINFO_H
 #define ARCH_SYSTEMINFO_H
 
+/// \file arch/systemInfo.h
+/// \ingroup group_arch_SystemFunctions
+/// Provide architecture-specific system information.
+
+#include "pxr/pxr.h"
+#include "pxr/base/arch/api.h"
 #include <string>
 
-/*!
- * \file systemInfo.h
- * \brief Provide architecture-specific system information.
- * \ingroup group_arch_SystemFunctions
- */
+PXR_NAMESPACE_OPEN_SCOPE
 
-/*!
- * \brief Return current working directory as a string.
- * \ingroup group_arch_SystemFunctions
- */
+/// \addtogroup group_arch_SystemFunctions
+///@{
+
+/// Return current working directory as a string.
+ARCH_API
 std::string ArchGetCwd();
 
-/*!
- * \brief Return user's home directory.
- * \ingroup group_arch_SystemFunctions
- *
- * If \p login is not supplied, the home directory of the current user is
- * returned.  Otherwise, the home directory of the user with the specified
- * login is returned.  If the home directory cannot be determined, the empty
- * string is returned.
- */
-std::string ArchGetHomeDirectory(const std::string &login = std::string());
-
-/*!
- * \brief Return user name.
- * \ingroup group_arch_SystemFunctions
- *
- * If the user name cannot determined, the empty string is returned.
- */
-std::string ArchGetUserName();
-
-/*!
- * \brief Return the path to the program's executable.
- * \ingroup group_arch_SystemFunctions
- *
- * Return the path of the executing binary.
- */
+/// Return the path to the program's executable.
+ARCH_API
 std::string ArchGetExecutablePath();
+
+/// Return the system's memory page size.  Safe to assume power-of-two.
+ARCH_API
+int ArchGetPageSize();
+
+///@}
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // ARCH_SYSTEMINFO_H

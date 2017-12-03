@@ -21,9 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/parserHelpers.h"
 #include "pxr/usd/sdf/schema.h"
-
 #include "pxr/base/gf/half.h"
 #include "pxr/base/gf/matrix2d.h"
 #include "pxr/base/gf/matrix3d.h"
@@ -49,13 +50,13 @@
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/value.h"
 
-#include <boost/utility/enable_if.hpp>
-#include <boost/type_traits/is_integral.hpp>
-#include <boost/bind.hpp>
-#include <boost/foreach.hpp>
 #include <boost/mpl/for_each.hpp>
 
+#include <functional>
+#include <type_traits>
 #include <utility>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 namespace Sdf_ParserHelpers {
 
@@ -98,9 +99,9 @@ MakeScalarValueImpl(float *out, vector<Value> const &vars, size_t &index) {
 }
 
 inline void
-MakeScalarValueImpl(half *out, vector<Value> const &vars, size_t &index) {
+MakeScalarValueImpl(GfHalf *out, vector<Value> const &vars, size_t &index) {
     CHECK_BOUNDS(1, "half");
-    *out = half(vars[index++].Get<float>());
+    *out = GfHalf(vars[index++].Get<float>());
 }
 
 template <class Int>
@@ -128,8 +129,8 @@ MakeScalarValueImpl(GfVec2f *out, vector<Value> const &vars, size_t &index) {
 inline void
 MakeScalarValueImpl(GfVec2h *out, vector<Value> const &vars, size_t &index) {
     CHECK_BOUNDS(2, "Vec2h");
-    (*out)[0] = half(vars[index++].Get<float>());
-    (*out)[1] = half(vars[index++].Get<float>());
+    (*out)[0] = GfHalf(vars[index++].Get<float>());
+    (*out)[1] = GfHalf(vars[index++].Get<float>());
 }
 
 inline void
@@ -158,9 +159,9 @@ MakeScalarValueImpl(GfVec3f *out, vector<Value> const &vars, size_t &index) {
 inline void
 MakeScalarValueImpl(GfVec3h *out, vector<Value> const &vars, size_t &index) {
     CHECK_BOUNDS(3, "Vec3h");
-    (*out)[0] = half(vars[index++].Get<float>());
-    (*out)[1] = half(vars[index++].Get<float>());
-    (*out)[2] = half(vars[index++].Get<float>());
+    (*out)[0] = GfHalf(vars[index++].Get<float>());
+    (*out)[1] = GfHalf(vars[index++].Get<float>());
+    (*out)[2] = GfHalf(vars[index++].Get<float>());
 }
 
 inline void
@@ -192,10 +193,10 @@ MakeScalarValueImpl(GfVec4f *out, vector<Value> const &vars, size_t &index) {
 inline void
 MakeScalarValueImpl(GfVec4h *out, vector<Value> const &vars, size_t &index) {
     CHECK_BOUNDS(4, "Vec4h");
-    (*out)[0] = half(vars[index++].Get<float>());
-    (*out)[1] = half(vars[index++].Get<float>());
-    (*out)[2] = half(vars[index++].Get<float>());
-    (*out)[3] = half(vars[index++].Get<float>());
+    (*out)[0] = GfHalf(vars[index++].Get<float>());
+    (*out)[1] = GfHalf(vars[index++].Get<float>());
+    (*out)[2] = GfHalf(vars[index++].Get<float>());
+    (*out)[3] = GfHalf(vars[index++].Get<float>());
 }
 
 inline void
@@ -277,7 +278,7 @@ inline void
 MakeScalarValueImpl(GfQuath *out, vector<Value> const &vars, size_t &index) {
     CHECK_BOUNDS(4, "Quath");
     // Values in order are re, i, j, k.
-    GfVec3h imag; half re;
+    GfVec3h imag; GfHalf re;
     MakeScalarValueImpl(&re, vars, index);
     out->SetReal(re);
     MakeScalarValueImpl(&imag, vars, index);
@@ -350,6 +351,8 @@ struct _MakeFactoryMap {
     template <class CppType>
     void add(const SdfValueTypeName& scalar, const char* alias = NULL)
     {
+        namespace ph = std::placeholders;
+
         static const bool isShaped = true;
 
         const SdfValueTypeName array = scalar.GetArrayType();
@@ -361,13 +364,13 @@ struct _MakeFactoryMap {
 
         _ValueFactoryMap &f = *_factories;
         f[scalarName] =
-            ValueFactory(scalarName, scalar.GetDimensions(), not isShaped,
-                         boost::bind(MakeScalarValueTemplate<CppType>,
-                                     _1, _2, _3, _4));
+            ValueFactory(scalarName, scalar.GetDimensions(), !isShaped,
+                         std::bind(MakeScalarValueTemplate<CppType>,
+                                   ph::_1, ph::_2, ph::_3, ph::_4));
         f[arrayName] =
             ValueFactory(arrayName, array.GetDimensions(), isShaped,
-                         boost::bind(MakeShapedValueTemplate<CppType>,
-                                     _1, _2, _3, _4));
+                         std::bind(MakeShapedValueTemplate<CppType>,
+                                   ph::_1, ph::_2, ph::_3, ph::_4));
     }
     
     _ValueFactoryMap *_factories;
@@ -380,8 +383,7 @@ TF_MAKE_STATIC_DATA(_ValueFactoryMap, _valueFactories) {
     //      appropriate C++ type (which mostly involves moving the
     //      MakeScalarValueImpl functions into the value type name
     //      registration code).  Then we could do this:
-    //    BOOST_FOREACH(const SdfValueTypeName& typeName,
-    //                  SdfSchema::GetInstance().GetAllTypes()) {
+    //     for (const auto& typeName : SdfSchema::GetInstance().GetAllTypes()) {
     //        builder(typeName);
     //    }
     //            For symmetry (and I think it would actually be useful
@@ -396,7 +398,7 @@ TF_MAKE_STATIC_DATA(_ValueFactoryMap, _valueFactories) {
     builder.add<uint32_t>(SdfValueTypeNames->UInt);
     builder.add<int64_t>(SdfValueTypeNames->Int64);
     builder.add<uint64_t>(SdfValueTypeNames->UInt64);
-    builder.add<half>(SdfValueTypeNames->Half);
+    builder.add<GfHalf>(SdfValueTypeNames->Half);
     builder.add<float>(SdfValueTypeNames->Float);
     builder.add<double>(SdfValueTypeNames->Double);
     builder.add<std::string>(SdfValueTypeNames->String);
@@ -546,3 +548,21 @@ Sdf_EvalQuotedString(const char* x, size_t n, size_t trimBothSides,
     
     return ret;
 }
+
+std::string 
+Sdf_EvalAssetPath(const char* x, size_t n, bool tripleDelimited)
+{
+    // See _StringFromAssetPath for the code that writes asset paths.
+
+    // Asset paths are assumed to only contain printable characters and 
+    // no escape sequences except for the "@@@" delimiter.
+    size_t numDelimiters = tripleDelimited ? 3 : 1;
+    std::string ret(x + numDelimiters, n - (2 * numDelimiters));
+    if (tripleDelimited) {
+        ret = TfStringReplace(ret, "\\@@@", "@@@");
+    }
+
+    return ret;
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE

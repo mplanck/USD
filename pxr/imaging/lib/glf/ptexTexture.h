@@ -21,9 +21,34 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glf/pTexture.h
 #ifndef GLF_PTEXTEXTURE_H
 #define GLF_PTEXTEXTURE_H
+
+/// \file glf/ptexTexture.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/glf/api.h"
+
+#include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// Returns true if the file given by \p imageFilePath represents a ptex file,
+/// and false otherwise.
+/// 
+/// This function simply checks the extension of the file name and does not
+/// otherwise guarantee that the file is in any way valid for reading.
+/// 
+/// If ptex support is disabled, this function will always return false.
+///
+GLF_API bool GlfIsSupportedPtexTexture(std::string const & imageFilePath);
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+
+#ifdef PXR_PTEX_SUPPORT_ENABLED
 
 #include "pxr/imaging/glf/texture.h"
 
@@ -32,19 +57,20 @@
 #include "pxr/base/tf/refPtr.h"
 #include "pxr/base/tf/weakPtr.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfPtexTexture);
 
-/// 
-/// \class GlfPtexTexture pTexture.h "pxr/imaging/glf/pTexture_H
-/// \brief Represents a Ptex (per-face texture) object in Glf
+/// \class GlfPtexTexture
 ///
-/// A GlfPtexTexture is currently defined by a file path to a valid Ptex file.  ///
-/// The current implementation declares _texels as a GL_TEXTURE_2D_ARRAY of
-/// n pages of a resolution that matches that of the largest face in the Ptex
+/// Represents a Ptex (per-face texture) object in Glf.
+///
+/// A GlfPtexTexture is currently defined by a file path to a valid Ptex file.
+/// The current implementation declares _texels as a GL_TEXTURE_2D_ARRAY of n
+/// pages of a resolution that matches that of the largest face in the Ptex
 /// file.
 ///
-/// Two GL_TEXTURE_BUFFER constructs are used
-/// as lookup tables : 
+/// Two GL_TEXTURE_BUFFER constructs are used as lookup tables: 
 /// * _pages stores the array index in which a given face is located
 /// * _layout stores 4 float coordinates : top-left corner and width/height for each face
 ///
@@ -55,21 +81,24 @@ TF_DECLARE_WEAK_AND_REF_PTRS(GlfPtexTexture);
 
 class GlfPtexTexture : public GlfTexture {
 public:
+    GLF_API
     virtual ~GlfPtexTexture();
 
-    ///
-    /// \brief Creates a new instance.
+    /// Creates a new instance.
+    GLF_API
     static GlfPtexTextureRefPtr New(const TfToken &imageFilePath);
 
-    static bool IsPtexTexture(std::string const & imageFilePath);
-
     /// GlfTexture overrides
+    GLF_API
     virtual BindingVector GetBindings(TfToken const & identifier,
                                       GLuint samplerName) const;
+    GLF_API
     virtual VtDictionary GetTextureInfo() const;
 
+    GLF_API
     virtual bool IsMinFilterSupported(GLenum filter);
 
+    GLF_API
     virtual bool IsMagFilterSupported(GLenum filter);
 
     // get/set guttering control variables
@@ -84,11 +113,13 @@ public:
     GLuint GetTexelsTextureName() const { return _texels; }
 
 protected:
-
+    GLF_API
     GlfPtexTexture(const TfToken &imageFilePath);
 
+    GLF_API
     void _FreePtexTextureObject();
 
+    GLF_API
     virtual void _OnSetMemoryRequested(size_t targetMemory);
 
 private:
@@ -104,5 +135,9 @@ private:
 
     const TfToken	_imageFilePath;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // PXR_PTEX_SUPPORT_ENABLED
 
 #endif // GLF_TEXTURE_H

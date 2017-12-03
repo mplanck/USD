@@ -21,13 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file sdf/changeList.h
-
-
 #ifndef SDF_CHANGELIST_H
 #define SDF_CHANGELIST_H
 
+/// \file sdf/changeList.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/usd/sdf/path.h"
 #include "pxr/usd/sdf/types.h"
 
@@ -35,13 +35,15 @@
 #include <map>
 #include <iosfwd>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfChangeList;
 typedef std::map<SdfLayerHandle, SdfChangeList> SdfLayerChangeListMap;
 
 /// \class SdfChangeList
 ///
-/// \brief A list of scene description modifications, organized
-/// by the namespace paths where the changes occur.
+/// A list of scene description modifications, organized by the namespace
+/// paths where the changes occur.
 ///
 class SdfChangeList
 {
@@ -55,6 +57,7 @@ public:
 
     void DidReplaceLayerContent();
     void DidReloadLayerContent();
+    void DidChangeLayerResolvedPath();
     void DidChangeLayerIdentifier(const std::string &oldIdentifier);
     void DidChangeSublayerPaths(const std::string &subLayerPath,
                                 SubLayerChangeType changeType);
@@ -83,7 +86,9 @@ public:
     void DidChangeInfo(const SdfPath &path, const TfToken &key,
                        const VtValue &oldValue, const VtValue &newValue);
 
-    /// \brief Entry of changes at a single path in namespace.
+    /// \struct Entry
+    ///
+    /// Entry of changes at a single path in namespace.
     ///
     /// If the path is SdfPath::AbsoluteRootPath(), that indicates a change
     /// to the root of namespace (that is, a layer or stage).
@@ -123,6 +128,7 @@ public:
             
             // SdfLayer
             bool didChangeIdentifier:1;
+            bool didChangeResolvedPath:1;
             bool didReplaceContent:1;
             bool didReloadContent:1;
 
@@ -177,6 +183,8 @@ private:
 };
 
 // Stream-output operator
-std::ostream& operator<<(std::ostream&, const SdfChangeList &);
+SDF_API std::ostream& operator<<(std::ostream&, const SdfChangeList &);
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_CHANGELIST_H

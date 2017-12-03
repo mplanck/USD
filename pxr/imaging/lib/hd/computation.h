@@ -24,37 +24,48 @@
 #ifndef HD_COMPUTATION_H
 #define HD_COMPUTATION_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/bufferSpec.h"
 #include "pxr/imaging/hd/perfLog.h"
 #include <boost/shared_ptr.hpp>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class HdBufferArrayRange> HdBufferArrayRangeSharedPtr;
 typedef boost::shared_ptr<class HdComputation> HdComputationSharedPtr;
 typedef std::vector<HdComputationSharedPtr> HdComputationVector;
 
-/// This is an interface class for gpu computation. GPU computation fills
-/// the result into range, which has to be allocated using buffer specs
-/// determined by AddBufferSpecs, and registered as a pair of computation
-/// and range.
-
+/// \class HdComputation
+///
+/// An interface class for GPU computation.
+///
+/// GPU computation fills the result into range, which has to be allocated
+/// using buffer specs determined by AddBufferSpecs, and registered as a pair
+/// of computation and range.
+///
 class HdComputation
 {
 public:
+    HD_API
     virtual ~HdComputation();
 
     /// Execute computation.
-    virtual void Execute(HdBufferArrayRangeSharedPtr const &range) = 0;
+    virtual void Execute(
+        HdBufferArrayRangeSharedPtr const &range,
+        HdResourceRegistry *resourceRegistry) = 0;
 
-    /// returns the size of its destination buffer (located by range argument
+    /// Returns the size of its destination buffer (located by range argument
     /// of Execute()). This function will be called after all HdBufferSources
     /// have been resolved and commited, so it can use the result of those
     /// buffer source results.
     /// Returning 0 means it doesn't need to resize.
     virtual int GetNumOutputElements() const = 0;
 
-    /// Add the buffer spec for this computaiton into given bufferspec vector.
+    /// Add the buffer spec for this computation into given bufferspec vector.
     /// Caller has to allocate the destination buffer with respect to the
     /// BufferSpecs, and passes the range when registering the computation.
     virtual void AddBufferSpecs(HdBufferSpecVector *specs) const = 0;
@@ -65,5 +76,8 @@ public:
     /// It is a check to see if the AddBufferSpecs would produce a valid result.
     bool IsValid() { return true; }
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_COMPUTATION_H

@@ -21,24 +21,31 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/subLayerListEditor.h
-
 #ifndef SDF_SUBLAYERLISTEDITOR_H
 #define SDF_SUBLAYERLISTEDITOR_H
 
+/// \file sdf/subLayerListEditor.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/vectorListEditor.h"
 #include "pxr/usd/sdf/declareHandles.h"
 #include "pxr/usd/sdf/proxyPolicies.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 SDF_DECLARE_HANDLES(SdfLayer);
 
-/// \class Sdf_SubLayerListEditor sdf/subLayerListEditor.h
-/// \brief List editor implementation for sublayer path lists.
+/// \class Sdf_SubLayerListEditor
+///
+/// List editor implementation for sublayer path lists.
+///
 class Sdf_SubLayerListEditor 
     : public Sdf_VectorListEditor<SdfSubLayerTypePolicy>
 {
 public:
     Sdf_SubLayerListEditor(const SdfLayerHandle& owner);
+
+    virtual ~Sdf_SubLayerListEditor();
 
 private:
     typedef Sdf_VectorListEditor<SdfSubLayerTypePolicy> Parent;
@@ -49,4 +56,6 @@ private:
         const std::vector<std::string>& newValues) const;
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_SUBLAYERLISTEDITOR_H

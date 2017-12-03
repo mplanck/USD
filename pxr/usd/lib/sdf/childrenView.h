@@ -21,13 +21,16 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/childrenView.h
-
 #ifndef SDF_CHILDRENVIEW_H
 #define SDF_CHILDRENVIEW_H
 
+/// \file sdf/childrenView.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/usd/sdf/children.h"
 #include "pxr/base/tf/iterator.h"
+
 #include <boost/compressed_pair.hpp>
 #include <boost/iterator/filter_iterator.hpp>
 #include <boost/iterator/iterator_facade.hpp>
@@ -35,12 +38,16 @@
 #include <algorithm>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \class SdfChildrenViewTrivialPredicate
-/// \brief Special case predicate that always passes.
+///
+/// Special case predicate that always passes.
 ///
 /// \c T is the type exposed by the value traits.
 ///
 /// This predicate is compiled out.
+///
 template <class T>
 class SdfChildrenViewTrivialPredicate {
 public:
@@ -48,7 +55,9 @@ public:
 };
 
 /// \class SdfChildrenViewTrivialAdapter
-/// \brief Special case adapter that does no conversions.
+///
+/// Special case adapter that does no conversions.
+///
 template <class T>
 class SdfChildrenViewTrivialAdapter {
 public:
@@ -57,11 +66,13 @@ public:
     static const PublicType& Convert(const PrivateType& t) { return t; }
 };
 
-// This traits class defines the iterator for a particular ChildrenView
-// along with conversions to and from the view's internal un-filtered iterator.
-//
-// A specialization of the traits for trivial predicates allows the
-// internal iterator to be used directly.
+/// \class Sdf_ChildrenViewTraits
+/// This traits class defines the iterator for a particular ChildrenView
+/// along with conversions to and from the view's internal un-filtered iterator.
+///
+/// A specialization of the traits for trivial predicates allows the
+/// internal iterator to be used directly.
+///
 template <typename _Owner, typename _InnerIterator, typename _DummyPredicate>
 class Sdf_ChildrenViewTraits {
 private:
@@ -129,8 +140,9 @@ public:
     }
 };
 
-/// \class SdfChildrenView sdf/childrenView.h
-/// \brief Provides a view onto an object's children.
+/// \class SdfChildrenView
+///
+/// Provides a view onto an object's children.
 ///
 /// The \c _ChildPolicy dictates the type of children being viewed by this
 /// object. This policy defines the key type by which children are referenced
@@ -148,6 +160,7 @@ public:
 ///
 /// Note that all methods are const, i.e. the children cannot be changed
 /// through a view.
+///
 template <typename _ChildPolicy,
           typename _Predicate =
               SdfChildrenViewTrivialPredicate<
@@ -343,7 +356,7 @@ public:
     /// Finds element \p x, if present in this view.
     const_iterator find(const value_type& x) const {
         const_iterator i = find(key(x));
-        return (i != end() and *i == x) ? i : end();
+        return (i != end() && *i == x) ? i : end();
     }
 
     /// Returns the key for an element.
@@ -448,7 +461,7 @@ public:
     /// list edits are not identical or the keys don't contain the same
     /// elements.
     bool operator!=(const This& other) const {
-        return not _children.IsEqualTo(other._children);
+        return !_children.IsEqualTo(other._children);
     }
 
     // Return true if this object is valid
@@ -519,4 +532,6 @@ struct Tf_IteratorInterface<SdfChildrenView<C, P, A>, true> {
     static IteratorType End(Type const &c) { return c.rend(); }
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_CHILDRENVIEW_H

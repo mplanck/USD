@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/specializes.h"
 
 #include <boost/python/class.hpp>
@@ -30,16 +31,20 @@ using std::string;
 
 using namespace boost::python;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 void wrapUsdSpecializes()
 {
     class_<UsdSpecializes>("Specializes", no_init)
-        .def("Add", &UsdSpecializes::Add, arg("primPath"))
-        .def("Remove", &UsdSpecializes::Remove, arg("primPath"))
-        .def("Clear", &UsdSpecializes::Clear)
-        .def("SetItems", &UsdSpecializes::SetItems)
+        .def("AddSpecialize", &UsdSpecializes::AddSpecialize,
+             (arg("primPath"),
+              arg("position")=UsdListPositionTempDefault))
+        .def("RemoveSpecialize", &UsdSpecializes::RemoveSpecialize,
+             arg("primPath"))
+        .def("ClearSpecializes", &UsdSpecializes::ClearSpecializes)
+        .def("SetSpecializes", &UsdSpecializes::SetSpecializes)
         .def("GetPrim", 
              (UsdPrim (UsdSpecializes::*)()) &UsdSpecializes::GetPrim)
         .def(!self)
         ;
 }
-

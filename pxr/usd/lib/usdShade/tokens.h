@@ -24,6 +24,8 @@
 #ifndef USDSHADE_TOKENS_H
 #define USDSHADE_TOKENS_H
 
+/// \file usdShade/tokens.h
+
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 // 
 // This is an automatically generated file (by usdGenSchema.py).
@@ -31,22 +33,19 @@
 // 
 // XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
-#include "pxr/base/tf/staticTokens.h"
+#include "pxr/pxr.h"
+#include "pxr/usd/usdShade/api.h"
+#include "pxr/base/tf/staticData.h"
+#include "pxr/base/tf/token.h"
+#include <vector>
 
-/// \file pxr/usd/usdShade/tokens.h
+PXR_NAMESPACE_OPEN_SCOPE
 
-/// \hideinitializer
-#define USDSHADE_TOKENS \
-    (displayColor) \
-    (displayOpacity) \
-    ((infoId, "info:id")) \
-    (shaderProtocol) \
-    (shaderType) \
-    (sloPath)
 
-/// \anchor UsdShadeTokens
-/// \brief <b>UsdShadeTokens</b> provides static, efficient TfToken's for
-/// use in all public USD API
+/// \class UsdShadeTokensType
+///
+/// \link UsdShadeTokens \endlink provides static, efficient
+/// \link TfToken TfTokens\endlink for use in all public USD API.
 ///
 /// These tokens are auto-generated from the module's schema, representing
 /// property names, for when you need to fetch an attribute or relationship
@@ -54,21 +53,85 @@
 /// manner, and allow the compiler to verify that you spelled the name
 /// correctly.
 ///
-/// UsdShadeTokens also contains all of the \em allowedTokens values declared
-/// for schema builtin attributes of 'token' scene description type.
+/// UsdShadeTokens also contains all of the \em allowedTokens values
+/// declared for schema builtin attributes of 'token' scene description type.
 /// Use UsdShadeTokens like so:
 ///
 /// \code
-///     gprim.GetVisibilityAttr().Set(UsdShadeTokens->invisible);
+///     gprim.GetMyTokenValuedAttr().Set(UsdShadeTokens->connectedSourceFor);
 /// \endcode
+struct UsdShadeTokensType {
+    USDSHADE_API UsdShadeTokensType();
+    /// \brief "connectedSourceFor:"
+    /// 
+    /// The prefix on UsdShadeShader relationships associated with a Parameter.  This prefixed relationship has a suffix matching the associated attribute name, and denotes a logical shader connection between UsdShadeShaders. 
+    const TfToken connectedSourceFor;
+    /// \brief "derivesFrom"
+    /// 
+    /// A legacy relationship name specifying a specializes composition on a UsdShadeMaterial. 
+    const TfToken derivesFrom;
+    /// \brief "displacement"
+    /// 
+    /// Describes the displacement relationship terminal on a UsdShadeMaterial. Used to find the terminal UsdShadeShader describing the displacement of a UsdShadeMaterial. 
+    const TfToken displacement;
+    /// \brief "full"
+    /// 
+    /// Possible value for 'connectability' metadata on  a UsdShadeInput. When connectability of an input is set to  "full", it implies that it can be connected to any input or  output. 
+    const TfToken full;
+    /// \brief "info:id"
+    /// 
+    /// UsdShadeShader
+    const TfToken infoId;
+    /// \brief "inputs:"
+    /// 
+    /// The prefix on shading attributes denoting an input. 
+    const TfToken inputs;
+    /// \brief "interface:"
+    /// 
+    /// (DEPRECATED) The prefix on UsdShadeNodeGraph  attributes denoting an interface attribute. 
+    const TfToken interface_;
+    /// \brief "interfaceOnly"
+    /// 
+    /// Possible value for 'connectability' metadata on  a UsdShadeInput. It implies that the input can only connect to  a NodeGraph Input (which represents an interface override, not  a render-time dataflow connection), or another Input whose  connectability is also 'interfaceOnly'. 
+    const TfToken interfaceOnly;
+    /// \brief "interfaceRecipientsOf:"
+    /// 
+    /// (DEPRECATED) The prefix on UsdShadeNodeGraph relationships denoting the target of an interface attribute. 
+    const TfToken interfaceRecipientsOf;
+    /// \brief "look:binding"
+    /// 
+    /// The relationship name on non shading prims to denote a binding to a UsdShadeLook. This is a deprecated relationship and is superceded by material:binding. 
+    const TfToken lookBinding;
+    /// \brief "materialBind"
+    /// 
+    /// The name of the GeomSubset family used to  identify face subsets defined for the purpose of binding  materials to facesets. 
+    const TfToken materialBind;
+    /// \brief "material:binding"
+    /// 
+    ///  The relationship name on non-shading prims to denote a binding to a UsdShadeMaterial. 
+    const TfToken materialBinding;
+    /// \brief "materialVariant"
+    /// 
+    /// The variant name of material variation described on a UsdShadeMaterial. 
+    const TfToken materialVariant;
+    /// \brief "outputs:"
+    /// 
+    /// The prefix on shading attributes denoting an output. 
+    const TfToken outputs;
+    /// \brief "surface"
+    /// 
+    /// Describes the surface relationship terminal on a UsdShadeMaterial. Used to find the terminal UsdShadeShader describing the surface of a UsdShadeMaterial. 
+    const TfToken surface;
+    /// A vector of all of the tokens listed above.
+    const std::vector<TfToken> allTokens;
+};
+
+/// \var UsdShadeTokens
 ///
-/// The tokens are:
-/// \li <b>displayColor</b> - UsdShadePShader
-/// \li <b>displayOpacity</b> - UsdShadePShader
-/// \li <b>infoId</b> - UsdShadeShader
-/// \li <b>shaderProtocol</b> - UsdShadePShader
-/// \li <b>shaderType</b> - UsdShadePShader
-/// \li <b>sloPath</b> - UsdShadePShader
-TF_DECLARE_PUBLIC_TOKENS(UsdShadeTokens, USDSHADE_TOKENS);
+/// A global variable with static, efficient \link TfToken TfTokens\endlink
+/// for use in all public USD API.  \sa UsdShadeTokensType
+extern USDSHADE_API TfStaticData<UsdShadeTokensType> UsdShadeTokens;
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

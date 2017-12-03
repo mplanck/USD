@@ -102,6 +102,9 @@
 #line 25 "pxr/usd/sdf/textFileFormat.yy"
 
 
+#include "pxr/pxr.h"
+#include "pxr/base/arch/errno.h"
+#include "pxr/base/arch/fileSystem.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/base/vt/dictionary.h"
 #include "pxr/usd/sdf/allowed.h"
@@ -118,7 +121,7 @@
 
 #include "pxr/base/tracelite/trace.h"
 
-
+#include "pxr/base/arch/errno.h"
 #include "pxr/base/tf/enum.h"
 #include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/ostreamMethods.h"
@@ -127,20 +130,20 @@
 #include "pxr/base/gf/matrix4d.h"
 #include "pxr/base/tf/mallocTag.h"
 
-#include <boost/bind.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/optional.hpp>
 #include <boost/variant.hpp>
 
+#include <functional>
 #include <sstream>
 #include <string>
-#include <sys/mman.h>
-#include <unistd.h>
 #include <vector>
 
 // See this page for info as to why this is here.  Especially note the last
 // paragraph.  http://www.delorie.com/gnu/docs/bison/bison_91.html
 #define YYINITDEPTH 1500
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 using Sdf_ParserHelpers::Value;
 using boost::get;
@@ -156,7 +159,7 @@ using boost::get;
 #define ERROR_IF_NOT_ALLOWED(context, allowed)                   \
     {                                                            \
         const SdfAllowed allow = allowed;                        \
-        if (not allow) {                                         \
+        if (!allow) {                                            \
             Err(context, "%s", allow.GetWhyNot().c_str());       \
         }                                                        \
     }
@@ -164,7 +167,7 @@ using boost::get;
 #define ERROR_AND_RETURN_IF_NOT_ALLOWED(context, allowed)        \
     {                                                            \
         const SdfAllowed allow = allowed;                        \
-        if (not allow) {                                         \
+        if (!allow) {                                            \
             Err(context, "%s", allow.GetWhyNot().c_str());       \
             return;                                              \
         }                                                        \
@@ -184,7 +187,7 @@ void textFileFormatYyerror(Sdf_TextParserContext *context, const char *s);
 
 extern int textFileFormatYylex(YYSTYPE *yylval_param, yyscan_t yyscanner);
 extern char *textFileFormatYyget_text(yyscan_t yyscanner);
-extern int textFileFormatYyget_leng(yyscan_t yyscanner);
+extern size_t textFileFormatYyget_leng(yyscan_t yyscanner);
 extern int textFileFormatYylex_init(yyscan_t *yyscanner);
 extern int textFileFormatYylex_destroy(yyscan_t yyscanner);
 extern void textFileFormatYyset_extra(Sdf_TextParserContext *context, 
@@ -215,7 +218,7 @@ _HasDuplicates(const std::vector<T> &v)
 {
     std::set<T> s;
     TF_FOR_ALL(i, v) {
-        if (not s.insert(*i).second) {
+        if (!s.insert(*i).second) {
             return true;
         }
     }
@@ -309,8 +312,8 @@ _MatchMagicIdentifier(const Value& arg1, Sdf_TextParserContext *context)
     const std::string cookie = TfStringTrimRight(arg1.Get<std::string>());
     const std::string expected = "#" + context->magicIdentifierToken + " ";
     if (TfStringStartsWith(cookie, expected)) {
-        if (not context->versionString.empty() and
-            not TfStringEndsWith(cookie, context->versionString)) {
+        if (!context->versionString.empty() &&
+            !TfStringEndsWith(cookie, context->versionString)) {
             TF_WARN("File '%s' is not the latest %s version (found '%s', "
                 "expected '%s'). The file may parse correctly and yield "
                 "incorrect results.",
@@ -361,7 +364,7 @@ _ValueAppendAtomic(const Value& arg1, Sdf_TextParserContext *context)
 static void
 _ValueSetAtomic(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
+    if (!context->values.IsRecordingString()) {
         if (context->values.valueIsShaped) {
             Err(context, "Type name has [] for non-shaped value!\n");
             return;
@@ -379,7 +382,7 @@ _ValueSetAtomic(Sdf_TextParserContext *context)
 static void
 _PrimSetInheritListItems(SdfListOpType opType, Sdf_TextParserContext *context) 
 {
-    if (context->inheritParsingTargetPaths.empty() and 
+    if (context->inheritParsingTargetPaths.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting inherit paths to None (or empty list) is only allowed "
@@ -414,7 +417,7 @@ _InheritAppendPath(Sdf_TextParserContext *context)
 static void
 _PrimSetSpecializesListItems(SdfListOpType opType, Sdf_TextParserContext *context) 
 {
-    if (context->specializesParsingTargetPaths.empty() and 
+    if (context->specializesParsingTargetPaths.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting specializes paths to None (or empty list) is only allowed "
@@ -449,7 +452,7 @@ _SpecializesAppendPath(Sdf_TextParserContext *context)
 static void
 _PrimSetReferenceListItems(SdfListOpType opType, Sdf_TextParserContext *context) 
 {
-    if (context->referenceParsingRefs.empty() and 
+    if (context->referenceParsingRefs.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting references to None (or an empty list) is only allowed "
@@ -483,7 +486,7 @@ _PrimSetVariantSetNamesListItems(SdfListOpType opType,
     _SetListOpItems(SdfFieldKeys->VariantSetNames, opType, names, context);
 
     // If the op type is added or explicit, create the variant sets
-    if (opType == SdfListOpTypeAdded or opType == SdfListOpTypeExplicit) {
+    if (opType == SdfListOpTypeAdded || opType == SdfListOpTypeExplicit) {
         TF_FOR_ALL(i, context->nameVector) {
             _CreateSpec(
                 context->path.AppendVariantSelection(*i,""),
@@ -503,7 +506,7 @@ _RelationshipInitTarget(const SdfPath& targetPath,
 {
     SdfPath path = context->path.AppendTarget(targetPath);
 
-    if (not _HasSpec(path, context)) {
+    if (!_HasSpec(path, context)) {
         // Create relationship target spec by setting the appropriate 
         // object type flag.
         _CreateSpec(path, SdfSpecTypeRelationshipTarget, context);
@@ -518,12 +521,12 @@ static void
 _RelationshipSetTargetsList(SdfListOpType opType, 
                             Sdf_TextParserContext *context)
 {
-    if (not context->relParsingTargetPaths) {
+    if (!context->relParsingTargetPaths) {
         // No target paths were encountered.
         return;
     }
 
-    if (context->relParsingTargetPaths->empty() and 
+    if (context->relParsingTargetPaths->empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, 
             "Setting relationship targets to None (or empty list) is only "
@@ -537,7 +540,7 @@ _RelationshipSetTargetsList(SdfListOpType opType,
             SdfSchema::IsValidRelationshipTargetPath(*path));
     }
 
-    if (opType == SdfListOpTypeAdded or 
+    if (opType == SdfListOpTypeAdded || 
         opType == SdfListOpTypeExplicit) {
 
         // Initialize relationship target specs for each target path that
@@ -565,7 +568,7 @@ _PrimSetVariantSelection(Sdf_TextParserContext *context)
     }
 
     TF_FOR_ALL(it, context->currentDictionaries[0]) {
-        if (not it->second.IsHolding<std::string>()) {
+        if (!it->second.IsHolding<std::string>()) {
             Err(context, "variant name must be a string");
             return;
         } else {
@@ -592,12 +595,12 @@ _RelocatesAdd(const Value& arg1, const Value& arg2,
     SdfPath srcPath(srcStr);
     SdfPath targetPath(targetStr);
 
-    if (not srcPath.IsPrimPath()) {
+    if (!srcPath.IsPrimPath()) {
         Err(context, "'%s' is not a valid prim path",
             srcStr.c_str());
         return;
     }
-    if (not targetPath.IsPrimPath()) {
+    if (!targetPath.IsPrimPath()) {
         Err(context, "'%s' is not a valid prim path",
             targetStr.c_str());
         return;
@@ -619,7 +622,7 @@ static void
 _AttributeSetConnectionTargetsList(SdfListOpType opType, 
                                    Sdf_TextParserContext *context)
 {
-    if (context->connParsingTargetPaths.empty() and 
+    if (context->connParsingTargetPaths.empty() &&
         opType != SdfListOpTypeExplicit) {
         Err(context, "Setting connection paths to None (or an empty list) "
             "is only allowed when setting explicit connection paths, "
@@ -633,12 +636,12 @@ _AttributeSetConnectionTargetsList(SdfListOpType opType,
             SdfSchema::IsValidAttributeConnectionPath(*path));
     }
 
-    if (opType == SdfListOpTypeAdded or 
+    if (opType == SdfListOpTypeAdded || 
         opType == SdfListOpTypeExplicit) {
 
         TF_FOR_ALL(pathIter, context->connParsingTargetPaths) {
             SdfPath path = context->path.AppendTarget(*pathIter);
-            if (not _HasSpec(path, context)) {
+            if (!_HasSpec(path, context)) {
                 _CreateSpec(path, SdfSpecTypeConnection, context);
             }
         }
@@ -674,8 +677,7 @@ _AttributeAppendConnectionPath(Sdf_TextParserContext *context)
         TF_WARN("Connection path <%s> (in file @%s@, line %i) has a variant "
                 "selection, but variant selections are not meaningful in "
                 "connection paths.  Stripping the variant selection and "
-                "using <%s> instead.  Resaving the menva file will fix "
-                "this issue.  (See also bug 68132.)",
+                "using <%s> instead.  Resaving the file will fix this issue.",
                 absPath.GetText(),
                 context->fileContext.c_str(),
                 context->menvaLineNo,
@@ -690,7 +692,7 @@ static void
 _PrimInitAttribute(const Value &arg1, Sdf_TextParserContext *context)  
 {
     TfToken name(arg1.Get<std::string>());
-    if (not SdfPath::IsValidNamespacedIdentifier(name)) {
+    if (!SdfPath::IsValidNamespacedIdentifier(name)) {
         Err(context, "'%s' is not a valid attribute name", name.GetText());
     }
 
@@ -702,7 +704,7 @@ _PrimInitAttribute(const Value &arg1, Sdf_TextParserContext *context)
     // If we haven't seen this attribute before, then set the object type
     // and add it to the parent's list of properties. Otherwise both have
     // already been done, so we don't need to do anything.
-    if (not _HasSpec(context->path, context)) {
+    if (!_HasSpec(context->path, context)) {
         context->propertiesStack.back().push_back(name);
         _CreateSpec(context->path, SdfSpecTypeAttribute, context);
         _SetField(context->path, SdfFieldKeys->Custom, false, context);
@@ -801,7 +803,7 @@ _DictionaryInitScalarFactory(const Value& arg1,
                              Sdf_TextParserContext *context)
 {
     const std::string& typeName = arg1.Get<std::string>();
-    if (not _SetupValue(typeName, context)) {
+    if (!_SetupValue(typeName, context)) {
         Err(context, "Unrecognized value typename '%s' for dictionary", 
             typeName.c_str());
     }
@@ -812,7 +814,7 @@ _DictionaryInitShapedFactory(const Value& arg1,
                              Sdf_TextParserContext *context)
 {
     const std::string typeName = arg1.Get<std::string>() + "[]";
-    if (not _SetupValue(typeName, context)) {
+    if (!_SetupValue(typeName, context)) {
         Err(context, "Unrecognized value typename '%s' for dictionary", 
             typeName.c_str());
     }
@@ -821,7 +823,7 @@ _DictionaryInitShapedFactory(const Value& arg1,
 static void
 _ValueSetTuple(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
+    if (!context->values.IsRecordingString()) {
         if (context->values.valueIsShaped) {
             Err(context, "Type name has [] for non-shaped value.\n");
             return;
@@ -839,8 +841,8 @@ _ValueSetTuple(Sdf_TextParserContext *context)
 static void
 _ValueSetList(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
-        if (not context->values.valueIsShaped) {
+    if (!context->values.IsRecordingString()) {
+        if (!context->values.valueIsShaped) {
             Err(context, "Type name missing [] for shaped value.");
             return;
         }
@@ -857,8 +859,8 @@ _ValueSetList(Sdf_TextParserContext *context)
 static void
 _ValueSetShaped(Sdf_TextParserContext *context)
 {
-    if (not context->values.IsRecordingString()) {
-        if (not context->values.valueIsShaped) {
+    if (!context->values.IsRecordingString()) {
+        if (!context->values.valueIsShaped) {
             Err(context, "Type name missing [] for shaped value.");
             return;
         }
@@ -898,14 +900,14 @@ _PrimInitRelationship(const Value& arg1,
                       Sdf_TextParserContext *context)
 {
     TfToken name( arg1.Get<std::string>() );
-    if (not SdfPath::IsValidNamespacedIdentifier(name)) {
+    if (!SdfPath::IsValidNamespacedIdentifier(name)) {
         Err(context, "'%s' is not a valid relationship name", name.GetText());
         return;
     }
 
     context->path = context->path.AppendProperty(name);
 
-    if (not _HasSpec(context->path, context)) {
+    if (!_HasSpec(context->path, context)) {
         context->propertiesStack.back().push_back(name);
         _CreateSpec(context->path, SdfSpecTypeRelationship, context);
     }
@@ -926,7 +928,7 @@ _PrimInitRelationship(const Value& arg1,
 static void
 _PrimEndRelationship(Sdf_TextParserContext *context)
 {
-    if (not context->relParsingNewTargetChildren.empty()) {
+    if (!context->relParsingNewTargetChildren.empty()) {
         std::vector<SdfPath> children = 
             context->data->GetAs<std::vector<SdfPath> >(
                 SdfAbstractDataSpecId(&context->path), 
@@ -952,7 +954,7 @@ _RelationshipAppendTargetPath(const Value& arg1,
     const std::string& pathStr = arg1.Get<std::string>();
     SdfPath path(pathStr);
 
-    if (not path.IsAbsolutePath()) {
+    if (!path.IsAbsolutePath()) {
         // Expand paths relative to the containing prim.
         //
         // This strips any variant selections from the containing prim
@@ -961,7 +963,7 @@ _RelationshipAppendTargetPath(const Value& arg1,
         path = path.MakeAbsolutePath(context->path.GetPrimPath());
     }
 
-    if (not context->relParsingTargetPaths) {
+    if (!context->relParsingTargetPaths) {
         // This is the first target we've seen for this relationship.
         // Start tracking them in a vector.
         context->relParsingTargetPaths = SdfPathVector();
@@ -989,18 +991,35 @@ _PathSetProperty(const Value& arg1, Sdf_TextParserContext *context)
     }
 }
 
+static void
+_PathSetPrimOrPropertyScenePath(const Value& arg1,
+                                Sdf_TextParserContext *context)
+{
+    const std::string& pathStr = arg1.Get<std::string>();
+    context->savedPath = SdfPath(pathStr);
+    // Valid paths are prim or property paths that do not contain variant
+    // selections.
+    SdfPath const &path = context->savedPath;
+    bool pathValid = (path.IsPrimPath() || path.IsPropertyPath()) &&
+        !path.ContainsPrimVariantSelection();
+    if (!pathValid) {
+        Err(context, "'%s' is not a valid prim or property scene path",
+            pathStr.c_str());
+    }
+}
+
 template <class ListOpType>
 static bool
 _SetItemsIfListOp(const TfType& type, Sdf_TextParserContext *context)
 {
-    if (not type.IsA<ListOpType>()) {
+    if (!type.IsA<ListOpType>()) {
         return false;
     }
 
     typedef VtArray<typename ListOpType::value_type> ArrayType;
 
-    if (not TF_VERIFY(context->currentValue.IsHolding<ArrayType>() or
-                      context->currentValue.IsEmpty())) {
+    if (!TF_VERIFY(context->currentValue.IsHolding<ArrayType>() ||
+                   context->currentValue.IsEmpty())) {
         return true;
     }
 
@@ -1020,11 +1039,11 @@ _SetGenericMetadataListOpItems(const TfType& fieldType,
 {
     // Chain together attempts to set list op items using 'or' to bail
     // out as soon as we successfully write out the list op we're holding.
-    _SetItemsIfListOp<SdfIntListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfInt64ListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfUIntListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfUInt64ListOp>(fieldType, context) or
-    _SetItemsIfListOp<SdfStringListOp>(fieldType, context) or
+    _SetItemsIfListOp<SdfIntListOp>(fieldType, context)    ||
+    _SetItemsIfListOp<SdfInt64ListOp>(fieldType, context)  ||
+    _SetItemsIfListOp<SdfUIntListOp>(fieldType, context)   ||
+    _SetItemsIfListOp<SdfUInt64ListOp>(fieldType, context) ||
+    _SetItemsIfListOp<SdfStringListOp>(fieldType, context) ||
     _SetItemsIfListOp<SdfTokenListOp>(fieldType, context);
 }
 
@@ -1046,11 +1065,11 @@ static bool
 _IsGenericMetadataListOpType(const TfType& type,
                              TfType* itemArrayType = nullptr)
 {
-    return _IsListOpType<SdfIntListOp>(type, itemArrayType) or
-           _IsListOpType<SdfInt64ListOp>(type, itemArrayType) or
-           _IsListOpType<SdfUIntListOp>(type, itemArrayType) or
-           _IsListOpType<SdfUInt64ListOp>(type, itemArrayType) or
-           _IsListOpType<SdfStringListOp>(type, itemArrayType) or
+    return _IsListOpType<SdfIntListOp>(type, itemArrayType)    ||
+           _IsListOpType<SdfInt64ListOp>(type, itemArrayType)  || 
+           _IsListOpType<SdfUIntListOp>(type, itemArrayType)   ||
+           _IsListOpType<SdfUInt64ListOp>(type, itemArrayType) ||
+           _IsListOpType<SdfStringListOp>(type, itemArrayType) ||
            _IsListOpType<SdfTokenListOp>(type, itemArrayType);
 }
 
@@ -1103,7 +1122,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
         const TfType fieldType = fieldDef.GetFallbackValue().GetType();
 
         if (_IsGenericMetadataListOpType(fieldType)) {
-            if (not fieldDef.IsValidListValue(context->currentValue)) {
+            if (!fieldDef.IsValidListValue(context->currentValue)) {
                 Err(context, "invalid value for field \"%s\"", 
                     context->genericMetadataKey.GetText());
             }
@@ -1112,7 +1131,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
             }
         }
         else {
-            if (not fieldDef.IsValidValue(context->currentValue) or
+            if (!fieldDef.IsValidValue(context->currentValue) ||
                 context->currentValue.IsEmpty()) {
                 Err(context, "invalid value for field \"%s\"", 
                     context->genericMetadataKey.GetText());
@@ -1145,10 +1164,13 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
                 VtValue v;
                 if (_HasField(context->path, context->genericMetadataKey,
                               &v, context)
-                    and TF_VERIFY(v.IsHolding<SdfUnregisteredValue>())) {
-                    return v.UncheckedGet<SdfUnregisteredValue>().GetValue();
+                    && TF_VERIFY(v.IsHolding<SdfUnregisteredValue>())) {
+                    v = v.UncheckedGet<SdfUnregisteredValue>().GetValue();
                 }
-                return VtValue();
+                else {
+                    v = VtValue();
+                }
+                return v;
             };
 
             auto getRecordedStringAsUnregisteredValue = [context]() {
@@ -1161,8 +1183,8 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
                 // a single SdfUnregisteredValue, but strip off the enclosing
                 // brackets so that we don't write out two sets of brackets
                 // when serializing out the list op.
-                if (not s.empty() and s.front() == '[') { s.erase(0, 1); }
-                if (not s.empty() and s.back() == ']') { s.pop_back(); }
+                if (!s.empty() && s.front() == '[') { s.erase(0, 1); }
+                if (!s.empty() && s.back() == ']') { s.pop_back(); }
                 return std::vector<SdfUnregisteredValue>(
                     { SdfUnregisteredValue(s) });
             };
@@ -1177,7 +1199,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
                     SdfUnregisteredValue(context->values.GetRecordedString());
             }
             else if (oldValue.IsEmpty()
-                     or oldValue.IsHolding<SdfUnregisteredValueListOp>()) {
+                     || oldValue.IsHolding<SdfUnregisteredValueListOp>()) {
                 // In this case, we've parsed a list op statement so unpack
                 // it into a list op unless we've already parsed something
                 // for this field that *isn't* a list op.
@@ -1196,7 +1218,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
             }
         }
 
-        if (not value.IsEmpty()) {
+        if (!value.IsEmpty()) {
             _SetField(context->path, context->genericMetadataKey, 
                       value, context);
         }
@@ -1221,7 +1243,7 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
 
 
 /* Line 189 of yacc.c  */
-#line 1202 "pxr/usd/sdf/textFileFormat.tab.cpp"
+#line 1224 "pxr/usd/sdf/textFileFormat.tab.cpp"
 
 /* Enabling traces.  */
 #ifndef YYDEBUG
@@ -1260,46 +1282,49 @@ _GenericMetadataEnd(SdfSpecType specType, Sdf_TextParserContext *context)
      TOK_STRING = 267,
      TOK_ABSTRACT = 268,
      TOK_ADD = 269,
-     TOK_ATTRIBUTES = 270,
-     TOK_CLASS = 271,
-     TOK_CONFIG = 272,
-     TOK_CONNECT = 273,
-     TOK_CUSTOM = 274,
-     TOK_CUSTOMDATA = 275,
-     TOK_DEF = 276,
-     TOK_DEFAULT = 277,
-     TOK_DELETE = 278,
-     TOK_DICTIONARY = 279,
-     TOK_DISPLAYUNIT = 280,
-     TOK_DOC = 281,
-     TOK_INHERITS = 282,
-     TOK_KIND = 283,
-     TOK_MAPPER = 284,
-     TOK_NAMECHILDREN = 285,
-     TOK_NONE = 286,
-     TOK_OFFSET = 287,
-     TOK_OVER = 288,
-     TOK_PERMISSION = 289,
-     TOK_PAYLOAD = 290,
-     TOK_PREFIX_SUBSTITUTIONS = 291,
-     TOK_PROPERTIES = 292,
-     TOK_REFERENCES = 293,
-     TOK_RELOCATES = 294,
-     TOK_REL = 295,
-     TOK_RENAMES = 296,
-     TOK_REORDER = 297,
-     TOK_ROOTPRIMS = 298,
-     TOK_SCALE = 299,
-     TOK_SPECIALIZES = 300,
-     TOK_SUBLAYERS = 301,
-     TOK_SYMMETRYARGUMENTS = 302,
-     TOK_SYMMETRYFUNCTION = 303,
-     TOK_TIME_SAMPLES = 304,
-     TOK_UNIFORM = 305,
-     TOK_VARIANTS = 306,
-     TOK_VARIANTSET = 307,
-     TOK_VARIANTSETS = 308,
-     TOK_VARYING = 309
+     TOK_APPEND = 270,
+     TOK_ATTRIBUTES = 271,
+     TOK_CLASS = 272,
+     TOK_CONFIG = 273,
+     TOK_CONNECT = 274,
+     TOK_CUSTOM = 275,
+     TOK_CUSTOMDATA = 276,
+     TOK_DEF = 277,
+     TOK_DEFAULT = 278,
+     TOK_DELETE = 279,
+     TOK_DICTIONARY = 280,
+     TOK_DISPLAYUNIT = 281,
+     TOK_DOC = 282,
+     TOK_INHERITS = 283,
+     TOK_KIND = 284,
+     TOK_MAPPER = 285,
+     TOK_NAMECHILDREN = 286,
+     TOK_NONE = 287,
+     TOK_OFFSET = 288,
+     TOK_OVER = 289,
+     TOK_PERMISSION = 290,
+     TOK_PAYLOAD = 291,
+     TOK_PREFIX_SUBSTITUTIONS = 292,
+     TOK_SUFFIX_SUBSTITUTIONS = 293,
+     TOK_PREPEND = 294,
+     TOK_PROPERTIES = 295,
+     TOK_REFERENCES = 296,
+     TOK_RELOCATES = 297,
+     TOK_REL = 298,
+     TOK_RENAMES = 299,
+     TOK_REORDER = 300,
+     TOK_ROOTPRIMS = 301,
+     TOK_SCALE = 302,
+     TOK_SPECIALIZES = 303,
+     TOK_SUBLAYERS = 304,
+     TOK_SYMMETRYARGUMENTS = 305,
+     TOK_SYMMETRYFUNCTION = 306,
+     TOK_TIME_SAMPLES = 307,
+     TOK_UNIFORM = 308,
+     TOK_VARIANTS = 309,
+     TOK_VARIANTSET = 310,
+     TOK_VARIANTSETS = 311,
+     TOK_VARYING = 312
    };
 #endif
 
@@ -1317,7 +1342,7 @@ typedef int YYSTYPE;
 
 
 /* Line 264 of yacc.c  */
-#line 1298 "pxr/usd/sdf/textFileFormat.tab.cpp"
+#line 1323 "pxr/usd/sdf/textFileFormat.tab.cpp"
 
 #ifdef short
 # undef short
@@ -1532,20 +1557,20 @@ union yyalloc
 /* YYFINAL -- State number of the termination state.  */
 #define YYFINAL  5
 /* YYLAST -- Last index in YYTABLE.  */
-#define YYLAST   951
+#define YYLAST   1109
 
 /* YYNTOKENS -- Number of terminals.  */
-#define YYNTOKENS  67
+#define YYNTOKENS  70
 /* YYNNTS -- Number of nonterminals.  */
-#define YYNNTS  208
+#define YYNNTS  227
 /* YYNRULES -- Number of rules.  */
-#define YYNRULES  442
+#define YYNRULES  485
 /* YYNRULES -- Number of states.  */
-#define YYNSTATES  781
+#define YYNSTATES  885
 
 /* YYTRANSLATE(YYLEX) -- Bison symbol number corresponding to YYLEX.  */
 #define YYUNDEFTOK  2
-#define YYMAXUTOK   309
+#define YYMAXUTOK   312
 
 #define YYTRANSLATE(YYX)						\
   ((unsigned int) (YYX) <= YYMAXUTOK ? yytranslate[YYX] : YYUNDEFTOK)
@@ -1557,15 +1582,15 @@ static const yytype_uint8 yytranslate[] =
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
-      55,    56,     2,     2,    66,     2,    60,     2,     2,     2,
-       2,     2,     2,     2,     2,     2,     2,     2,    63,    65,
-       2,    57,     2,     2,    64,     2,     2,     2,     2,     2,
+      58,    59,     2,     2,    69,     2,    63,     2,     2,     2,
+       2,     2,     2,     2,     2,     2,     2,     2,    66,    68,
+       2,    60,     2,     2,    67,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
-       2,    58,     2,    59,     2,     2,     2,     2,     2,     2,
+       2,    61,     2,    62,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
-       2,     2,     2,    61,     2,    62,     2,     2,     2,     2,
+       2,     2,     2,    64,     2,    65,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
@@ -1583,7 +1608,8 @@ static const yytype_uint8 yytranslate[] =
       15,    16,    17,    18,    19,    20,    21,    22,    23,    24,
       25,    26,    27,    28,    29,    30,    31,    32,    33,    34,
       35,    36,    37,    38,    39,    40,    41,    42,    43,    44,
-      45,    46,    47,    48,    49,    50,    51,    52,    53,    54
+      45,    46,    47,    48,    49,    50,    51,    52,    53,    54,
+      55,    56,    57
 };
 
 #if YYDEBUG
@@ -1595,235 +1621,258 @@ static const yytype_uint16 yyprhs[] =
       19,    21,    23,    25,    27,    29,    31,    33,    35,    37,
       39,    41,    43,    45,    47,    49,    51,    53,    55,    57,
       59,    61,    63,    65,    67,    69,    71,    73,    75,    77,
-      79,    81,    83,    85,    87,    89,    91,    95,    96,   100,
-     102,   108,   110,   114,   116,   120,   122,   124,   125,   130,
-     131,   137,   138,   144,   145,   151,   155,   159,   163,   169,
-     171,   175,   178,   180,   181,   186,   188,   192,   196,   200,
-     202,   206,   207,   211,   212,   217,   218,   222,   223,   228,
-     229,   233,   234,   239,   244,   246,   250,   251,   258,   260,
-     266,   268,   272,   274,   278,   280,   282,   284,   286,   287,
-     292,   293,   299,   300,   306,   307,   313,   317,   321,   325,
-     326,   331,   332,   337,   338,   344,   345,   351,   352,   358,
-     359,   364,   365,   371,   372,   378,   379,   385,   386,   391,
-     392,   398,   399,   405,   406,   412,   416,   420,   424,   429,
-     434,   439,   443,   446,   450,   452,   455,   457,   459,   463,
-     469,   471,   475,   479,   480,   484,   485,   489,   495,   497,
-     501,   503,   507,   509,   511,   515,   521,   523,   527,   529,
-     531,   533,   537,   543,   545,   549,   551,   556,   557,   560,
-     562,   566,   570,   572,   578,   580,   584,   586,   588,   591,
-     593,   596,   599,   602,   605,   608,   611,   612,   622,   624,
-     627,   628,   636,   641,   646,   648,   650,   652,   654,   656,
-     658,   662,   664,   667,   668,   669,   676,   677,   678,   686,
-     687,   695,   696,   705,   706,   715,   716,   725,   726,   737,
-     738,   746,   748,   750,   752,   754,   756,   757,   762,   763,
-     767,   773,   775,   779,   780,   786,   787,   791,   797,   799,
-     803,   807,   809,   811,   815,   821,   823,   827,   829,   830,
-     835,   836,   842,   843,   846,   848,   852,   853,   858,   862,
-     863,   867,   873,   875,   879,   881,   883,   885,   887,   888,
-     893,   894,   900,   901,   907,   908,   914,   918,   922,   926,
-     930,   933,   934,   937,   939,   941,   942,   948,   949,   952,
-     954,   958,   963,   968,   970,   972,   974,   976,   978,   982,
-     983,   989,   990,   993,   995,   999,  1003,  1005,  1007,  1009,
-    1011,  1013,  1015,  1017,  1019,  1022,  1024,  1026,  1028,  1030,
-    1032,  1033,  1038,  1042,  1044,  1048,  1050,  1052,  1054,  1055,
-    1060,  1064,  1066,  1070,  1072,  1074,  1076,  1079,  1083,  1086,
-    1087,  1095,  1102,  1103,  1109,  1110,  1116,  1117,  1123,  1124,
-    1130,  1131,  1139,  1141,  1143,  1144,  1148,  1154,  1156,  1160,
-    1162,  1164,  1166,  1168,  1169,  1174,  1175,  1181,  1182,  1188,
-    1189,  1195,  1199,  1203,  1207,  1210,  1211,  1214,  1216,  1218,
-    1222,  1228,  1230,  1234,  1237,  1239,  1243,  1244,  1246,  1247,
-    1253,  1254,  1257,  1259,  1263,  1265,  1267,  1272,  1273,  1275,
-    1277,  1279,  1281,  1283,  1285,  1287,  1289,  1291,  1293,  1295,
-    1297,  1299,  1301,  1302,  1304,  1307,  1309,  1311,  1313,  1316,
-    1317,  1319,  1321
+      79,    81,    83,    85,    87,    89,    91,    93,    95,    97,
+     101,   102,   106,   108,   114,   116,   120,   122,   126,   128,
+     130,   131,   136,   137,   143,   144,   150,   151,   157,   158,
+     164,   165,   171,   175,   179,   183,   189,   191,   195,   198,
+     200,   201,   206,   208,   212,   216,   220,   222,   226,   227,
+     231,   232,   237,   238,   242,   243,   248,   249,   253,   254,
+     259,   264,   266,   270,   271,   278,   280,   286,   288,   292,
+     294,   298,   300,   302,   304,   306,   307,   312,   313,   319,
+     320,   326,   327,   333,   334,   340,   341,   347,   351,   355,
+     359,   360,   365,   366,   371,   372,   378,   379,   385,   386,
+     392,   393,   399,   400,   406,   407,   412,   413,   419,   420,
+     426,   427,   433,   434,   440,   441,   447,   448,   453,   454,
+     460,   461,   467,   468,   474,   475,   481,   482,   488,   492,
+     496,   500,   505,   510,   515,   520,   525,   529,   532,   536,
+     540,   542,   545,   547,   549,   553,   559,   561,   565,   569,
+     570,   574,   575,   579,   585,   587,   591,   593,   597,   599,
+     601,   605,   611,   613,   617,   619,   621,   623,   627,   633,
+     635,   639,   641,   646,   647,   650,   652,   656,   660,   662,
+     668,   670,   674,   676,   678,   681,   683,   686,   689,   692,
+     695,   698,   701,   702,   712,   714,   717,   718,   726,   731,
+     736,   738,   740,   742,   744,   746,   748,   752,   754,   757,
+     758,   759,   766,   767,   768,   776,   777,   785,   786,   795,
+     796,   805,   806,   815,   816,   825,   826,   835,   836,   847,
+     848,   856,   858,   860,   862,   864,   866,   867,   872,   873,
+     877,   883,   885,   889,   890,   896,   897,   901,   907,   909,
+     913,   917,   919,   921,   925,   931,   933,   937,   939,   940,
+     945,   946,   952,   953,   956,   958,   962,   963,   968,   972,
+     973,   977,   983,   985,   989,   991,   993,   995,   997,   998,
+    1003,  1004,  1010,  1011,  1017,  1018,  1024,  1025,  1031,  1032,
+    1038,  1042,  1046,  1050,  1054,  1057,  1058,  1061,  1063,  1065,
+    1066,  1072,  1073,  1076,  1078,  1082,  1087,  1092,  1094,  1096,
+    1098,  1100,  1102,  1106,  1107,  1113,  1114,  1117,  1119,  1123,
+    1127,  1129,  1131,  1133,  1135,  1137,  1139,  1141,  1143,  1146,
+    1148,  1150,  1152,  1154,  1156,  1157,  1162,  1166,  1168,  1172,
+    1174,  1176,  1178,  1179,  1184,  1188,  1190,  1194,  1196,  1198,
+    1200,  1203,  1207,  1210,  1211,  1219,  1226,  1227,  1233,  1234,
+    1240,  1241,  1247,  1248,  1254,  1255,  1261,  1262,  1268,  1269,
+    1277,  1279,  1281,  1282,  1286,  1292,  1294,  1298,  1300,  1302,
+    1304,  1306,  1307,  1312,  1313,  1319,  1320,  1326,  1327,  1333,
+    1334,  1340,  1341,  1347,  1351,  1355,  1359,  1362,  1363,  1366,
+    1368,  1370,  1374,  1380,  1382,  1386,  1389,  1391,  1395,  1396,
+    1398,  1399,  1405,  1406,  1409,  1411,  1415,  1417,  1419,  1424,
+    1425,  1427,  1429,  1431,  1433,  1435,  1437,  1439,  1441,  1443,
+    1445,  1447,  1449,  1451,  1453,  1455,  1456,  1458,  1461,  1463,
+    1465,  1467,  1470,  1471,  1473,  1475
 };
 
 /* YYRHS -- A `-1'-separated list of the rules' RHS.  */
 static const yytype_int16 yyrhs[] =
 {
-      68,     0,    -1,    71,    -1,    13,    -1,    14,    -1,    15,
+      71,     0,    -1,    74,    -1,    13,    -1,    14,    -1,    15,
       -1,    16,    -1,    17,    -1,    18,    -1,    19,    -1,    20,
       -1,    21,    -1,    22,    -1,    23,    -1,    24,    -1,    25,
       -1,    26,    -1,    27,    -1,    28,    -1,    29,    -1,    30,
-      -1,    31,    -1,    32,    -1,    33,    -1,    35,    -1,    34,
-      -1,    36,    -1,    37,    -1,    38,    -1,    39,    -1,    40,
+      -1,    31,    -1,    32,    -1,    33,    -1,    34,    -1,    36,
+      -1,    35,    -1,    37,    -1,    38,    -1,    39,    -1,    40,
       -1,    41,    -1,    42,    -1,    43,    -1,    44,    -1,    45,
       -1,    46,    -1,    47,    -1,    48,    -1,    49,    -1,    50,
-      -1,    51,    -1,    52,    -1,    53,    -1,    54,    -1,    73,
-      -1,    73,    89,   273,    -1,    -1,     4,    72,    70,    -1,
-     273,    -1,   273,    55,    74,    56,   273,    -1,   273,    -1,
-     273,    75,   269,    -1,    77,    -1,    75,   270,    77,    -1,
-     267,    -1,    12,    -1,    -1,    76,    78,    57,   218,    -1,
-      -1,    23,   267,    79,    57,   217,    -1,    -1,    14,   267,
-      80,    57,   217,    -1,    -1,    42,   267,    81,    57,   217,
-      -1,    26,    57,    12,    -1,    46,    57,    82,    -1,    58,
-     273,    59,    -1,    58,   273,    83,   271,    59,    -1,    84,
-      -1,    83,   272,    84,    -1,    85,    86,    -1,     6,    -1,
-      -1,    55,    87,   269,    56,    -1,    88,    -1,    87,   270,
-      88,    -1,    32,    57,    11,    -1,    44,    57,    11,    -1,
-      90,    -1,    89,   274,    90,    -1,    -1,    21,    91,    98,
-      -1,    -1,    21,    97,    92,    98,    -1,    -1,    16,    93,
-      98,    -1,    -1,    16,    97,    94,    98,    -1,    -1,    33,
-      95,    98,    -1,    -1,    33,    97,    96,    98,    -1,    42,
-      43,    57,   140,    -1,   267,    -1,    97,    60,   267,    -1,
-      -1,    12,    99,   100,    61,   143,    62,    -1,   273,    -1,
-     273,    55,   101,    56,   273,    -1,   273,    -1,   273,   102,
-     269,    -1,   104,    -1,   102,   270,   104,    -1,   267,    -1,
-      20,    -1,    47,    -1,    12,    -1,    -1,   103,   105,    57,
-     218,    -1,    -1,    23,   267,   106,    57,   217,    -1,    -1,
-      14,   267,   107,    57,   217,    -1,    -1,    42,   267,   108,
-      57,   217,    -1,    26,    57,    12,    -1,    28,    57,    12,
-      -1,    34,    57,   267,    -1,    -1,    35,   109,    57,   122,
-      -1,    -1,    27,   110,    57,   130,    -1,    -1,    23,    27,
-     111,    57,   130,    -1,    -1,    14,    27,   112,    57,   130,
-      -1,    -1,    42,    27,   113,    57,   130,    -1,    -1,    45,
-     114,    57,   133,    -1,    -1,    23,    45,   115,    57,   133,
-      -1,    -1,    14,    45,   116,    57,   133,    -1,    -1,    42,
-      45,   117,    57,   133,    -1,    -1,    38,   118,    57,   123,
-      -1,    -1,    23,    38,   119,    57,   123,    -1,    -1,    14,
-      38,   120,    57,   123,    -1,    -1,    42,    38,   121,    57,
-     123,    -1,    39,    57,   136,    -1,    51,    57,   203,    -1,
-      53,    57,   140,    -1,    23,    53,    57,   140,    -1,    14,
-      53,    57,   140,    -1,    42,    53,    57,   140,    -1,    48,
-      57,   267,    -1,    48,    57,    -1,    36,    57,   212,    -1,
-      31,    -1,    85,   261,    -1,    31,    -1,   125,    -1,    58,
-     273,    59,    -1,    58,   273,   124,   271,    59,    -1,   125,
-      -1,   124,   272,   125,    -1,    85,   261,   127,    -1,    -1,
-       7,   126,   127,    -1,    -1,    55,   273,    56,    -1,    55,
-     273,   128,   269,    56,    -1,   129,    -1,   128,   270,   129,
-      -1,    88,    -1,    20,    57,   203,    -1,    31,    -1,   132,
-      -1,    58,   273,    59,    -1,    58,   273,   131,   271,    59,
-      -1,   132,    -1,   131,   272,   132,    -1,   262,    -1,    31,
-      -1,   135,    -1,    58,   273,    59,    -1,    58,   273,   134,
-     271,    59,    -1,   135,    -1,   134,   272,   135,    -1,   262,
-      -1,    61,   273,   137,    62,    -1,    -1,   138,   271,    -1,
-     139,    -1,   138,   272,   139,    -1,     7,    63,     7,    -1,
-     142,    -1,    58,   273,   141,   271,    59,    -1,   142,    -1,
-     141,   272,   142,    -1,    12,    -1,   273,    -1,   273,   144,
-      -1,   145,    -1,   144,   145,    -1,   153,   270,    -1,   151,
-     270,    -1,   152,   270,    -1,    90,   274,    -1,   146,   274,
-      -1,    -1,    52,    12,   147,    57,   273,    61,   273,   148,
-      62,    -1,   149,    -1,   149,   148,    -1,    -1,    12,   150,
-     100,    61,   143,    62,   273,    -1,    42,    30,    57,   140,
-      -1,    42,    37,    57,   140,    -1,   173,    -1,   235,    -1,
-      50,    -1,    17,    -1,   154,    -1,   267,    -1,   267,    58,
-      59,    -1,   156,    -1,   155,   156,    -1,    -1,    -1,   157,
-     266,   159,   201,   160,   193,    -1,    -1,    -1,    19,   157,
-     266,   162,   201,   163,   193,    -1,    -1,   157,   266,    60,
-      18,    57,   165,   183,    -1,    -1,    14,   157,   266,    60,
-      18,    57,   166,   183,    -1,    -1,    23,   157,   266,    60,
-      18,    57,   167,   183,    -1,    -1,    42,   157,   266,    60,
-      18,    57,   168,   183,    -1,    -1,   157,   266,    60,    29,
-      58,   263,    59,    57,   170,   174,    -1,    -1,   157,   266,
-      60,    49,    57,   172,   187,    -1,   161,    -1,   158,    -1,
-     164,    -1,   169,    -1,   171,    -1,    -1,   265,   175,   180,
-     176,    -1,    -1,    61,   273,    62,    -1,    61,   273,   177,
-     269,    62,    -1,   178,    -1,   177,   270,   178,    -1,    -1,
-     156,   265,   179,    57,   219,    -1,    -1,    55,   273,    56,
-      -1,    55,   273,   181,   269,    56,    -1,   182,    -1,   181,
-     270,   182,    -1,    47,    57,   203,    -1,    31,    -1,   185,
-      -1,    58,   273,    59,    -1,    58,   273,   184,   271,    59,
-      -1,   185,    -1,   184,   272,   185,    -1,   263,    -1,    -1,
-     263,   186,    64,   264,    -1,    -1,    61,   188,   273,   189,
-      62,    -1,    -1,   190,   271,    -1,   191,    -1,   190,   272,
-     191,    -1,    -1,   268,    63,   192,   219,    -1,   268,    63,
-      31,    -1,    -1,    55,   273,    56,    -1,    55,   273,   194,
-     269,    56,    -1,   196,    -1,   194,   270,   196,    -1,   267,
-      -1,    20,    -1,    47,    -1,    12,    -1,    -1,   195,   197,
-      57,   218,    -1,    -1,    23,   267,   198,    57,   217,    -1,
-      -1,    14,   267,   199,    57,   217,    -1,    -1,    42,   267,
-     200,    57,   217,    -1,    26,    57,    12,    -1,    34,    57,
-     267,    -1,    25,    57,   267,    -1,    48,    57,   267,    -1,
-      48,    57,    -1,    -1,    57,   202,    -1,   219,    -1,    31,
-      -1,    -1,    61,   204,   273,   205,    62,    -1,    -1,   206,
-     269,    -1,   207,    -1,   206,   270,   207,    -1,   209,   208,
-      57,   219,    -1,    24,   208,    57,   203,    -1,    12,    -1,
-     265,    -1,   210,    -1,   211,    -1,   267,    -1,   267,    58,
-      59,    -1,    -1,    61,   213,   273,   214,    62,    -1,    -1,
-     215,   271,    -1,   216,    -1,   215,   272,   216,    -1,    12,
-      63,    12,    -1,    31,    -1,   221,    -1,   203,    -1,   219,
-      -1,    31,    -1,   220,    -1,   226,    -1,   221,    -1,    58,
-      59,    -1,     7,    -1,    11,    -1,    12,    -1,   267,    -1,
-       6,    -1,    -1,    58,   222,   223,    59,    -1,   273,   224,
-     271,    -1,   225,    -1,   224,   272,   225,    -1,   220,    -1,
-     221,    -1,   226,    -1,    -1,    55,   227,   228,    56,    -1,
-     273,   229,   271,    -1,   230,    -1,   229,   272,   230,    -1,
-     220,    -1,   226,    -1,    40,    -1,    19,    40,    -1,    19,
-      54,    40,    -1,    54,    40,    -1,    -1,   231,   266,    60,
-      49,    57,   233,   187,    -1,   231,   266,    60,    22,    57,
-       7,    -1,    -1,   231,   266,   236,   249,   241,    -1,    -1,
-      23,   231,   266,   237,   249,    -1,    -1,    14,   231,   266,
-     238,   249,    -1,    -1,    42,   231,   266,   239,   249,    -1,
-      -1,   231,   266,    58,     7,    59,   240,   255,    -1,   232,
-      -1,   234,    -1,    -1,    55,   273,    56,    -1,    55,   273,
-     242,   269,    56,    -1,   244,    -1,   242,   270,   244,    -1,
-     267,    -1,    20,    -1,    47,    -1,    12,    -1,    -1,   243,
-     245,    57,   218,    -1,    -1,    23,   267,   246,    57,   217,
-      -1,    -1,    14,   267,   247,    57,   217,    -1,    -1,    42,
-     267,   248,    57,   217,    -1,    26,    57,    12,    -1,    34,
-      57,   267,    -1,    48,    57,   267,    -1,    48,    57,    -1,
-      -1,    57,   250,    -1,   252,    -1,    31,    -1,    58,   273,
-      59,    -1,    58,   273,   251,   271,    59,    -1,   252,    -1,
-     251,   272,   252,    -1,   253,   254,    -1,     7,    -1,     7,
-      64,   264,    -1,    -1,   255,    -1,    -1,    61,   256,   273,
-     257,    62,    -1,    -1,   258,   269,    -1,   259,    -1,   258,
-     270,   259,    -1,   173,    -1,   260,    -1,    42,    15,    57,
-     140,    -1,    -1,   262,    -1,     7,    -1,     7,    -1,   262,
-      -1,   265,    -1,   267,    -1,    69,    -1,     8,    -1,    10,
-      -1,    69,    -1,     8,    -1,     9,    -1,    11,    -1,     8,
-      -1,    -1,   270,    -1,    65,   273,    -1,   274,    -1,   273,
-      -1,   272,    -1,    66,   273,    -1,    -1,   274,    -1,     3,
-      -1,   274,     3,    -1
+      -1,    51,    -1,    52,    -1,    53,    -1,    54,    -1,    55,
+      -1,    56,    -1,    57,    -1,    76,    -1,    76,    94,   295,
+      -1,    -1,     4,    75,    73,    -1,   295,    -1,   295,    58,
+      77,    59,   295,    -1,   295,    -1,   295,    78,   291,    -1,
+      80,    -1,    78,   292,    80,    -1,   289,    -1,    12,    -1,
+      -1,    79,    81,    60,   235,    -1,    -1,    24,   289,    82,
+      60,   234,    -1,    -1,    14,   289,    83,    60,   234,    -1,
+      -1,    39,   289,    84,    60,   234,    -1,    -1,    15,   289,
+      85,    60,   234,    -1,    -1,    45,   289,    86,    60,   234,
+      -1,    27,    60,    12,    -1,    49,    60,    87,    -1,    61,
+     295,    62,    -1,    61,   295,    88,   293,    62,    -1,    89,
+      -1,    88,   294,    89,    -1,    90,    91,    -1,     6,    -1,
+      -1,    58,    92,   291,    59,    -1,    93,    -1,    92,   292,
+      93,    -1,    33,    60,    11,    -1,    47,    60,    11,    -1,
+      95,    -1,    94,   296,    95,    -1,    -1,    22,    96,   103,
+      -1,    -1,    22,   102,    97,   103,    -1,    -1,    17,    98,
+     103,    -1,    -1,    17,   102,    99,   103,    -1,    -1,    34,
+     100,   103,    -1,    -1,    34,   102,   101,   103,    -1,    45,
+      46,    60,   153,    -1,   289,    -1,   102,    63,   289,    -1,
+      -1,    12,   104,   105,    64,   156,    65,    -1,   295,    -1,
+     295,    58,   106,    59,   295,    -1,   295,    -1,   295,   107,
+     291,    -1,   109,    -1,   107,   292,   109,    -1,   289,    -1,
+      21,    -1,    50,    -1,    12,    -1,    -1,   108,   110,    60,
+     235,    -1,    -1,    24,   289,   111,    60,   234,    -1,    -1,
+      14,   289,   112,    60,   234,    -1,    -1,    39,   289,   113,
+      60,   234,    -1,    -1,    15,   289,   114,    60,   234,    -1,
+      -1,    45,   289,   115,    60,   234,    -1,    27,    60,    12,
+      -1,    29,    60,    12,    -1,    35,    60,   289,    -1,    -1,
+      36,   116,    60,   135,    -1,    -1,    28,   117,    60,   143,
+      -1,    -1,    24,    28,   118,    60,   143,    -1,    -1,    14,
+      28,   119,    60,   143,    -1,    -1,    39,    28,   120,    60,
+     143,    -1,    -1,    15,    28,   121,    60,   143,    -1,    -1,
+      45,    28,   122,    60,   143,    -1,    -1,    48,   123,    60,
+     146,    -1,    -1,    24,    48,   124,    60,   146,    -1,    -1,
+      14,    48,   125,    60,   146,    -1,    -1,    39,    48,   126,
+      60,   146,    -1,    -1,    15,    48,   127,    60,   146,    -1,
+      -1,    45,    48,   128,    60,   146,    -1,    -1,    41,   129,
+      60,   136,    -1,    -1,    24,    41,   130,    60,   136,    -1,
+      -1,    14,    41,   131,    60,   136,    -1,    -1,    39,    41,
+     132,    60,   136,    -1,    -1,    15,    41,   133,    60,   136,
+      -1,    -1,    45,    41,   134,    60,   136,    -1,    42,    60,
+     149,    -1,    54,    60,   220,    -1,    56,    60,   153,    -1,
+      24,    56,    60,   153,    -1,    14,    56,    60,   153,    -1,
+      39,    56,    60,   153,    -1,    15,    56,    60,   153,    -1,
+      45,    56,    60,   153,    -1,    51,    60,   289,    -1,    51,
+      60,    -1,    37,    60,   229,    -1,    38,    60,   229,    -1,
+      32,    -1,    90,   282,    -1,    32,    -1,   138,    -1,    61,
+     295,    62,    -1,    61,   295,   137,   293,    62,    -1,   138,
+      -1,   137,   294,   138,    -1,    90,   282,   140,    -1,    -1,
+       7,   139,   140,    -1,    -1,    58,   295,    59,    -1,    58,
+     295,   141,   291,    59,    -1,   142,    -1,   141,   292,   142,
+      -1,    93,    -1,    21,    60,   220,    -1,    32,    -1,   145,
+      -1,    61,   295,    62,    -1,    61,   295,   144,   293,    62,
+      -1,   145,    -1,   144,   294,   145,    -1,   283,    -1,    32,
+      -1,   148,    -1,    61,   295,    62,    -1,    61,   295,   147,
+     293,    62,    -1,   148,    -1,   147,   294,   148,    -1,   283,
+      -1,    64,   295,   150,    65,    -1,    -1,   151,   293,    -1,
+     152,    -1,   151,   294,   152,    -1,     7,    66,     7,    -1,
+     155,    -1,    61,   295,   154,   293,    62,    -1,   155,    -1,
+     154,   294,   155,    -1,    12,    -1,   295,    -1,   295,   157,
+      -1,   158,    -1,   157,   158,    -1,   166,   292,    -1,   164,
+     292,    -1,   165,   292,    -1,    95,   296,    -1,   159,   296,
+      -1,    -1,    55,    12,   160,    60,   295,    64,   295,   161,
+      65,    -1,   162,    -1,   162,   161,    -1,    -1,    12,   163,
+     105,    64,   156,    65,   295,    -1,    45,    31,    60,   153,
+      -1,    45,    40,    60,   153,    -1,   188,    -1,   252,    -1,
+      53,    -1,    18,    -1,   167,    -1,   289,    -1,   289,    61,
+      62,    -1,   169,    -1,   168,   169,    -1,    -1,    -1,   170,
+     288,   172,   218,   173,   208,    -1,    -1,    -1,    20,   170,
+     288,   175,   218,   176,   208,    -1,    -1,   170,   288,    63,
+      19,    60,   178,   198,    -1,    -1,    14,   170,   288,    63,
+      19,    60,   179,   198,    -1,    -1,    39,   170,   288,    63,
+      19,    60,   180,   198,    -1,    -1,    15,   170,   288,    63,
+      19,    60,   181,   198,    -1,    -1,    24,   170,   288,    63,
+      19,    60,   182,   198,    -1,    -1,    45,   170,   288,    63,
+      19,    60,   183,   198,    -1,    -1,   170,   288,    63,    30,
+      61,   284,    62,    60,   185,   189,    -1,    -1,   170,   288,
+      63,    52,    60,   187,   202,    -1,   174,    -1,   171,    -1,
+     177,    -1,   184,    -1,   186,    -1,    -1,   287,   190,   195,
+     191,    -1,    -1,    64,   295,    65,    -1,    64,   295,   192,
+     291,    65,    -1,   193,    -1,   192,   292,   193,    -1,    -1,
+     169,   287,   194,    60,   236,    -1,    -1,    58,   295,    59,
+      -1,    58,   295,   196,   291,    59,    -1,   197,    -1,   196,
+     292,   197,    -1,    50,    60,   220,    -1,    32,    -1,   200,
+      -1,    61,   295,    62,    -1,    61,   295,   199,   293,    62,
+      -1,   200,    -1,   199,   294,   200,    -1,   285,    -1,    -1,
+     284,   201,    67,   286,    -1,    -1,    64,   203,   295,   204,
+      65,    -1,    -1,   205,   293,    -1,   206,    -1,   205,   294,
+     206,    -1,    -1,   290,    66,   207,   236,    -1,   290,    66,
+      32,    -1,    -1,    58,   295,    59,    -1,    58,   295,   209,
+     291,    59,    -1,   211,    -1,   209,   292,   211,    -1,   289,
+      -1,    21,    -1,    50,    -1,    12,    -1,    -1,   210,   212,
+      60,   235,    -1,    -1,    24,   289,   213,    60,   234,    -1,
+      -1,    14,   289,   214,    60,   234,    -1,    -1,    39,   289,
+     215,    60,   234,    -1,    -1,    15,   289,   216,    60,   234,
+      -1,    -1,    45,   289,   217,    60,   234,    -1,    27,    60,
+      12,    -1,    35,    60,   289,    -1,    26,    60,   289,    -1,
+      51,    60,   289,    -1,    51,    60,    -1,    -1,    60,   219,
+      -1,   236,    -1,    32,    -1,    -1,    64,   221,   295,   222,
+      65,    -1,    -1,   223,   291,    -1,   224,    -1,   223,   292,
+     224,    -1,   226,   225,    60,   236,    -1,    25,   225,    60,
+     220,    -1,    12,    -1,   287,    -1,   227,    -1,   228,    -1,
+     289,    -1,   289,    61,    62,    -1,    -1,    64,   230,   295,
+     231,    65,    -1,    -1,   232,   293,    -1,   233,    -1,   232,
+     294,   233,    -1,    12,    66,    12,    -1,    32,    -1,   238,
+      -1,   220,    -1,   236,    -1,    32,    -1,   237,    -1,   243,
+      -1,   238,    -1,    61,    62,    -1,     7,    -1,    11,    -1,
+      12,    -1,   289,    -1,     6,    -1,    -1,    61,   239,   240,
+      62,    -1,   295,   241,   293,    -1,   242,    -1,   241,   294,
+     242,    -1,   237,    -1,   238,    -1,   243,    -1,    -1,    58,
+     244,   245,    59,    -1,   295,   246,   293,    -1,   247,    -1,
+     246,   294,   247,    -1,   237,    -1,   243,    -1,    43,    -1,
+      20,    43,    -1,    20,    57,    43,    -1,    57,    43,    -1,
+      -1,   248,   288,    63,    52,    60,   250,   202,    -1,   248,
+     288,    63,    23,    60,     7,    -1,    -1,   248,   288,   253,
+     270,   260,    -1,    -1,    24,   248,   288,   254,   270,    -1,
+      -1,    14,   248,   288,   255,   270,    -1,    -1,    39,   248,
+     288,   256,   270,    -1,    -1,    15,   248,   288,   257,   270,
+      -1,    -1,    45,   248,   288,   258,   270,    -1,    -1,   248,
+     288,    61,     7,    62,   259,   276,    -1,   249,    -1,   251,
+      -1,    -1,    58,   295,    59,    -1,    58,   295,   261,   291,
+      59,    -1,   263,    -1,   261,   292,   263,    -1,   289,    -1,
+      21,    -1,    50,    -1,    12,    -1,    -1,   262,   264,    60,
+     235,    -1,    -1,    24,   289,   265,    60,   234,    -1,    -1,
+      14,   289,   266,    60,   234,    -1,    -1,    39,   289,   267,
+      60,   234,    -1,    -1,    15,   289,   268,    60,   234,    -1,
+      -1,    45,   289,   269,    60,   234,    -1,    27,    60,    12,
+      -1,    35,    60,   289,    -1,    51,    60,   289,    -1,    51,
+      60,    -1,    -1,    60,   271,    -1,   273,    -1,    32,    -1,
+      61,   295,    62,    -1,    61,   295,   272,   293,    62,    -1,
+     273,    -1,   272,   294,   273,    -1,   274,   275,    -1,     7,
+      -1,     7,    67,   286,    -1,    -1,   276,    -1,    -1,    64,
+     277,   295,   278,    65,    -1,    -1,   279,   291,    -1,   280,
+      -1,   279,   292,   280,    -1,   188,    -1,   281,    -1,    45,
+      16,    60,   153,    -1,    -1,   283,    -1,     7,    -1,     7,
+      -1,     7,    -1,   283,    -1,   287,    -1,   289,    -1,    72,
+      -1,     8,    -1,    10,    -1,    72,    -1,     8,    -1,     9,
+      -1,    11,    -1,     8,    -1,    -1,   292,    -1,    68,   295,
+      -1,   296,    -1,   295,    -1,   294,    -1,    69,   295,    -1,
+      -1,   296,    -1,     3,    -1,   296,     3,    -1
 };
 
 /* YYRLINE[YYN] -- source line where rule number YYN was defined.  */
 static const yytype_uint16 yyrline[] =
 {
-       0,  1218,  1218,  1221,  1222,  1223,  1224,  1225,  1226,  1227,
-    1228,  1229,  1230,  1231,  1232,  1233,  1234,  1235,  1236,  1237,
-    1238,  1239,  1240,  1241,  1242,  1243,  1244,  1245,  1246,  1247,
-    1248,  1249,  1250,  1251,  1252,  1253,  1254,  1255,  1256,  1257,
-    1258,  1259,  1260,  1261,  1262,  1270,  1271,  1282,  1282,  1294,
-    1295,  1307,  1308,  1312,  1313,  1317,  1321,  1326,  1326,  1335,
-    1335,  1341,  1341,  1347,  1347,  1355,  1362,  1366,  1367,  1381,
-    1382,  1386,  1394,  1401,  1403,  1407,  1408,  1412,  1416,  1423,
-    1424,  1432,  1432,  1436,  1436,  1440,  1440,  1444,  1444,  1448,
-    1448,  1452,  1452,  1456,  1466,  1467,  1474,  1474,  1534,  1535,
-    1539,  1540,  1544,  1545,  1549,  1550,  1551,  1555,  1560,  1560,
-    1569,  1569,  1575,  1575,  1581,  1581,  1589,  1596,  1603,  1611,
-    1611,  1620,  1620,  1625,  1625,  1630,  1630,  1635,  1635,  1641,
-    1641,  1646,  1646,  1651,  1651,  1656,  1656,  1662,  1662,  1669,
-    1669,  1676,  1676,  1683,  1683,  1692,  1700,  1704,  1708,  1712,
-    1716,  1722,  1727,  1734,  1743,  1744,  1748,  1749,  1750,  1751,
-    1755,  1756,  1760,  1773,  1773,  1797,  1799,  1800,  1804,  1805,
-    1809,  1810,  1814,  1815,  1816,  1817,  1821,  1822,  1826,  1832,
-    1833,  1834,  1835,  1839,  1840,  1844,  1850,  1853,  1855,  1859,
-    1860,  1864,  1870,  1871,  1875,  1876,  1880,  1888,  1889,  1893,
-    1894,  1898,  1899,  1900,  1901,  1902,  1906,  1906,  1940,  1941,
-    1945,  1945,  1988,  1997,  2010,  2011,  2019,  2022,  2028,  2034,
-    2037,  2043,  2047,  2053,  2060,  2053,  2071,  2079,  2071,  2090,
-    2090,  2098,  2098,  2106,  2106,  2114,  2114,  2125,  2125,  2149,
-    2149,  2161,  2162,  2163,  2164,  2165,  2174,  2174,  2191,  2193,
-    2194,  2203,  2204,  2208,  2208,  2223,  2225,  2226,  2230,  2231,
-    2235,  2244,  2245,  2246,  2247,  2251,  2252,  2256,  2259,  2259,
-    2285,  2285,  2290,  2292,  2296,  2297,  2301,  2301,  2308,  2320,
-    2322,  2323,  2327,  2328,  2332,  2333,  2334,  2338,  2343,  2343,
-    2352,  2352,  2358,  2358,  2364,  2364,  2372,  2379,  2386,  2394,
-    2399,  2406,  2408,  2412,  2417,  2429,  2429,  2437,  2439,  2443,
-    2444,  2448,  2451,  2459,  2460,  2464,  2465,  2469,  2475,  2485,
-    2485,  2493,  2495,  2499,  2500,  2504,  2517,  2523,  2533,  2537,
-    2538,  2551,  2554,  2557,  2560,  2571,  2577,  2580,  2583,  2588,
-    2601,  2601,  2610,  2614,  2615,  2619,  2620,  2621,  2629,  2629,
-    2636,  2640,  2641,  2645,  2646,  2654,  2658,  2662,  2666,  2673,
-    2673,  2685,  2700,  2700,  2710,  2710,  2718,  2718,  2727,  2727,
-    2735,  2735,  2749,  2750,  2753,  2755,  2756,  2760,  2761,  2765,
-    2766,  2767,  2771,  2776,  2776,  2785,  2785,  2791,  2791,  2797,
-    2797,  2805,  2812,  2820,  2825,  2832,  2834,  2838,  2839,  2842,
-    2845,  2849,  2850,  2854,  2858,  2861,  2885,  2887,  2891,  2891,
-    2917,  2919,  2923,  2924,  2929,  2931,  2935,  2948,  2951,  2955,
-    2961,  2967,  2970,  2981,  2982,  2988,  2989,  2990,  2995,  2996,
-    3001,  3002,  3005,  3007,  3011,  3012,  3016,  3017,  3021,  3024,
-    3026,  3030,  3031
+       0,  1243,  1243,  1246,  1247,  1248,  1249,  1250,  1251,  1252,
+    1253,  1254,  1255,  1256,  1257,  1258,  1259,  1260,  1261,  1262,
+    1263,  1264,  1265,  1266,  1267,  1268,  1269,  1270,  1271,  1272,
+    1273,  1274,  1275,  1276,  1277,  1278,  1279,  1280,  1281,  1282,
+    1283,  1284,  1285,  1286,  1287,  1288,  1289,  1290,  1298,  1299,
+    1310,  1310,  1322,  1323,  1335,  1336,  1340,  1341,  1345,  1349,
+    1354,  1354,  1363,  1363,  1369,  1369,  1375,  1375,  1381,  1381,
+    1387,  1387,  1395,  1402,  1406,  1407,  1421,  1422,  1426,  1434,
+    1441,  1443,  1447,  1448,  1452,  1456,  1463,  1464,  1472,  1472,
+    1476,  1476,  1480,  1480,  1484,  1484,  1488,  1488,  1492,  1492,
+    1496,  1506,  1507,  1514,  1514,  1574,  1575,  1579,  1580,  1584,
+    1585,  1589,  1590,  1591,  1595,  1600,  1600,  1609,  1609,  1615,
+    1615,  1621,  1621,  1627,  1627,  1633,  1633,  1641,  1648,  1655,
+    1663,  1663,  1672,  1672,  1677,  1677,  1682,  1682,  1687,  1687,
+    1692,  1692,  1697,  1697,  1703,  1703,  1708,  1708,  1713,  1713,
+    1718,  1718,  1723,  1723,  1728,  1728,  1734,  1734,  1741,  1741,
+    1748,  1748,  1755,  1755,  1762,  1762,  1769,  1769,  1778,  1786,
+    1790,  1794,  1798,  1802,  1806,  1810,  1816,  1821,  1828,  1836,
+    1845,  1846,  1850,  1851,  1852,  1853,  1857,  1858,  1862,  1875,
+    1875,  1899,  1901,  1902,  1906,  1907,  1911,  1912,  1916,  1917,
+    1918,  1919,  1923,  1924,  1928,  1934,  1935,  1936,  1937,  1941,
+    1942,  1946,  1952,  1955,  1957,  1961,  1962,  1966,  1972,  1973,
+    1977,  1978,  1982,  1990,  1991,  1995,  1996,  2000,  2001,  2002,
+    2003,  2004,  2008,  2008,  2042,  2043,  2047,  2047,  2090,  2099,
+    2112,  2113,  2121,  2124,  2130,  2136,  2139,  2145,  2149,  2155,
+    2162,  2155,  2173,  2181,  2173,  2192,  2192,  2200,  2200,  2208,
+    2208,  2216,  2216,  2224,  2224,  2232,  2232,  2243,  2243,  2267,
+    2267,  2279,  2280,  2281,  2282,  2283,  2292,  2292,  2309,  2311,
+    2312,  2321,  2322,  2326,  2326,  2341,  2343,  2344,  2348,  2349,
+    2353,  2362,  2363,  2364,  2365,  2369,  2370,  2374,  2377,  2377,
+    2403,  2403,  2408,  2410,  2414,  2415,  2419,  2419,  2426,  2438,
+    2440,  2441,  2445,  2446,  2450,  2451,  2452,  2456,  2461,  2461,
+    2470,  2470,  2476,  2476,  2482,  2482,  2488,  2488,  2494,  2494,
+    2502,  2509,  2516,  2524,  2529,  2536,  2538,  2542,  2547,  2559,
+    2559,  2567,  2569,  2573,  2574,  2578,  2581,  2589,  2590,  2594,
+    2595,  2599,  2605,  2615,  2615,  2623,  2625,  2629,  2630,  2634,
+    2647,  2653,  2663,  2667,  2668,  2681,  2684,  2687,  2690,  2701,
+    2707,  2710,  2713,  2718,  2731,  2731,  2740,  2744,  2745,  2749,
+    2750,  2751,  2759,  2759,  2766,  2770,  2771,  2775,  2776,  2784,
+    2788,  2792,  2796,  2803,  2803,  2815,  2830,  2830,  2840,  2840,
+    2848,  2848,  2856,  2856,  2864,  2864,  2873,  2873,  2881,  2881,
+    2895,  2896,  2899,  2901,  2902,  2906,  2907,  2911,  2912,  2913,
+    2917,  2922,  2922,  2931,  2931,  2937,  2937,  2943,  2943,  2949,
+    2949,  2955,  2955,  2963,  2970,  2978,  2983,  2990,  2992,  2996,
+    2997,  3000,  3003,  3007,  3008,  3012,  3016,  3019,  3043,  3045,
+    3049,  3049,  3075,  3077,  3081,  3082,  3087,  3089,  3093,  3106,
+    3109,  3113,  3119,  3125,  3131,  3134,  3145,  3146,  3152,  3153,
+    3154,  3159,  3160,  3165,  3166,  3169,  3171,  3175,  3176,  3180,
+    3181,  3185,  3188,  3190,  3194,  3195
 };
 #endif
 
@@ -1835,76 +1884,78 @@ static const char *const yytname[] =
   "$end", "error", "$undefined", "TOK_NL", "TOK_MAGIC",
   "TOK_SYNTAX_ERROR", "TOK_ASSETREF", "TOK_PATHREF", "TOK_IDENTIFIER",
   "TOK_CXX_NAMESPACED_IDENTIFIER", "TOK_NAMESPACED_IDENTIFIER",
-  "TOK_NUMBER", "TOK_STRING", "TOK_ABSTRACT", "TOK_ADD", "TOK_ATTRIBUTES",
-  "TOK_CLASS", "TOK_CONFIG", "TOK_CONNECT", "TOK_CUSTOM", "TOK_CUSTOMDATA",
-  "TOK_DEF", "TOK_DEFAULT", "TOK_DELETE", "TOK_DICTIONARY",
-  "TOK_DISPLAYUNIT", "TOK_DOC", "TOK_INHERITS", "TOK_KIND", "TOK_MAPPER",
-  "TOK_NAMECHILDREN", "TOK_NONE", "TOK_OFFSET", "TOK_OVER",
-  "TOK_PERMISSION", "TOK_PAYLOAD", "TOK_PREFIX_SUBSTITUTIONS",
-  "TOK_PROPERTIES", "TOK_REFERENCES", "TOK_RELOCATES", "TOK_REL",
-  "TOK_RENAMES", "TOK_REORDER", "TOK_ROOTPRIMS", "TOK_SCALE",
-  "TOK_SPECIALIZES", "TOK_SUBLAYERS", "TOK_SYMMETRYARGUMENTS",
-  "TOK_SYMMETRYFUNCTION", "TOK_TIME_SAMPLES", "TOK_UNIFORM",
-  "TOK_VARIANTS", "TOK_VARIANTSET", "TOK_VARIANTSETS", "TOK_VARYING",
-  "'('", "')'", "'='", "'['", "']'", "'.'", "'{'", "'}'", "':'", "'@'",
-  "';'", "','", "$accept", "menva_file", "keyword", "layer_metadata_form",
-  "layer", "$@1", "layer_metadata_opt", "layer_metadata_list_opt",
-  "layer_metadata_list", "layer_metadata_key", "layer_metadata", "$@2",
-  "$@3", "$@4", "$@5", "sublayer_list", "sublayer_list_int",
-  "sublayer_stmt", "layer_ref", "layer_offset_opt", "layer_offset_int",
-  "layer_offset_stmt", "prim_list", "prim_stmt", "$@6", "$@7", "$@8",
-  "$@9", "$@10", "$@11", "prim_type_name", "prim_stmt_int", "$@12",
-  "prim_metadata_opt", "prim_metadata_list_opt", "prim_metadata_list",
-  "prim_metadata_key", "prim_metadata", "$@13", "$@14", "$@15", "$@16",
-  "$@17", "$@18", "$@19", "$@20", "$@21", "$@22", "$@23", "$@24", "$@25",
-  "$@26", "$@27", "$@28", "$@29", "payload_item", "reference_list",
-  "reference_list_int", "reference_list_item", "$@30",
-  "reference_params_opt", "reference_params_int", "reference_params_item",
-  "inherit_list", "inherit_list_int", "inherit_list_item",
-  "specializes_list", "specializes_list_int", "specializes_list_item",
-  "relocates_map", "relocates_stmt_list_opt", "relocates_stmt_list",
-  "relocates_stmt", "name_list", "name_list_int", "name_list_item",
-  "prim_contents_list_opt", "prim_contents_list",
-  "prim_contents_list_item", "variantset_stmt", "$@31", "variant_list",
-  "variant_stmt", "$@32", "prim_child_order_stmt",
+  "TOK_NUMBER", "TOK_STRING", "TOK_ABSTRACT", "TOK_ADD", "TOK_APPEND",
+  "TOK_ATTRIBUTES", "TOK_CLASS", "TOK_CONFIG", "TOK_CONNECT", "TOK_CUSTOM",
+  "TOK_CUSTOMDATA", "TOK_DEF", "TOK_DEFAULT", "TOK_DELETE",
+  "TOK_DICTIONARY", "TOK_DISPLAYUNIT", "TOK_DOC", "TOK_INHERITS",
+  "TOK_KIND", "TOK_MAPPER", "TOK_NAMECHILDREN", "TOK_NONE", "TOK_OFFSET",
+  "TOK_OVER", "TOK_PERMISSION", "TOK_PAYLOAD", "TOK_PREFIX_SUBSTITUTIONS",
+  "TOK_SUFFIX_SUBSTITUTIONS", "TOK_PREPEND", "TOK_PROPERTIES",
+  "TOK_REFERENCES", "TOK_RELOCATES", "TOK_REL", "TOK_RENAMES",
+  "TOK_REORDER", "TOK_ROOTPRIMS", "TOK_SCALE", "TOK_SPECIALIZES",
+  "TOK_SUBLAYERS", "TOK_SYMMETRYARGUMENTS", "TOK_SYMMETRYFUNCTION",
+  "TOK_TIME_SAMPLES", "TOK_UNIFORM", "TOK_VARIANTS", "TOK_VARIANTSET",
+  "TOK_VARIANTSETS", "TOK_VARYING", "'('", "')'", "'='", "'['", "']'",
+  "'.'", "'{'", "'}'", "':'", "'@'", "';'", "','", "$accept", "menva_file",
+  "keyword", "layer_metadata_form", "layer", "$@1", "layer_metadata_opt",
+  "layer_metadata_list_opt", "layer_metadata_list", "layer_metadata_key",
+  "layer_metadata", "$@2", "$@3", "$@4", "$@5", "$@6", "$@7",
+  "sublayer_list", "sublayer_list_int", "sublayer_stmt", "layer_ref",
+  "layer_offset_opt", "layer_offset_int", "layer_offset_stmt", "prim_list",
+  "prim_stmt", "$@8", "$@9", "$@10", "$@11", "$@12", "$@13",
+  "prim_type_name", "prim_stmt_int", "$@14", "prim_metadata_opt",
+  "prim_metadata_list_opt", "prim_metadata_list", "prim_metadata_key",
+  "prim_metadata", "$@15", "$@16", "$@17", "$@18", "$@19", "$@20", "$@21",
+  "$@22", "$@23", "$@24", "$@25", "$@26", "$@27", "$@28", "$@29", "$@30",
+  "$@31", "$@32", "$@33", "$@34", "$@35", "$@36", "$@37", "$@38", "$@39",
+  "payload_item", "reference_list", "reference_list_int",
+  "reference_list_item", "$@40", "reference_params_opt",
+  "reference_params_int", "reference_params_item", "inherit_list",
+  "inherit_list_int", "inherit_list_item", "specializes_list",
+  "specializes_list_int", "specializes_list_item", "relocates_map",
+  "relocates_stmt_list_opt", "relocates_stmt_list", "relocates_stmt",
+  "name_list", "name_list_int", "name_list_item", "prim_contents_list_opt",
+  "prim_contents_list", "prim_contents_list_item", "variantset_stmt",
+  "$@41", "variant_list", "variant_stmt", "$@42", "prim_child_order_stmt",
   "prim_property_order_stmt", "prim_property", "prim_attr_variability",
   "prim_attr_qualifiers", "prim_attr_type", "prim_attribute_full_type",
-  "prim_attribute_default", "$@33", "$@34", "prim_attribute_fallback",
-  "$@35", "$@36", "prim_attribute_connect", "$@37", "$@38", "$@39", "$@40",
-  "prim_attribute_mapper", "$@41", "prim_attribute_time_samples", "$@42",
-  "prim_attribute", "attribute_mapper_rhs", "$@43",
-  "attribute_mapper_params_opt", "attribute_mapper_params_list",
-  "attribute_mapper_param", "$@44", "attribute_mapper_metadata_opt",
-  "attribute_mapper_metadata_list", "attribute_mapper_metadata",
-  "connect_rhs", "connect_list", "connect_item", "$@45",
-  "time_samples_rhs", "$@46", "time_sample_list", "time_sample_list_int",
-  "time_sample", "$@47", "attribute_metadata_list_opt",
-  "attribute_metadata_list", "attribute_metadata_key",
-  "attribute_metadata", "$@48", "$@49", "$@50", "$@51",
-  "attribute_assignment_opt", "attribute_value", "typed_dictionary",
-  "$@52", "typed_dictionary_list_opt", "typed_dictionary_list",
-  "typed_dictionary_element", "dictionary_key", "dictionary_value_type",
-  "dictionary_value_scalar_type", "dictionary_value_shaped_type",
-  "string_dictionary", "$@53", "string_dictionary_list_opt",
-  "string_dictionary_list", "string_dictionary_element",
-  "metadata_listop_list", "metadata_value", "typed_value",
-  "typed_value_atomic", "typed_value_list", "$@54", "typed_value_list_int",
-  "typed_value_list_items", "typed_value_list_item", "typed_value_tuple",
-  "$@55", "typed_value_tuple_int", "typed_value_tuple_items",
+  "prim_attribute_default", "$@43", "$@44", "prim_attribute_fallback",
+  "$@45", "$@46", "prim_attribute_connect", "$@47", "$@48", "$@49", "$@50",
+  "$@51", "$@52", "prim_attribute_mapper", "$@53",
+  "prim_attribute_time_samples", "$@54", "prim_attribute",
+  "attribute_mapper_rhs", "$@55", "attribute_mapper_params_opt",
+  "attribute_mapper_params_list", "attribute_mapper_param", "$@56",
+  "attribute_mapper_metadata_opt", "attribute_mapper_metadata_list",
+  "attribute_mapper_metadata", "connect_rhs", "connect_list",
+  "connect_item", "$@57", "time_samples_rhs", "$@58", "time_sample_list",
+  "time_sample_list_int", "time_sample", "$@59",
+  "attribute_metadata_list_opt", "attribute_metadata_list",
+  "attribute_metadata_key", "attribute_metadata", "$@60", "$@61", "$@62",
+  "$@63", "$@64", "$@65", "attribute_assignment_opt", "attribute_value",
+  "typed_dictionary", "$@66", "typed_dictionary_list_opt",
+  "typed_dictionary_list", "typed_dictionary_element", "dictionary_key",
+  "dictionary_value_type", "dictionary_value_scalar_type",
+  "dictionary_value_shaped_type", "string_dictionary", "$@67",
+  "string_dictionary_list_opt", "string_dictionary_list",
+  "string_dictionary_element", "metadata_listop_list", "metadata_value",
+  "typed_value", "typed_value_atomic", "typed_value_list", "$@68",
+  "typed_value_list_int", "typed_value_list_items",
+  "typed_value_list_item", "typed_value_tuple", "$@69",
+  "typed_value_tuple_int", "typed_value_tuple_items",
   "typed_value_tuple_item", "prim_relationship_type",
-  "prim_relationship_time_samples", "$@56", "prim_relationship_default",
-  "prim_relationship", "$@57", "$@58", "$@59", "$@60", "$@61",
-  "relationship_metadata_list_opt", "relationship_metadata_list",
-  "relationship_metadata_key", "relationship_metadata", "$@62", "$@63",
-  "$@64", "$@65", "relationship_assignment_opt", "relationship_rhs",
-  "relationship_target_list", "relationship_target",
+  "prim_relationship_time_samples", "$@70", "prim_relationship_default",
+  "prim_relationship", "$@71", "$@72", "$@73", "$@74", "$@75", "$@76",
+  "$@77", "relationship_metadata_list_opt", "relationship_metadata_list",
+  "relationship_metadata_key", "relationship_metadata", "$@78", "$@79",
+  "$@80", "$@81", "$@82", "$@83", "relationship_assignment_opt",
+  "relationship_rhs", "relationship_target_list", "relationship_target",
   "relationship_target_and_opt_marker", "relational_attributes_opt",
-  "relational_attributes", "$@66", "relational_attributes_list_opt",
+  "relational_attributes", "$@84", "relational_attributes_list_opt",
   "relational_attributes_list", "relational_attributes_list_item",
   "relational_attributes_order_stmt", "prim_path_opt", "prim_path",
-  "property_path", "marker", "name", "namespaced_name", "identifier",
-  "extended_number", "stmtsep_opt", "stmtsep", "listsep_opt", "listsep",
-  "newlines_opt", "newlines", 0
+  "property_path", "prim_or_property_scene_path", "marker", "name",
+  "namespaced_name", "identifier", "extended_number", "stmtsep_opt",
+  "stmtsep", "listsep_opt", "listsep", "newlines_opt", "newlines", 0
 };
 #endif
 
@@ -1918,59 +1969,63 @@ static const yytype_uint16 yytoknum[] =
      275,   276,   277,   278,   279,   280,   281,   282,   283,   284,
      285,   286,   287,   288,   289,   290,   291,   292,   293,   294,
      295,   296,   297,   298,   299,   300,   301,   302,   303,   304,
-     305,   306,   307,   308,   309,    40,    41,    61,    91,    93,
-      46,   123,   125,    58,    64,    59,    44
+     305,   306,   307,   308,   309,   310,   311,   312,    40,    41,
+      61,    91,    93,    46,   123,   125,    58,    64,    59,    44
 };
 # endif
 
 /* YYR1[YYN] -- Symbol number of symbol that rule YYN derives.  */
 static const yytype_uint16 yyr1[] =
 {
-       0,    67,    68,    69,    69,    69,    69,    69,    69,    69,
-      69,    69,    69,    69,    69,    69,    69,    69,    69,    69,
-      69,    69,    69,    69,    69,    69,    69,    69,    69,    69,
-      69,    69,    69,    69,    69,    69,    69,    69,    69,    69,
-      69,    69,    69,    69,    69,    70,    70,    72,    71,    73,
-      73,    74,    74,    75,    75,    76,    77,    78,    77,    79,
-      77,    80,    77,    81,    77,    77,    77,    82,    82,    83,
-      83,    84,    85,    86,    86,    87,    87,    88,    88,    89,
-      89,    91,    90,    92,    90,    93,    90,    94,    90,    95,
-      90,    96,    90,    90,    97,    97,    99,    98,   100,   100,
-     101,   101,   102,   102,   103,   103,   103,   104,   105,   104,
-     106,   104,   107,   104,   108,   104,   104,   104,   104,   109,
-     104,   110,   104,   111,   104,   112,   104,   113,   104,   114,
-     104,   115,   104,   116,   104,   117,   104,   118,   104,   119,
-     104,   120,   104,   121,   104,   104,   104,   104,   104,   104,
-     104,   104,   104,   104,   122,   122,   123,   123,   123,   123,
-     124,   124,   125,   126,   125,   127,   127,   127,   128,   128,
-     129,   129,   130,   130,   130,   130,   131,   131,   132,   133,
-     133,   133,   133,   134,   134,   135,   136,   137,   137,   138,
-     138,   139,   140,   140,   141,   141,   142,   143,   143,   144,
-     144,   145,   145,   145,   145,   145,   147,   146,   148,   148,
-     150,   149,   151,   152,   153,   153,   154,   154,   155,   156,
-     156,   157,   157,   159,   160,   158,   162,   163,   161,   165,
-     164,   166,   164,   167,   164,   168,   164,   170,   169,   172,
-     171,   173,   173,   173,   173,   173,   175,   174,   176,   176,
-     176,   177,   177,   179,   178,   180,   180,   180,   181,   181,
-     182,   183,   183,   183,   183,   184,   184,   185,   186,   185,
-     188,   187,   189,   189,   190,   190,   192,   191,   191,   193,
-     193,   193,   194,   194,   195,   195,   195,   196,   197,   196,
-     198,   196,   199,   196,   200,   196,   196,   196,   196,   196,
-     196,   201,   201,   202,   202,   204,   203,   205,   205,   206,
-     206,   207,   207,   208,   208,   209,   209,   210,   211,   213,
-     212,   214,   214,   215,   215,   216,   217,   217,   218,   218,
-     218,   219,   219,   219,   219,   219,   220,   220,   220,   220,
-     222,   221,   223,   224,   224,   225,   225,   225,   227,   226,
-     228,   229,   229,   230,   230,   231,   231,   231,   231,   233,
-     232,   234,   236,   235,   237,   235,   238,   235,   239,   235,
-     240,   235,   235,   235,   241,   241,   241,   242,   242,   243,
-     243,   243,   244,   245,   244,   246,   244,   247,   244,   248,
-     244,   244,   244,   244,   244,   249,   249,   250,   250,   250,
-     250,   251,   251,   252,   253,   253,   254,   254,   256,   255,
-     257,   257,   258,   258,   259,   259,   260,   261,   261,   262,
-     263,   264,   264,   265,   265,   266,   266,   266,   267,   267,
-     268,   268,   269,   269,   270,   270,   271,   271,   272,   273,
-     273,   274,   274
+       0,    70,    71,    72,    72,    72,    72,    72,    72,    72,
+      72,    72,    72,    72,    72,    72,    72,    72,    72,    72,
+      72,    72,    72,    72,    72,    72,    72,    72,    72,    72,
+      72,    72,    72,    72,    72,    72,    72,    72,    72,    72,
+      72,    72,    72,    72,    72,    72,    72,    72,    73,    73,
+      75,    74,    76,    76,    77,    77,    78,    78,    79,    80,
+      81,    80,    82,    80,    83,    80,    84,    80,    85,    80,
+      86,    80,    80,    80,    87,    87,    88,    88,    89,    90,
+      91,    91,    92,    92,    93,    93,    94,    94,    96,    95,
+      97,    95,    98,    95,    99,    95,   100,    95,   101,    95,
+      95,   102,   102,   104,   103,   105,   105,   106,   106,   107,
+     107,   108,   108,   108,   109,   110,   109,   111,   109,   112,
+     109,   113,   109,   114,   109,   115,   109,   109,   109,   109,
+     116,   109,   117,   109,   118,   109,   119,   109,   120,   109,
+     121,   109,   122,   109,   123,   109,   124,   109,   125,   109,
+     126,   109,   127,   109,   128,   109,   129,   109,   130,   109,
+     131,   109,   132,   109,   133,   109,   134,   109,   109,   109,
+     109,   109,   109,   109,   109,   109,   109,   109,   109,   109,
+     135,   135,   136,   136,   136,   136,   137,   137,   138,   139,
+     138,   140,   140,   140,   141,   141,   142,   142,   143,   143,
+     143,   143,   144,   144,   145,   146,   146,   146,   146,   147,
+     147,   148,   149,   150,   150,   151,   151,   152,   153,   153,
+     154,   154,   155,   156,   156,   157,   157,   158,   158,   158,
+     158,   158,   160,   159,   161,   161,   163,   162,   164,   165,
+     166,   166,   167,   167,   168,   169,   169,   170,   170,   172,
+     173,   171,   175,   176,   174,   178,   177,   179,   177,   180,
+     177,   181,   177,   182,   177,   183,   177,   185,   184,   187,
+     186,   188,   188,   188,   188,   188,   190,   189,   191,   191,
+     191,   192,   192,   194,   193,   195,   195,   195,   196,   196,
+     197,   198,   198,   198,   198,   199,   199,   200,   201,   200,
+     203,   202,   204,   204,   205,   205,   207,   206,   206,   208,
+     208,   208,   209,   209,   210,   210,   210,   211,   212,   211,
+     213,   211,   214,   211,   215,   211,   216,   211,   217,   211,
+     211,   211,   211,   211,   211,   218,   218,   219,   219,   221,
+     220,   222,   222,   223,   223,   224,   224,   225,   225,   226,
+     226,   227,   228,   230,   229,   231,   231,   232,   232,   233,
+     234,   234,   235,   235,   235,   236,   236,   236,   236,   236,
+     237,   237,   237,   237,   239,   238,   240,   241,   241,   242,
+     242,   242,   244,   243,   245,   246,   246,   247,   247,   248,
+     248,   248,   248,   250,   249,   251,   253,   252,   254,   252,
+     255,   252,   256,   252,   257,   252,   258,   252,   259,   252,
+     252,   252,   260,   260,   260,   261,   261,   262,   262,   262,
+     263,   264,   263,   265,   263,   266,   263,   267,   263,   268,
+     263,   269,   263,   263,   263,   263,   263,   270,   270,   271,
+     271,   271,   271,   272,   272,   273,   274,   274,   275,   275,
+     277,   276,   278,   278,   279,   279,   280,   280,   281,   282,
+     282,   283,   284,   285,   286,   286,   287,   287,   288,   288,
+     288,   289,   289,   290,   290,   291,   291,   292,   292,   293,
+     293,   294,   295,   295,   296,   296
 };
 
 /* YYR2[YYN] -- Number of symbols composing right hand side of rule YYN.  */
@@ -1980,47 +2035,51 @@ static const yytype_uint8 yyr2[] =
        1,     1,     1,     1,     1,     1,     1,     1,     1,     1,
        1,     1,     1,     1,     1,     1,     1,     1,     1,     1,
        1,     1,     1,     1,     1,     1,     1,     1,     1,     1,
-       1,     1,     1,     1,     1,     1,     3,     0,     3,     1,
-       5,     1,     3,     1,     3,     1,     1,     0,     4,     0,
-       5,     0,     5,     0,     5,     3,     3,     3,     5,     1,
-       3,     2,     1,     0,     4,     1,     3,     3,     3,     1,
-       3,     0,     3,     0,     4,     0,     3,     0,     4,     0,
-       3,     0,     4,     4,     1,     3,     0,     6,     1,     5,
-       1,     3,     1,     3,     1,     1,     1,     1,     0,     4,
-       0,     5,     0,     5,     0,     5,     3,     3,     3,     0,
-       4,     0,     4,     0,     5,     0,     5,     0,     5,     0,
-       4,     0,     5,     0,     5,     0,     5,     0,     4,     0,
-       5,     0,     5,     0,     5,     3,     3,     3,     4,     4,
-       4,     3,     2,     3,     1,     2,     1,     1,     3,     5,
-       1,     3,     3,     0,     3,     0,     3,     5,     1,     3,
-       1,     3,     1,     1,     3,     5,     1,     3,     1,     1,
-       1,     3,     5,     1,     3,     1,     4,     0,     2,     1,
-       3,     3,     1,     5,     1,     3,     1,     1,     2,     1,
-       2,     2,     2,     2,     2,     2,     0,     9,     1,     2,
-       0,     7,     4,     4,     1,     1,     1,     1,     1,     1,
-       3,     1,     2,     0,     0,     6,     0,     0,     7,     0,
-       7,     0,     8,     0,     8,     0,     8,     0,    10,     0,
+       1,     1,     1,     1,     1,     1,     1,     1,     1,     3,
+       0,     3,     1,     5,     1,     3,     1,     3,     1,     1,
+       0,     4,     0,     5,     0,     5,     0,     5,     0,     5,
+       0,     5,     3,     3,     3,     5,     1,     3,     2,     1,
+       0,     4,     1,     3,     3,     3,     1,     3,     0,     3,
+       0,     4,     0,     3,     0,     4,     0,     3,     0,     4,
+       4,     1,     3,     0,     6,     1,     5,     1,     3,     1,
+       3,     1,     1,     1,     1,     0,     4,     0,     5,     0,
+       5,     0,     5,     0,     5,     0,     5,     3,     3,     3,
+       0,     4,     0,     4,     0,     5,     0,     5,     0,     5,
+       0,     5,     0,     5,     0,     4,     0,     5,     0,     5,
+       0,     5,     0,     5,     0,     5,     0,     4,     0,     5,
+       0,     5,     0,     5,     0,     5,     0,     5,     3,     3,
+       3,     4,     4,     4,     4,     4,     3,     2,     3,     3,
+       1,     2,     1,     1,     3,     5,     1,     3,     3,     0,
+       3,     0,     3,     5,     1,     3,     1,     3,     1,     1,
+       3,     5,     1,     3,     1,     1,     1,     3,     5,     1,
+       3,     1,     4,     0,     2,     1,     3,     3,     1,     5,
+       1,     3,     1,     1,     2,     1,     2,     2,     2,     2,
+       2,     2,     0,     9,     1,     2,     0,     7,     4,     4,
+       1,     1,     1,     1,     1,     1,     3,     1,     2,     0,
+       0,     6,     0,     0,     7,     0,     7,     0,     8,     0,
+       8,     0,     8,     0,     8,     0,     8,     0,    10,     0,
        7,     1,     1,     1,     1,     1,     0,     4,     0,     3,
        5,     1,     3,     0,     5,     0,     3,     5,     1,     3,
        3,     1,     1,     3,     5,     1,     3,     1,     0,     4,
        0,     5,     0,     2,     1,     3,     0,     4,     3,     0,
        3,     5,     1,     3,     1,     1,     1,     1,     0,     4,
-       0,     5,     0,     5,     0,     5,     3,     3,     3,     3,
-       2,     0,     2,     1,     1,     0,     5,     0,     2,     1,
-       3,     4,     4,     1,     1,     1,     1,     1,     3,     0,
-       5,     0,     2,     1,     3,     3,     1,     1,     1,     1,
-       1,     1,     1,     1,     2,     1,     1,     1,     1,     1,
-       0,     4,     3,     1,     3,     1,     1,     1,     0,     4,
-       3,     1,     3,     1,     1,     1,     2,     3,     2,     0,
-       7,     6,     0,     5,     0,     5,     0,     5,     0,     5,
-       0,     7,     1,     1,     0,     3,     5,     1,     3,     1,
-       1,     1,     1,     0,     4,     0,     5,     0,     5,     0,
-       5,     3,     3,     3,     2,     0,     2,     1,     1,     3,
-       5,     1,     3,     2,     1,     3,     0,     1,     0,     5,
-       0,     2,     1,     3,     1,     1,     4,     0,     1,     1,
+       0,     5,     0,     5,     0,     5,     0,     5,     0,     5,
+       3,     3,     3,     3,     2,     0,     2,     1,     1,     0,
+       5,     0,     2,     1,     3,     4,     4,     1,     1,     1,
+       1,     1,     3,     0,     5,     0,     2,     1,     3,     3,
+       1,     1,     1,     1,     1,     1,     1,     1,     2,     1,
+       1,     1,     1,     1,     0,     4,     3,     1,     3,     1,
+       1,     1,     0,     4,     3,     1,     3,     1,     1,     1,
+       2,     3,     2,     0,     7,     6,     0,     5,     0,     5,
+       0,     5,     0,     5,     0,     5,     0,     5,     0,     7,
+       1,     1,     0,     3,     5,     1,     3,     1,     1,     1,
+       1,     0,     4,     0,     5,     0,     5,     0,     5,     0,
+       5,     0,     5,     3,     3,     3,     2,     0,     2,     1,
+       1,     3,     5,     1,     3,     2,     1,     3,     0,     1,
+       0,     5,     0,     2,     1,     3,     1,     1,     4,     0,
        1,     1,     1,     1,     1,     1,     1,     1,     1,     1,
-       1,     1,     0,     1,     2,     1,     1,     1,     2,     0,
-       1,     1,     2
+       1,     1,     1,     1,     1,     0,     1,     2,     1,     1,
+       1,     2,     0,     1,     1,     2
 };
 
 /* YYDEFACT[STATE-NAME] -- Default rule to reduce with in state
@@ -2028,513 +2087,577 @@ static const yytype_uint8 yyr2[] =
    means the default is an error.  */
 static const yytype_uint16 yydefact[] =
 {
-       0,    47,     0,     2,   439,     1,   441,    48,    45,    49,
-     440,    85,    81,    89,     0,   439,    79,   439,   442,   428,
-     429,     0,    87,    94,     0,    83,     0,    91,     0,    46,
-     440,     0,    51,    96,    86,     0,     0,    82,     0,    90,
-       0,     0,    80,   439,    56,     0,     0,     0,     0,     0,
-     432,    57,    53,    55,   439,    95,    88,    84,    92,   196,
-     439,    93,   192,    50,    61,    59,     0,    63,     0,   439,
-      52,   433,   435,     0,     0,    98,     0,     0,     0,    65,
-       0,   439,    66,   434,    54,     0,   439,   439,   439,   194,
-       0,     0,     0,     0,   339,   335,   336,   337,   330,   348,
-     340,   305,   328,    58,   329,   331,   333,   332,   338,     0,
-     197,     0,   100,   439,     0,   437,   436,   326,   340,    62,
-     327,    60,    64,    72,    67,   439,    69,    73,   439,   334,
-     439,   439,    97,     0,   217,     0,     0,   355,     0,   216,
-       0,     0,     0,   198,   199,     0,     0,     0,     0,   218,
-       0,   221,     0,   242,   241,   243,   244,   245,   214,     0,
-     372,   373,   215,   219,   439,   107,     0,   105,     0,     0,
-     121,     0,     0,   119,     0,   137,     0,     0,   129,   106,
-       0,     0,     0,   432,   108,   102,   104,   438,   193,   195,
-       0,   437,     0,    71,     0,     0,     0,     0,   307,     0,
-       0,     0,   356,     0,     0,     0,     0,     0,     0,     0,
-       0,   206,   358,   204,   200,   205,   202,   203,   201,   222,
-     425,   426,     3,     4,     5,     6,     7,     8,     9,    10,
-      11,    12,    13,    14,    15,    16,    17,    18,    19,    20,
-      21,    22,    23,    25,    24,    26,    27,    28,    29,    30,
-      31,    32,    33,    34,    35,    36,    37,    38,    39,    40,
-      41,    42,    43,    44,   427,   223,   362,     0,    99,   125,
-     141,   133,     0,   112,   123,   139,   131,     0,   110,     0,
-       0,     0,     0,     0,     0,     0,     0,   127,   143,   135,
-       0,   114,     0,   152,     0,     0,   101,   433,     0,    68,
-      70,     0,     0,   432,    75,   349,   353,   354,   439,   351,
-     341,   345,   346,   439,   343,   347,     0,     0,   432,   309,
-       0,   315,   316,   317,     0,   366,   357,   226,     0,   364,
-       0,     0,     0,   368,     0,     0,   301,     0,     0,   395,
-     220,     0,     0,     0,     0,     0,     0,     0,     0,     0,
-       0,   116,     0,   117,   118,     0,   319,   153,     0,   439,
-     145,     0,     0,     0,     0,     0,     0,   151,   146,   147,
-     103,     0,     0,     0,     0,   433,   350,   437,   342,   437,
-     313,   424,     0,   314,   423,   306,   308,   433,     0,     0,
-       0,   395,   301,     0,   395,   212,   213,     0,   395,   439,
-       0,     0,     0,     0,   224,     0,     0,     0,     0,   374,
-       0,     0,     0,   149,     0,     0,     0,     0,   148,     0,
-     419,   172,   439,   122,   173,   178,   154,   417,   120,   439,
-     163,   156,   439,   417,   138,   157,   187,     0,     0,     0,
-     150,     0,   179,   439,   130,   180,   185,   109,    77,    78,
-      74,    76,   352,   344,     0,   310,     0,   318,     0,   367,
-     227,     0,   365,     0,   369,     0,   229,     0,   239,   304,
-     302,   303,   279,   370,     0,   359,   404,   398,   439,   396,
-     397,   406,   439,   363,   126,   142,   134,   113,   124,   140,
-     132,   111,     0,   155,   418,   321,   165,     0,   165,     0,
-       0,   439,   189,   128,   144,   136,   115,     0,   312,   311,
-     231,   279,   233,   235,   439,     0,   420,     0,     0,   439,
-     225,     0,   361,     0,     0,     0,   408,   403,   407,     0,
-     174,   439,   176,     0,     0,   439,   323,   439,   164,   158,
-     439,   160,   162,     0,   186,   188,   437,   181,   439,   183,
-       0,   228,     0,     0,     0,   261,   439,   230,   262,   267,
-       0,   270,   240,     0,   371,   360,   421,   405,   422,   399,
-     439,   401,   439,   382,     0,   380,     0,     0,     0,     0,
-     381,     0,   375,   432,   383,   377,   379,     0,   437,     0,
-     320,   322,   437,     0,     0,   437,   191,   190,     0,   437,
-     232,   234,   236,   210,     0,   208,     0,     0,   237,   439,
-     287,     0,   285,     0,     0,     0,     0,     0,   286,     0,
-     280,   432,   288,   282,   284,     0,   437,   410,   387,   385,
-       0,     0,   389,   394,     0,   433,     0,   175,   177,   325,
-     324,     0,   166,   170,   432,   168,   159,   161,   182,   184,
-     439,   207,   209,   263,   439,   265,     0,     0,   272,   292,
-     290,     0,     0,     0,   294,   300,     0,   433,     0,   400,
-     402,     0,     0,     0,     0,   414,     0,   432,   412,   415,
-       0,     0,   391,   392,     0,   393,   376,   378,     0,     0,
-       0,   433,     0,     0,   437,   269,   238,   246,   431,   430,
-       0,   439,   274,     0,     0,     0,   298,   296,   297,     0,
-     299,   281,   283,     0,     0,   409,   411,   433,     0,     0,
-       0,   384,   171,   167,   169,   439,   264,   266,   255,   271,
-     273,   437,   276,     0,     0,     0,   289,     0,   413,   388,
-     386,   390,     0,   439,   248,   275,   278,     0,   293,   291,
-     295,   416,   439,     0,   439,   247,   277,   211,     0,   256,
-     432,   258,     0,     0,     0,   433,   249,     0,   432,   251,
-     260,   257,   259,   253,     0,   433,     0,   250,   252,     0,
-     254
+       0,    50,     0,     2,   482,     1,   484,    51,    48,    52,
+     483,    92,    88,    96,     0,   482,    86,   482,   485,   471,
+     472,     0,    94,   101,     0,    90,     0,    98,     0,    49,
+     483,     0,    54,   103,    93,     0,     0,    89,     0,    97,
+       0,     0,    87,   482,    59,     0,     0,     0,     0,     0,
+       0,     0,   475,    60,    56,    58,   482,   102,    95,    91,
+      99,   222,   482,   100,   218,    53,    64,    68,    62,     0,
+      66,    70,     0,   482,    55,   476,   478,     0,     0,   105,
+       0,     0,     0,     0,    72,     0,     0,   482,    73,   477,
+      57,     0,   482,   482,   482,   220,     0,     0,     0,     0,
+       0,     0,   373,   369,   370,   371,   364,   382,   374,   339,
+     362,    61,   363,   365,   367,   366,   372,     0,   223,     0,
+     107,   482,     0,   480,   479,   360,   374,    65,   361,    69,
+      63,    67,    71,    79,    74,   482,    76,    80,   482,   368,
+     482,   482,   104,     0,     0,   243,     0,     0,     0,   389,
+       0,   242,     0,     0,     0,   224,   225,     0,     0,     0,
+       0,   244,     0,   247,     0,   272,   271,   273,   274,   275,
+     240,     0,   410,   411,   241,   245,   482,   114,     0,     0,
+     112,     0,     0,   132,     0,     0,   130,     0,     0,     0,
+     156,     0,     0,   144,   113,     0,     0,     0,   475,   115,
+     109,   111,   481,   219,   221,     0,   480,     0,    78,     0,
+       0,     0,     0,   341,     0,     0,     0,     0,     0,   390,
+       0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+     232,   392,   230,   226,   231,   228,   229,   227,   248,   468,
+     469,     3,     4,     5,     6,     7,     8,     9,    10,    11,
+      12,    13,    14,    15,    16,    17,    18,    19,    20,    21,
+      22,    23,    24,    26,    25,    27,    28,    29,    30,    31,
+      32,    33,    34,    35,    36,    37,    38,    39,    40,    41,
+      42,    43,    44,    45,    46,    47,   470,   249,   396,     0,
+     106,   136,   160,   148,     0,   119,   140,   164,   152,     0,
+     123,   134,   158,   146,     0,   117,     0,     0,     0,     0,
+       0,     0,     0,   138,   162,   150,     0,   121,     0,     0,
+     142,   166,   154,     0,   125,     0,   177,     0,     0,   108,
+     476,     0,    75,    77,     0,     0,   475,    82,   383,   387,
+     388,   482,   385,   375,   379,   380,   482,   377,   381,     0,
+       0,   475,   343,     0,   349,   350,   351,     0,   400,     0,
+     404,   391,   252,     0,   398,     0,   402,     0,     0,     0,
+     406,     0,     0,   335,     0,     0,   437,   246,     0,     0,
+       0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+       0,     0,     0,   127,     0,   128,   129,     0,   353,   178,
+     179,     0,     0,     0,     0,     0,     0,   482,   168,     0,
+       0,     0,     0,     0,     0,   176,   169,   170,   110,     0,
+       0,     0,     0,   476,   384,   480,   376,   480,   347,   467,
+       0,   348,   466,   340,   342,   476,     0,     0,     0,   437,
+       0,   437,   335,     0,   437,     0,   437,   238,   239,     0,
+     437,   482,     0,     0,     0,     0,   250,     0,     0,     0,
+       0,   412,     0,     0,     0,   172,     0,     0,     0,     0,
+     174,     0,     0,     0,     0,   171,     0,   461,   198,   482,
+     133,   199,   204,   180,   459,   131,   482,     0,     0,     0,
+     173,     0,   189,   182,   482,   459,   157,   183,   213,     0,
+       0,     0,   175,     0,   205,   482,   145,   206,   211,   116,
+      84,    85,    81,    83,   386,   378,     0,   344,     0,   352,
+       0,   401,     0,   405,   253,     0,   399,     0,   403,     0,
+     407,     0,   255,     0,   269,   338,   336,   337,   309,   408,
+       0,   393,   446,   440,   482,   438,   439,   448,   482,   397,
+     137,   161,   149,   120,   141,   165,   153,   124,   135,   159,
+     147,   118,     0,   181,   460,   355,   139,   163,   151,   122,
+     191,     0,   191,     0,     0,   482,   215,   143,   167,   155,
+     126,     0,   346,   345,   257,   261,   309,   263,   259,   265,
+     482,     0,   462,     0,     0,   482,   251,     0,   395,     0,
+       0,     0,   450,   445,   449,     0,   200,   482,   202,     0,
+       0,   482,   357,   482,   190,   184,   482,   186,   188,     0,
+     212,   214,   480,   207,   482,   209,     0,     0,   254,     0,
+       0,     0,     0,   463,   291,   482,   256,   292,   298,   297,
+       0,   300,   270,     0,   409,   394,   464,   447,   465,   441,
+     482,   443,   482,   420,     0,     0,   418,     0,     0,     0,
+       0,     0,   419,     0,   413,   475,   421,   415,   417,     0,
+     480,     0,   354,   356,   480,     0,     0,   480,   217,   216,
+       0,   480,   258,   262,   264,   260,   266,   236,     0,   234,
+       0,     0,   267,   482,   317,     0,     0,   315,     0,     0,
+       0,     0,     0,     0,   316,     0,   310,   475,   318,   312,
+     314,     0,   480,   452,   425,   429,   423,     0,     0,   427,
+     431,   436,     0,   476,     0,   201,   203,   359,   358,     0,
+     192,   196,   475,   194,   185,   187,   208,   210,   482,   233,
+     235,   293,   482,   295,     0,     0,   302,   322,   326,   320,
+       0,     0,     0,   324,   328,   334,     0,   476,     0,   442,
+     444,     0,     0,     0,     0,     0,     0,   456,     0,   475,
+     454,   457,     0,     0,     0,   433,   434,     0,     0,   435,
+     414,   416,     0,     0,     0,   476,     0,     0,   480,   299,
+     268,   276,   474,   473,     0,   482,   304,     0,     0,     0,
+       0,   332,   330,   331,     0,     0,   333,   311,   313,     0,
+       0,   451,   453,   476,     0,     0,     0,     0,     0,   422,
+     197,   193,   195,   482,   294,   296,   285,   301,   303,   480,
+     306,     0,     0,     0,     0,     0,   319,     0,   455,   426,
+     430,   424,   428,   432,     0,   482,   278,   305,   308,     0,
+     323,   327,   321,   325,   329,   458,   482,     0,   482,   277,
+     307,   237,     0,   286,   475,   288,     0,     0,     0,   476,
+     279,     0,   475,   281,   290,   287,   289,   283,     0,   476,
+       0,   280,   282,     0,   284
 };
 
 /* YYDEFGOTO[NTERM-NUM].  */
 static const yytype_int16 yydefgoto[] =
 {
-      -1,     2,   264,     7,     3,     4,     8,    31,    50,    51,
-      52,    73,    78,    77,    80,    82,   125,   126,   433,   193,
-     303,   643,    15,   142,    24,    38,    21,    36,    26,    40,
-      22,    34,    54,    74,   111,   183,   184,   185,   298,   350,
-     345,   365,   283,   280,   346,   341,   361,   292,   348,   343,
-     363,   285,   347,   342,   362,   428,   434,   540,   435,   496,
-     538,   644,   645,   423,   531,   424,   444,   548,   445,   360,
-     500,   501,   502,    61,    88,    62,   109,   143,   144,   145,
-     334,   604,   605,   650,   146,   147,   148,   149,   150,   151,
-     152,   153,   336,   472,   154,   392,   511,   155,   515,   550,
-     552,   553,   156,   657,   157,   518,   158,   696,   728,   755,
-     768,   769,   776,   744,   760,   761,   557,   654,   558,   607,
-     562,   609,   700,   701,   702,   747,   520,   621,   622,   623,
-     668,   705,   704,   709,   404,   470,   102,   131,   317,   318,
-     319,   382,   320,   321,   322,   357,   429,   534,   535,   536,
-     119,   103,   104,   105,   120,   130,   196,   313,   314,   107,
-     128,   194,   308,   309,   159,   160,   523,   161,   162,   339,
-     394,   391,   398,   521,   483,   583,   584,   585,   636,   681,
-     680,   684,   409,   479,   570,   480,   481,   527,   528,   572,
-     676,   677,   678,   679,   493,   425,   559,   567,   383,   265,
-     163,   703,    70,    71,   114,   115,   116,    10
+      -1,     2,   286,     7,     3,     4,     8,    31,    52,    53,
+      54,    77,    83,    81,    85,    82,    86,    88,   135,   136,
+     495,   208,   336,   731,    15,   154,    24,    38,    21,    36,
+      26,    40,    22,    34,    56,    78,   119,   198,   199,   200,
+     331,   392,   382,   405,   387,   413,   310,   307,   388,   378,
+     401,   383,   409,   325,   390,   380,   403,   385,   411,   318,
+     389,   379,   402,   384,   410,   485,   496,   616,   497,   570,
+     614,   732,   733,   480,   607,   481,   506,   624,   507,   408,
+     574,   575,   576,    63,    94,    64,   117,   155,   156,   157,
+     371,   688,   689,   738,   158,   159,   160,   161,   162,   163,
+     164,   165,   373,   538,   166,   442,   586,   167,   591,   626,
+     630,   627,   629,   631,   168,   745,   169,   594,   170,   790,
+     826,   859,   872,   873,   880,   846,   864,   865,   636,   742,
+     637,   691,   642,   693,   794,   795,   796,   849,   596,   707,
+     708,   709,   758,   800,   798,   804,   799,   805,   456,   536,
+     110,   141,   350,   351,   352,   430,   353,   354,   355,   399,
+     486,   610,   611,   612,   127,   111,   112,   113,   128,   140,
+     211,   346,   347,   115,   138,   209,   341,   342,   171,   172,
+     599,   173,   174,   376,   444,   439,   446,   441,   450,   597,
+     549,   665,   666,   667,   724,   774,   772,   777,   773,   778,
+     461,   545,   650,   546,   547,   603,   604,   652,   768,   769,
+     770,   771,   563,   482,   638,   639,   647,   431,   287,   175,
+     797,    74,    75,   122,   123,   124,    10
 };
 
 /* YYPACT[STATE-NUM] -- Index in YYTABLE of the portion describing
    STATE-NUM.  */
-#define YYPACT_NINF -578
+#define YYPACT_NINF -677
 static const yytype_int16 yypact[] =
 {
-      47,  -578,   104,  -578,   108,  -578,  -578,  -578,   356,    99,
-     157,    85,    85,    85,   139,   108,  -578,   108,  -578,  -578,
-    -578,   203,   159,  -578,   203,   159,   203,   159,   166,  -578,
-     446,   179,   584,  -578,  -578,    85,   203,  -578,   203,  -578,
-     203,    93,  -578,   108,  -578,    85,    85,   180,    85,   187,
-      44,  -578,  -578,  -578,   108,  -578,  -578,  -578,  -578,  -578,
-     108,  -578,  -578,  -578,  -578,  -578,   236,  -578,   201,   108,
-    -578,   584,   157,   209,   211,   239,   268,   250,   253,  -578,
-     257,   108,  -578,  -578,  -578,   169,   108,   108,    40,  -578,
-     191,   191,   191,    43,  -578,  -578,  -578,  -578,  -578,  -578,
-     259,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,   260,
-     447,   276,   661,   108,   281,   268,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,    40,  -578,   287,   108,  -578,
-     108,   108,  -578,   340,  -578,   361,   340,  -578,   304,  -578,
-     338,   312,   108,   447,  -578,   108,    44,    44,    44,  -578,
-      85,  -578,   850,  -578,  -578,  -578,  -578,  -578,  -578,   850,
-    -578,  -578,  -578,   309,   108,  -578,   292,  -578,   399,   314,
-    -578,   317,   318,  -578,   322,  -578,   326,   431,  -578,  -578,
-     329,   330,   331,    44,  -578,  -578,  -578,  -578,  -578,  -578,
-     332,   391,   255,  -578,   344,    71,   346,   230,   190,    56,
-     850,   850,  -578,   359,   850,   850,   850,   349,   353,   850,
-     850,  -578,  -578,   157,  -578,   157,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,   357,   275,   354,  -578,  -578,
-    -578,  -578,   362,  -578,  -578,  -578,  -578,   363,  -578,   415,
-     371,   418,    85,   376,   342,   384,   382,  -578,  -578,  -578,
-     390,  -578,   393,    85,   396,    93,  -578,   661,   397,  -578,
-    -578,   403,   414,    44,  -578,  -578,  -578,  -578,    40,  -578,
-    -578,  -578,  -578,    40,  -578,  -578,   803,   410,    44,  -578,
-     803,  -578,  -578,   417,   413,  -578,  -578,  -578,   422,  -578,
-      93,    93,   432,  -578,   420,    69,   421,   486,   225,   438,
-    -578,   443,   449,   453,    93,   454,   455,   457,   458,    93,
-     462,  -578,    57,  -578,  -578,    64,  -578,  -578,    61,   108,
-    -578,   463,   464,   466,    93,   468,    92,  -578,  -578,  -578,
-    -578,   169,   492,   493,   470,   255,  -578,    71,  -578,   230,
-    -578,  -578,   471,  -578,  -578,  -578,  -578,   190,   474,   475,
-     509,   438,   421,   521,   438,  -578,  -578,   523,   438,   108,
-     488,   485,   489,   195,  -578,   490,   491,   494,   121,   498,
-      57,    61,    92,  -578,   191,    57,    61,    92,  -578,   191,
-    -578,  -578,   108,  -578,  -578,  -578,  -578,   547,  -578,   108,
-    -578,  -578,   108,   547,  -578,  -578,   548,    57,    61,    92,
-    -578,   191,  -578,   108,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,   396,  -578,   137,  -578,   499,  -578,
-    -578,   500,  -578,   503,  -578,   501,  -578,   554,  -578,  -578,
-    -578,  -578,   512,  -578,   557,  -578,   505,  -578,   108,  -578,
-    -578,   513,   108,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,    54,  -578,  -578,   558,   528,    49,   528,   522,
-     514,    40,  -578,  -578,  -578,  -578,  -578,    58,  -578,  -578,
-    -578,   512,  -578,  -578,   108,   154,  -578,   527,   526,   108,
-    -578,   513,  -578,   526,   756,    62,  -578,  -578,  -578,   269,
-    -578,    40,  -578,   525,   529,    40,  -578,   108,  -578,  -578,
-      40,  -578,  -578,   583,  -578,  -578,   548,  -578,    40,  -578,
-     154,  -578,   154,   154,   582,  -578,   108,  -578,  -578,   531,
-     540,  -578,  -578,   220,  -578,  -578,  -578,  -578,  -578,  -578,
-      40,  -578,   108,  -578,    85,  -578,    85,   542,   544,    85,
-    -578,   546,  -578,    44,  -578,  -578,  -578,   545,   547,   593,
-    -578,  -578,   558,   177,   549,   284,  -578,  -578,   550,   547,
-    -578,  -578,  -578,  -578,   552,   582,    68,   553,  -578,   108,
-    -578,    85,  -578,    85,   559,   561,   562,    85,  -578,   564,
-    -578,    44,  -578,  -578,  -578,   568,   616,   256,  -578,  -578,
-     617,    85,  -578,    85,   575,   524,   578,  -578,  -578,  -578,
-    -578,   579,  -578,  -578,    44,  -578,  -578,  -578,  -578,  -578,
-     108,  -578,  -578,  -578,    40,  -578,   756,   897,   182,  -578,
-    -578,    85,   620,    85,  -578,    85,   581,   482,   590,  -578,
-    -578,   208,   208,   208,   155,  -578,   577,    44,  -578,  -578,
-     591,   592,  -578,  -578,   594,  -578,  -578,  -578,   169,   396,
-     585,   295,   599,   596,   554,  -578,  -578,  -578,  -578,  -578,
-     600,    40,  -578,   598,   606,   607,  -578,  -578,  -578,   608,
-    -578,  -578,  -578,   169,   609,  -578,  -578,   256,   191,   191,
-     191,  -578,  -578,  -578,  -578,   108,  -578,  -578,   613,  -578,
-    -578,   182,   640,   191,   191,   191,  -578,    93,  -578,  -578,
-    -578,  -578,   612,   108,   615,  -578,  -578,   137,  -578,  -578,
-    -578,  -578,   108,   100,   108,  -578,  -578,  -578,   621,  -578,
-      44,  -578,    50,   396,   623,   633,  -578,   897,    44,  -578,
-    -578,  -578,  -578,  -578,   624,    85,   625,  -578,  -578,   137,
-    -578
+     107,  -677,    66,  -677,   142,  -677,  -677,  -677,   313,   113,
+     172,    62,    62,    62,   141,   142,  -677,   142,  -677,  -677,
+    -677,   178,   135,  -677,   178,   135,   178,   135,   140,  -677,
+     387,   149,  1060,  -677,  -677,    62,   178,  -677,   178,  -677,
+     178,    67,  -677,   142,  -677,    62,    62,    62,   158,    62,
+      62,   159,    49,  -677,  -677,  -677,   142,  -677,  -677,  -677,
+    -677,  -677,   142,  -677,  -677,  -677,  -677,  -677,  -677,   217,
+    -677,  -677,   174,   142,  -677,  1060,   172,   184,   196,   190,
+     252,   209,   214,   220,  -677,   227,   229,   142,  -677,  -677,
+    -677,   145,   142,   142,    30,  -677,    35,    35,    35,    35,
+      35,    54,  -677,  -677,  -677,  -677,  -677,  -677,   213,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,   228,   511,   236,
+     764,   142,   234,   252,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,    30,  -677,   241,   142,  -677,
+     142,   142,  -677,   316,   316,  -677,   346,   316,   316,  -677,
+     270,  -677,   290,   260,   142,   511,  -677,   142,    49,    49,
+      49,  -677,    62,  -677,   960,  -677,  -677,  -677,  -677,  -677,
+    -677,   960,  -677,  -677,  -677,   243,   142,  -677,   324,   370,
+    -677,   465,   245,  -677,   247,   248,  -677,   251,   261,   495,
+    -677,   268,   530,  -677,  -677,   277,   280,   283,    49,  -677,
+    -677,  -677,  -677,  -677,  -677,   250,   340,   206,  -677,   294,
+     225,   287,   215,   157,    26,   960,   960,   960,   960,  -677,
+     318,   960,   960,   960,   960,   960,   296,   306,   960,   960,
+    -677,  -677,   172,  -677,   172,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,   305,    43,   308,
+    -677,  -677,  -677,  -677,   314,  -677,  -677,  -677,  -677,   317,
+    -677,  -677,  -677,  -677,   322,  -677,   364,   328,   372,    62,
+     331,   329,   329,  -677,  -677,  -677,   334,  -677,   341,   332,
+    -677,  -677,  -677,   352,  -677,   353,    62,   355,    67,  -677,
+     764,   363,  -677,  -677,   367,   368,    49,  -677,  -677,  -677,
+    -677,    30,  -677,  -677,  -677,  -677,    30,  -677,  -677,   910,
+     335,    49,  -677,   910,  -677,  -677,   374,   376,  -677,   380,
+    -677,  -677,  -677,   383,  -677,   395,  -677,    67,    67,   398,
+    -677,   371,    42,   390,   456,    75,   404,  -677,   406,   410,
+     411,    67,   416,   417,   420,   422,    67,   427,   428,   436,
+     437,    67,   439,  -677,    46,  -677,  -677,    70,  -677,  -677,
+    -677,   441,   442,   449,    67,   450,    68,   142,  -677,   451,
+     452,   454,    67,   455,   151,  -677,  -677,  -677,  -677,   145,
+     478,   505,   463,   206,  -677,   225,  -677,   215,  -677,  -677,
+     467,  -677,  -677,  -677,  -677,   157,   470,   475,   521,   404,
+     522,   404,   390,   528,   404,   533,   404,  -677,  -677,   534,
+     404,   142,   489,   494,   497,   185,  -677,   499,   502,   503,
+     152,   515,    46,    68,   151,  -677,    35,    46,    68,   151,
+    -677,    35,    46,    68,   151,  -677,    35,  -677,  -677,   142,
+    -677,  -677,  -677,  -677,   562,  -677,   142,    46,    68,   151,
+    -677,    35,  -677,  -677,   142,   562,  -677,  -677,   567,    46,
+      68,   151,  -677,    35,  -677,   142,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,   355,  -677,   259,  -677,
+     517,  -677,   520,  -677,  -677,   523,  -677,   524,  -677,   527,
+    -677,   518,  -677,   568,  -677,  -677,  -677,  -677,   547,  -677,
+     574,  -677,   539,  -677,   142,  -677,  -677,   543,   142,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,    33,  -677,  -677,   576,  -677,  -677,  -677,  -677,
+     551,    52,   551,   525,   545,    30,  -677,  -677,  -677,  -677,
+    -677,    50,  -677,  -677,  -677,  -677,   547,  -677,  -677,  -677,
+     142,   153,  -677,   552,   555,   142,  -677,   543,  -677,   555,
+     860,    56,  -677,  -677,  -677,   433,  -677,    30,  -677,   554,
+     556,    30,  -677,   142,  -677,  -677,    30,  -677,  -677,   618,
+    -677,  -677,   567,  -677,    30,  -677,   153,   153,  -677,   153,
+     153,   153,   616,   564,  -677,   142,  -677,  -677,  -677,  -677,
+     573,  -677,  -677,   336,  -677,  -677,  -677,  -677,  -677,  -677,
+      30,  -677,   142,  -677,    62,    62,  -677,    62,   579,   580,
+      62,    62,  -677,   581,  -677,    49,  -677,  -677,  -677,   572,
+     562,   624,  -677,  -677,   576,   195,   583,   173,  -677,  -677,
+     585,   562,  -677,  -677,  -677,  -677,  -677,  -677,   586,   616,
+      58,   589,  -677,   142,  -677,    62,    62,  -677,    62,   597,
+     598,   599,    62,    62,  -677,   600,  -677,    49,  -677,  -677,
+    -677,   601,   654,   584,  -677,  -677,  -677,   650,    62,  -677,
+    -677,    62,   605,   603,   606,  -677,  -677,  -677,  -677,   607,
+    -677,  -677,    49,  -677,  -677,  -677,  -677,  -677,   142,  -677,
+    -677,  -677,    30,  -677,   860,  1010,   111,  -677,  -677,  -677,
+      62,   653,    62,  -677,  -677,    62,   609,   820,   610,  -677,
+    -677,   154,   154,   154,   154,   154,   276,  -677,   608,    49,
+    -677,  -677,   611,   612,   615,  -677,  -677,   617,   620,  -677,
+    -677,  -677,   145,   355,   619,   122,   622,   614,   674,  -677,
+    -677,  -677,  -677,  -677,   623,    30,  -677,   629,   630,   636,
+     638,  -677,  -677,  -677,   645,   646,  -677,  -677,  -677,   145,
+     648,  -677,  -677,   584,    35,    35,    35,    35,    35,  -677,
+    -677,  -677,  -677,   142,  -677,  -677,   625,  -677,  -677,   111,
+     657,    35,    35,    35,    35,    35,  -677,    67,  -677,  -677,
+    -677,  -677,  -677,  -677,   644,   142,   649,  -677,  -677,   259,
+    -677,  -677,  -677,  -677,  -677,  -677,   142,    18,   142,  -677,
+    -677,  -677,   655,  -677,    49,  -677,    36,   355,   659,   664,
+    -677,  1010,    49,  -677,  -677,  -677,  -677,  -677,   651,    62,
+     660,  -677,  -677,   259,  -677
 };
 
 /* YYPGOTO[NTERM-NUM].  */
 static const yytype_int16 yypgoto[] =
 {
-    -578,  -578,  -293,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-     569,  -578,  -578,  -578,  -578,  -578,  -578,   502,   -71,  -578,
-    -578,  -167,  -578,    77,  -578,  -578,  -578,  -578,  -578,  -578,
-     343,   398,  -578,    33,  -578,  -578,  -578,   388,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -338,  -578,  -465,  -578,
-     192,  -578,     0,  -113,  -578,  -447,   -66,  -578,  -474,  -578,
-    -578,  -578,   146,  -278,  -578,    38,   -31,  -578,   555,  -578,
-    -578,    96,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -147,
-     -94,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -577,  -578,  -578,  -578,
-    -578,   -70,  -578,  -578,  -578,   -58,  -157,  -578,  -552,  -578,
-     188,  -578,  -578,  -578,   -21,  -578,   202,  -578,  -578,    48,
-    -578,  -578,  -578,  -578,   324,  -578,  -280,  -578,  -578,  -578,
-     333,   401,  -578,  -578,  -578,  -578,  -578,  -578,  -578,   125,
-     -76,  -352,  -394,  -166,   -75,  -578,  -578,  -578,   339,  -159,
-    -578,  -578,  -578,   345,   193,  -578,  -578,  -578,  -578,  -578,
-    -578,  -578,  -578,  -578,  -578,  -578,  -578,    84,  -578,  -578,
-    -578,  -578,  -229,  -578,  -578,  -497,  -578,  -578,   204,  -578,
-    -578,  -578,     6,  -578,   291,  -336,   262,    70,  -498,    51,
-     -11,  -578,  -179,  -135,  -119,  -117,     3,   -10
+    -677,  -677,  -339,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+     652,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,   513,
+     -83,  -677,  -677,  -191,  -677,   156,  -677,  -677,  -677,  -677,
+    -677,  -677,   198,   429,  -677,   -15,  -677,  -677,  -677,   396,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -182,  -677,  -545,  -677,
+     160,  -677,   -57,   -70,  -677,  -535,  -192,  -677,  -550,  -677,
+    -677,  -677,   108,  -278,  -677,   -26,   -94,  -677,   582,  -677,
+    -677,    47,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -155,
+     -62,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -676,  -677,
+    -677,  -677,  -677,  -148,  -677,  -677,  -677,  -134,  -193,  -677,
+    -649,  -677,   143,  -677,  -677,  -677,   -89,  -677,   161,  -677,
+    -677,   -14,  -677,  -677,  -677,  -677,  -677,  -677,   303,  -677,
+    -321,  -677,  -677,  -677,   315,   399,  -677,  -677,  -677,   443,
+    -677,  -677,  -677,    74,   -51,  -399,  -427,  -187,   -88,  -677,
+    -677,  -677,   326,  -180,  -677,  -677,  -677,   333,   453,  -677,
+    -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,  -677,
+    -677,  -677,  -677,    28,  -677,  -677,  -677,  -677,  -677,  -677,
+     126,  -677,  -677,  -579,  -677,  -677,   163,  -677,  -677,  -677,
+     -64,  -677,   262,  -359,   221,  -677,    12,  -571,    34,   -11,
+    -677,  -190,  -147,  -126,  -116,     0,   -10
 };
 
 /* YYTABLE[YYPACT[STATE-NUM]].  What to do in state STATE-NUM.  If
    positive, shift that token.  If negative, reduce the rule which
    number is the opposite.  If zero, do what YYDEFACT says.
    If YYTABLE_NINF, syntax error.  */
-#define YYTABLE_NINF -269
+#define YYTABLE_NINF -463
 static const yytype_int16 yytable[] =
 {
-      23,    23,    23,   219,   296,    30,   190,     9,   191,   471,
-     106,   216,   217,   218,   368,   121,   122,   369,    29,   447,
-      32,    53,   127,   381,    55,   304,   568,   381,   571,   306,
-     446,   311,   541,   549,    64,    65,   307,    67,   315,   200,
-      72,   204,   205,     6,   209,   532,    63,     6,   297,   123,
-     675,     1,   395,   396,   655,   123,   430,    75,    19,    20,
-      53,   420,   509,    76,   420,   420,   413,   123,   430,   476,
-     123,   418,    83,   485,   108,   516,   446,    94,   489,    19,
-      20,   446,    96,    97,    93,    16,   440,   400,   421,   110,
-     112,   494,   431,    19,    20,   426,   202,   494,   401,   420,
-     504,   186,   124,   446,     5,    59,   113,    42,   539,    69,
-     203,     6,   766,   530,    89,   422,   187,   547,   402,   432,
-     127,   569,   312,   442,   374,   649,    99,   653,   476,   670,
-     647,   195,   213,   197,   198,   215,    72,    72,    72,   386,
-     675,   638,   727,    94,    95,    19,    20,   758,    96,    97,
-     443,    60,   477,   189,    17,   273,   759,   278,   568,   697,
-      18,   516,   459,    19,    20,   462,   291,   268,   375,   464,
-     714,   446,   134,    72,   508,    94,    95,    19,    20,   478,
-      96,    97,    28,   387,   108,   555,   108,   323,   566,   376,
-     698,   377,    99,   699,   378,   100,   379,   641,    19,    20,
-      98,    94,    95,    19,    20,   139,    96,    97,   451,   301,
-     266,   306,   556,   311,   316,    33,    19,    20,   307,    35,
-     315,   302,   117,    41,    99,   134,   469,   100,    19,    20,
-     101,   381,   610,   642,   611,    43,    94,    66,    19,    20,
-     612,    96,    97,   613,    68,   614,   615,   406,    79,   118,
-      99,   324,   325,   100,   616,   327,   328,   329,   139,    81,
-     332,   333,   617,   446,    19,    20,    85,   618,   619,   773,
-     671,   354,    86,   134,   407,   672,   620,    19,    20,   673,
-      59,   573,   367,   574,   427,    99,   186,   301,   118,   575,
-     123,   430,   576,    72,    87,   577,   106,   484,   674,   302,
-      19,    20,   488,   578,   312,   384,   139,    90,    72,   384,
-      91,   579,    19,    20,    92,   641,   580,   581,   129,   269,
-     566,   134,   132,   199,   503,   582,   201,   301,   106,   206,
-     270,   210,   164,   337,   207,   338,   721,   271,   487,   302,
-     188,   208,   192,   491,   137,   272,   486,    28,    19,    20,
-     211,   490,   212,   756,   139,    25,    27,   134,   141,   199,
-     108,   736,   436,   381,   381,   506,   108,   267,   108,    19,
-      20,   279,    11,   505,   281,   282,   323,    12,   134,   284,
-     137,   106,   545,   286,   546,   780,   293,   294,   295,    13,
-     139,   299,   108,   600,   141,   601,   602,   123,    14,   326,
-     305,   202,   465,   356,   634,   310,   330,    19,    20,   722,
-     331,   139,   587,   340,   588,   203,   591,   335,   592,   344,
-     349,   594,    37,   595,    39,   492,   274,   351,   352,   598,
-     353,   599,   495,   355,    56,   497,    57,   275,    58,    19,
-      20,   358,   666,   359,   276,   108,   507,   364,   635,    18,
-     366,   625,   277,   626,   371,    19,    20,   101,   287,   751,
-     372,   133,    11,    11,   134,   690,   135,    12,    12,   288,
-     136,   373,   385,   390,   381,   389,   289,   399,   403,    13,
-      13,   525,   393,   770,   290,   529,   667,   137,    14,   138,
-      19,    20,   397,   405,   610,   408,   611,   139,   716,   140,
-     410,   141,   612,   448,   449,   613,   411,   614,   615,   691,
-     412,   414,   415,   384,   416,   417,   616,   554,   586,   419,
-     437,   438,   563,   439,   617,   441,   450,   458,   454,   618,
-     619,   456,    19,    20,   457,   693,   573,   694,   574,   461,
-     593,   463,   717,   467,   575,   466,   468,   576,   474,   473,
-     577,   475,   624,   482,   420,   499,   510,   512,   578,   606,
-     513,   516,   514,   628,   522,   629,   579,   519,   632,   524,
-     533,   580,   581,    72,   526,   627,   544,   200,   204,   205,
-     209,   764,   730,   537,   731,   543,   560,   561,   589,   774,
-     596,   590,    19,    20,   603,  -268,    44,   608,    45,   630,
-     659,   631,   660,   633,   637,   639,   664,    46,   646,   648,
-      47,    72,   658,   106,   651,   767,   661,   656,   662,   663,
-     683,   665,   685,   476,   586,   765,    48,   669,   767,   682,
-      49,   686,   707,   775,    72,   688,   689,   711,   106,   715,
-      84,   723,   739,   740,   741,   384,   384,   713,   718,   719,
-     706,   720,   708,    75,   710,   726,   624,   748,   749,   750,
-     725,   732,   729,   733,   734,   735,   737,    72,   743,    19,
-      20,   746,   106,   165,   752,   166,   754,   108,   763,   771,
-     758,   167,   779,   692,   168,   370,   777,   169,   170,   171,
-     542,   724,   597,   300,   742,   172,   173,   174,   214,   175,
-     176,   652,   108,   177,   106,   778,   178,   772,   179,   180,
-     745,   565,   181,   551,   182,   712,   460,   640,   453,   687,
-     455,   388,   452,   738,   498,   564,   695,     0,   110,   517,
-       0,     0,     0,     0,     0,     0,   108,     0,     0,     0,
-       0,     0,     0,     0,     0,     0,   753,     0,     0,     0,
-      72,     0,     0,     0,     0,   757,   384,   762,    72,     0,
-       0,     0,     0,   420,    19,    20,     0,     0,   108,   222,
-     223,   224,   225,   226,   227,   228,   229,   230,   231,   232,
-     233,   234,   235,   236,   237,   238,   239,   240,   241,   242,
-     243,   244,   245,   246,   247,   248,   249,   250,   251,   252,
-     253,   254,   255,   256,   257,   258,   259,   260,   261,   262,
-     263,    19,    20,     0,     0,   380,   222,   223,   224,   225,
-     226,   227,   228,   229,   230,   231,   232,   233,   234,   235,
-     236,   237,   238,   239,   240,   241,   242,   243,   244,   245,
-     246,   247,   248,   249,   250,   251,   252,   253,   254,   255,
-     256,   257,   258,   259,   260,   261,   262,   263,   220,     0,
-     221,     0,     0,   222,   223,   224,   225,   226,   227,   228,
-     229,   230,   231,   232,   233,   234,   235,   236,   237,   238,
-     239,   240,   241,   242,   243,   244,   245,   246,   247,   248,
-     249,   250,   251,   252,   253,   254,   255,   256,   257,   258,
-     259,   260,   261,   262,   263,    19,    20,     0,     0,     0,
-     222,   223,   224,   225,   226,   227,   228,   229,   230,   231,
-     232,   233,   234,   235,   236,   237,   238,   239,   240,   241,
-     242,   243,   244,   245,   246,   247,   248,   249,   250,   251,
-     252,   253,   254,   255,   256,   257,   258,   259,   260,   261,
-     262,   263
+      23,    23,    23,   114,     9,    30,   416,   238,   329,   205,
+     429,   235,   236,   237,   429,    29,   337,    32,   137,   206,
+     509,    55,   651,   339,    57,   344,   617,   608,   537,   648,
+     340,   625,   348,     6,    66,    67,    68,   767,    70,    71,
+     477,   743,    76,    65,    19,    20,   129,   130,   131,   132,
+     417,   330,     6,   477,    95,   508,    79,   477,   133,   492,
+     133,   452,    80,   542,    55,   633,     5,   125,   862,   219,
+      19,    20,   453,    89,   133,   492,   133,   863,   478,    61,
+     116,   215,   217,   220,   221,   222,   224,   101,   228,   447,
+     448,   583,   118,   120,   454,   606,   126,   204,   458,   121,
+     493,   870,   483,   465,   374,   508,   375,   479,   470,   201,
+     508,     1,   623,   475,   615,   508,   134,    73,   649,   792,
+     741,   202,   793,   137,   345,   564,   490,   459,    62,   494,
+     508,   737,   735,   760,   502,   726,   564,   767,   210,   825,
+     212,   213,   508,   729,   232,     6,   422,   234,    76,    76,
+      76,   102,   103,    19,    20,   334,   104,   105,   477,   542,
+     633,   434,    19,    20,    16,    19,    20,   295,   300,   335,
+     305,    17,   145,   648,   791,    18,   290,   106,   317,   133,
+     492,   324,   349,   504,   543,   634,    42,    28,    76,   423,
+      33,   102,   103,    19,    20,   582,   104,   105,    35,   116,
+      41,   116,   356,   107,   435,   288,   108,   151,    43,   109,
+      25,    27,   505,   544,   635,   424,   729,   535,    69,    72,
+     426,   102,   508,    19,    20,   425,   104,   105,   334,    84,
+     427,   102,   513,    19,    20,    87,   104,   105,   339,   334,
+     344,   646,   335,   107,    91,   340,   108,   348,    93,   357,
+     358,   359,   360,   335,   730,   362,   363,   364,   365,   366,
+      92,   429,   369,   370,    61,   102,   103,    19,    20,    96,
+     104,   105,   552,   107,    97,   139,   126,   556,    19,    20,
+      98,   551,   560,   107,    19,    20,   555,    99,   145,   100,
+     214,   559,   810,   142,   145,   176,   203,   568,   396,   207,
+     877,   226,   230,   231,   289,   306,   567,   308,   309,   579,
+     227,   311,   332,   149,   484,   415,    28,   107,   578,   201,
+     108,   312,   508,   151,    19,    20,    76,   153,   319,   151,
+      11,   114,    19,    20,   145,    12,   214,   326,   432,   345,
+     327,    76,   432,   328,    19,    20,   133,    13,   694,   343,
+     695,   696,   291,   338,    19,    20,   367,   697,    14,   149,
+     698,   361,   699,   700,   145,   292,   368,   114,   372,   151,
+     377,   701,   293,   153,   381,   702,   393,   386,    19,    20,
+     294,   703,   391,   819,   395,   646,   704,   705,   394,   219,
+      18,   397,   550,   398,   404,   706,   407,   554,   296,   151,
+     433,   406,   558,   220,    11,   429,   429,   498,   116,    12,
+     836,   297,   412,   414,   116,   553,   116,   566,   298,   109,
+     557,    13,   860,   419,   356,   561,   299,   420,   421,   577,
+     114,   451,    14,   682,   683,   437,   684,   685,   686,   438,
+     569,    19,    20,   440,   116,   653,   443,   654,   655,   621,
+     455,   531,   580,    37,   656,    39,   884,   657,   445,   622,
+     658,   449,   820,   457,   460,    58,   462,    59,   659,    60,
+     463,   464,   660,    19,    20,   722,   466,   467,   661,   562,
+     468,   669,   469,   662,   663,   673,   565,   471,   472,   510,
+     676,   670,   664,   301,   571,   674,   473,   474,   680,   476,
+     677,   487,   488,    19,    20,   581,   302,   116,   681,   489,
+     491,   499,   500,   303,   501,   503,   511,   756,   723,    19,
+      20,   304,   512,   313,   711,   143,   144,   516,    11,   145,
+     518,   146,   429,    12,   712,   147,   314,   519,    19,    20,
+     520,   522,   784,   315,   601,    13,   874,   525,   605,   532,
+     148,   316,   527,   529,   149,   533,   150,   534,   320,   855,
+     757,   539,   540,   541,   151,   521,   152,   523,   153,   477,
+     526,   321,   528,   548,   573,   592,   530,   584,   322,   812,
+     585,   598,   590,   587,   588,   785,   323,   589,   609,   432,
+     632,   619,    19,    20,   668,   643,   216,   218,   761,   762,
+     223,   225,   145,   229,   763,   595,   600,   602,   764,   613,
+     620,    19,    20,   675,   640,   653,   787,   654,   655,   641,
+     671,   672,   813,   765,   656,   678,   788,   657,   687,   766,
+     658,  -462,   710,   692,   725,   690,   727,   151,   659,   717,
+     718,   721,   660,   714,   715,   734,   716,   736,   661,   719,
+     720,   739,   713,   662,   663,    76,   744,   750,   751,   752,
+     755,   542,   775,   759,   780,   802,   782,   783,   807,   828,
+     809,   814,   815,   811,   868,   816,   824,   817,   821,   829,
+     818,   633,   878,   845,   747,   748,   823,   749,   827,   848,
+     831,   753,   754,   746,   114,   830,   832,    76,   833,   215,
+     217,   221,   222,   224,   228,   834,   835,   776,   837,   856,
+     779,   871,   668,   858,   862,   867,   881,   869,   875,   333,
+     883,   114,    76,   786,   871,   879,   418,    90,   822,   844,
+     679,   882,   618,   432,   432,   876,   740,   233,    79,   801,
+     847,   803,   645,   808,   806,   524,   710,   628,   728,   838,
+     517,   781,   436,   515,   593,   400,   789,   572,   514,    76,
+     644,   114,     0,   839,   840,   841,   842,   843,     0,     0,
+       0,   116,    19,    20,     0,     0,   177,     0,   178,   179,
+     850,   851,   852,   853,   854,   180,     0,     0,   181,     0,
+       0,   182,   183,   184,     0,   114,     0,     0,   116,   185,
+     186,   187,   188,   189,     0,   190,   191,     0,     0,   192,
+       0,     0,   193,     0,   194,   195,     0,     0,   196,     0,
+     197,     0,     0,   118,     0,     0,     0,     0,    19,    20,
+       0,     0,   694,     0,   695,   696,     0,     0,   116,     0,
+       0,   697,     0,     0,   698,   857,   699,   700,     0,     0,
+       0,     0,     0,     0,    76,   701,   861,     0,   866,   702,
+     432,     0,    76,     0,     0,   703,     0,   477,    19,    20,
+     704,   705,   116,   241,   242,   243,   244,   245,   246,   247,
+     248,   249,   250,   251,   252,   253,   254,   255,   256,   257,
+     258,   259,   260,   261,   262,   263,   264,   265,   266,   267,
+     268,   269,   270,   271,   272,   273,   274,   275,   276,   277,
+     278,   279,   280,   281,   282,   283,   284,   285,    19,    20,
+       0,     0,   428,   241,   242,   243,   244,   245,   246,   247,
+     248,   249,   250,   251,   252,   253,   254,   255,   256,   257,
+     258,   259,   260,   261,   262,   263,   264,   265,   266,   267,
+     268,   269,   270,   271,   272,   273,   274,   275,   276,   277,
+     278,   279,   280,   281,   282,   283,   284,   285,   239,     0,
+     240,     0,     0,   241,   242,   243,   244,   245,   246,   247,
+     248,   249,   250,   251,   252,   253,   254,   255,   256,   257,
+     258,   259,   260,   261,   262,   263,   264,   265,   266,   267,
+     268,   269,   270,   271,   272,   273,   274,   275,   276,   277,
+     278,   279,   280,   281,   282,   283,   284,   285,    19,    20,
+       0,     0,     0,   241,   242,   243,   244,   245,   246,   247,
+     248,   249,   250,   251,   252,   253,   254,   255,   256,   257,
+     258,   259,   260,   261,   262,   263,   264,   265,   266,   267,
+     268,   269,   270,   271,   272,   273,   274,   275,   276,   277,
+     278,   279,   280,   281,   282,   283,   284,   285,    19,    20,
+       0,     0,    44,     0,    45,    46,     0,     0,     0,     0,
+       0,     0,     0,     0,    47,     0,     0,    48,     0,     0,
+       0,     0,     0,     0,     0,     0,     0,     0,     0,    49,
+       0,     0,     0,     0,     0,    50,     0,     0,     0,    51
 };
 
 static const yytype_int16 yycheck[] =
 {
-      11,    12,    13,   150,   183,    15,   125,     4,   125,   403,
-      85,   146,   147,   148,   294,    91,    92,   295,    15,   371,
-      17,    32,    93,   316,    35,   192,   524,   320,   525,   195,
-     366,   197,   497,   507,    45,    46,   195,    48,   197,   133,
-      50,   135,   136,     3,   138,   492,    43,     3,   183,     6,
-     627,     4,   330,   331,   606,     6,     7,    54,     8,     9,
-      71,     7,   456,    60,     7,     7,   344,     6,     7,     7,
-       6,   349,    69,   411,    85,     7,   412,     6,   416,     8,
-       9,   417,    11,    12,    81,     8,   364,    18,    31,    86,
-      87,   427,    31,     8,     9,    31,    40,   433,    29,     7,
-     438,   112,    59,   439,     0,    12,    66,    30,    59,    65,
-      54,     3,    62,    59,    76,    58,   113,    59,    49,    58,
-     191,    59,   197,    31,   303,   599,    55,    59,     7,   626,
-     595,   128,   142,   130,   131,   145,   146,   147,   148,   318,
-     717,   588,   694,     6,     7,     8,     9,    47,    11,    12,
-      58,    58,    31,   115,    55,   166,    56,   168,   656,   657,
-       3,     7,   391,     8,     9,   394,   177,   164,   303,   398,
-      15,   507,    17,   183,   454,     6,     7,     8,     9,    58,
-      11,    12,    43,   318,   195,    31,   197,   198,   524,   308,
-       8,   308,    55,    11,   313,    58,   313,    20,     8,     9,
-      31,     6,     7,     8,     9,    50,    11,    12,   375,    32,
-     159,   377,    58,   379,    24,    12,     8,     9,   377,    60,
-     379,    44,    31,    57,    55,    17,    31,    58,     8,     9,
-      61,   524,    12,    56,    14,    56,     6,    57,     8,     9,
-      20,    11,    12,    23,    57,    25,    26,    22,    12,    58,
-      55,   200,   201,    58,    34,   204,   205,   206,    50,    58,
-     209,   210,    42,   599,     8,     9,    57,    47,    48,   767,
-      14,   282,    61,    17,    49,    19,    56,     8,     9,    23,
-      12,    12,   293,    14,   355,    55,   297,    32,    58,    20,
-       6,     7,    23,   303,    55,    26,   371,   410,    42,    44,
-       8,     9,   415,    34,   379,   316,    50,    57,   318,   320,
-      57,    42,     8,     9,    57,    20,    47,    48,    59,    27,
-     656,    17,    62,    19,   437,    56,   133,    32,   403,   136,
-      38,   138,    56,    58,    30,    60,   688,    45,   414,    44,
-      59,    37,    55,   419,    40,    53,   412,    43,     8,     9,
-      12,   417,    40,   747,    50,    12,    13,    17,    54,    19,
-     371,   713,   359,   656,   657,   441,   377,    58,   379,     8,
-       9,    57,    16,   439,    57,    57,   387,    21,    17,    57,
-      40,   456,   501,    57,   501,   779,    57,    57,    57,    33,
-      50,    59,   403,   550,    54,   552,   553,     6,    42,    40,
-      56,    40,   399,    61,   583,    59,    57,     8,     9,   689,
-      57,    50,   531,    59,   531,    54,   535,    60,   535,    57,
-      57,   540,    24,   540,    26,   422,    27,    12,    57,   548,
-      12,   548,   429,    57,    36,   432,    38,    38,    40,     8,
-       9,    57,   621,    61,    45,   456,   443,    57,   583,     3,
-      57,   570,    53,   570,    57,     8,     9,    61,    27,   737,
-      57,    14,    16,    16,    17,   644,    19,    21,    21,    38,
-      23,    57,    62,    60,   767,    58,    45,    57,    57,    33,
-      33,   478,    60,   763,    53,   482,   621,    40,    42,    42,
-       8,     9,    60,     7,    12,    57,    14,    50,   677,    52,
-      57,    54,    20,    11,    11,    23,    57,    25,    26,   644,
-      57,    57,    57,   524,    57,    57,    34,   514,   529,    57,
-      57,    57,   519,    57,    42,    57,    56,    18,    57,    47,
-      48,    57,     8,     9,    59,   654,    12,   654,    14,    18,
-     537,    18,   677,    58,    20,    57,    57,    23,    57,    59,
-      26,    57,   563,    55,     7,     7,    57,    57,    34,   556,
-      57,     7,    61,   574,     7,   576,    42,    55,   579,    64,
-      12,    47,    48,   583,    61,   572,    62,   671,   672,   673,
-     674,   760,   701,    55,   701,    63,    59,    61,    63,   768,
-       7,    62,     8,     9,    12,    64,    12,    57,    14,    57,
-     611,    57,   613,    57,    59,    12,   617,    23,    59,    59,
-      26,   621,   609,   688,    62,   762,    57,    64,    57,    57,
-     631,    57,   633,     7,   635,   760,    42,    59,   775,    12,
-      46,    56,    12,   768,   644,    57,    57,    56,   713,    62,
-      71,    56,   718,   719,   720,   656,   657,    57,    57,    57,
-     661,    57,   663,   650,   665,    59,   667,   733,   734,   735,
-      61,    63,    62,    57,    57,    57,    57,   677,    55,     8,
-       9,    31,   747,    12,    62,    14,    61,   688,    57,    56,
-      47,    20,    57,   650,    23,   297,    62,    26,    27,    28,
-     498,   691,   546,   191,   725,    34,    35,    36,   143,    38,
-      39,   605,   713,    42,   779,   775,    45,   765,    47,    48,
-     731,   523,    51,   511,    53,   667,   392,   592,   379,   635,
-     387,   320,   377,   717,   433,   521,   656,    -1,   725,   467,
-      -1,    -1,    -1,    -1,    -1,    -1,   747,    -1,    -1,    -1,
-      -1,    -1,    -1,    -1,    -1,    -1,   743,    -1,    -1,    -1,
-     760,    -1,    -1,    -1,    -1,   752,   767,   754,   768,    -1,
-      -1,    -1,    -1,     7,     8,     9,    -1,    -1,   779,    13,
-      14,    15,    16,    17,    18,    19,    20,    21,    22,    23,
-      24,    25,    26,    27,    28,    29,    30,    31,    32,    33,
-      34,    35,    36,    37,    38,    39,    40,    41,    42,    43,
-      44,    45,    46,    47,    48,    49,    50,    51,    52,    53,
-      54,     8,     9,    -1,    -1,    12,    13,    14,    15,    16,
-      17,    18,    19,    20,    21,    22,    23,    24,    25,    26,
-      27,    28,    29,    30,    31,    32,    33,    34,    35,    36,
-      37,    38,    39,    40,    41,    42,    43,    44,    45,    46,
-      47,    48,    49,    50,    51,    52,    53,    54,     8,    -1,
+      11,    12,    13,    91,     4,    15,   327,   162,   198,   135,
+     349,   158,   159,   160,   353,    15,   207,    17,   101,   135,
+     419,    32,   601,   210,    35,   212,   571,   562,   455,   600,
+     210,   581,   212,     3,    45,    46,    47,   713,    49,    50,
+       7,   690,    52,    43,     8,     9,    97,    98,    99,   100,
+     328,   198,     3,     7,    80,   414,    56,     7,     6,     7,
+       6,    19,    62,     7,    75,     7,     0,    32,    50,    43,
+       8,     9,    30,    73,     6,     7,     6,    59,    32,    12,
+      91,   143,   144,    57,   146,   147,   148,    87,   150,   367,
+     368,   518,    92,    93,    52,    62,    61,   123,    23,    69,
+      32,    65,    32,   381,    61,   464,    63,    61,   386,   120,
+     469,     4,    62,   391,    62,   474,    62,    68,    62,     8,
+      62,   121,    11,   206,   212,   484,   404,    52,    61,    61,
+     489,   681,   677,   712,   412,   670,   495,   813,   138,   788,
+     140,   141,   501,    21,   154,     3,   336,   157,   158,   159,
+     160,     6,     7,     8,     9,    33,    11,    12,     7,     7,
+       7,   351,     8,     9,     8,     8,     9,   178,   179,    47,
+     181,    58,    18,   744,   745,     3,   176,    32,   189,     6,
+       7,   192,    25,    32,    32,    32,    30,    46,   198,   336,
+      12,     6,     7,     8,     9,   516,    11,    12,    63,   210,
+      60,   212,   213,    58,   351,   171,    61,    53,    59,    64,
+      12,    13,    61,    61,    61,   341,    21,    32,    60,    60,
+     346,     6,   581,     8,     9,   341,    11,    12,    33,    12,
+     346,     6,   423,     8,     9,    61,    11,    12,   425,    33,
+     427,   600,    47,    58,    60,   425,    61,   427,    58,   215,
+     216,   217,   218,    47,    59,   221,   222,   223,   224,   225,
+      64,   600,   228,   229,    12,     6,     7,     8,     9,    60,
+      11,    12,   464,    58,    60,    62,    61,   469,     8,     9,
+      60,   463,   474,    58,     8,     9,   468,    60,    18,    60,
+      20,   473,    16,    65,    18,    59,    62,   489,   309,    58,
+     871,    31,    12,    43,    61,    60,   488,    60,    60,   501,
+      40,    60,    62,    43,   397,   326,    46,    58,   500,   330,
+      61,    60,   681,    53,     8,     9,   336,    57,    60,    53,
+      17,   419,     8,     9,    18,    22,    20,    60,   349,   427,
+      60,   351,   353,    60,     8,     9,     6,    34,    12,    62,
+      14,    15,    28,    59,     8,     9,    60,    21,    45,    43,
+      24,    43,    26,    27,    18,    41,    60,   455,    63,    53,
+      62,    35,    48,    57,    60,    39,    12,    60,     8,     9,
+      56,    45,    60,   782,    12,   744,    50,    51,    60,    43,
+       3,    60,   462,    64,    60,    59,    64,   467,    28,    53,
+      65,    60,   472,    57,    17,   744,   745,   407,   419,    22,
+     809,    41,    60,    60,   425,   466,   427,   487,    48,    64,
+     471,    34,   849,    60,   435,   476,    56,    60,    60,   499,
+     518,    60,    45,   626,   627,    61,   629,   630,   631,    63,
+     491,     8,     9,    63,   455,    12,    63,    14,    15,   575,
+      60,   451,   503,    24,    21,    26,   883,    24,    63,   575,
+      27,    63,   783,     7,    60,    36,    60,    38,    35,    40,
+      60,    60,    39,     8,     9,   665,    60,    60,    45,   479,
+      60,   607,    60,    50,    51,   611,   486,    60,    60,    11,
+     616,   607,    59,    28,   494,   611,    60,    60,   624,    60,
+     616,    60,    60,     8,     9,   505,    41,   518,   624,    60,
+      60,    60,    60,    48,    60,    60,    11,   707,   665,     8,
+       9,    56,    59,    28,   650,    14,    15,    60,    17,    18,
+      60,    20,   871,    22,   650,    24,    41,    62,     8,     9,
+      19,    19,   732,    48,   544,    34,   867,    19,   548,    60,
+      39,    56,    19,    19,    43,    61,    45,    60,    28,   837,
+     707,    62,    60,    60,    53,   439,    55,   441,    57,     7,
+     444,    41,   446,    58,     7,     7,   450,    60,    48,   769,
+      60,     7,    64,    60,    60,   732,    56,    60,    12,   600,
+     590,    66,     8,     9,   605,   595,   143,   144,    14,    15,
+     147,   148,    18,   150,    20,    58,    67,    64,    24,    58,
+      65,     8,     9,   613,    62,    12,   742,    14,    15,    64,
+      66,    65,   769,    39,    21,     7,   742,    24,    12,    45,
+      27,    67,   643,    60,    62,   635,    12,    53,    35,    60,
+      60,    60,    39,   654,   655,    62,   657,    62,    45,   660,
+     661,    65,   652,    50,    51,   665,    67,    60,    60,    60,
+      60,     7,    12,    62,    59,    12,    60,    60,    59,   795,
+      60,    60,    60,    65,   864,    60,    62,    60,    59,   795,
+      60,     7,   872,    58,   695,   696,    64,   698,    65,    32,
+      60,   702,   703,   693,   782,    66,    60,   707,    60,   761,
+     762,   763,   764,   765,   766,    60,    60,   718,    60,    65,
+     721,   866,   723,    64,    50,    60,    65,   864,    59,   206,
+      60,   809,   732,   738,   879,   872,   330,    75,   785,   823,
+     622,   879,   572,   744,   745,   869,   689,   155,   738,   750,
+     829,   752,   599,   757,   755,   442,   757,   586,   674,   813,
+     435,   723,   353,   427,   533,   312,   744,   495,   425,   769,
+     597,   849,    -1,   814,   815,   816,   817,   818,    -1,    -1,
+      -1,   782,     8,     9,    -1,    -1,    12,    -1,    14,    15,
+     831,   832,   833,   834,   835,    21,    -1,    -1,    24,    -1,
+      -1,    27,    28,    29,    -1,   883,    -1,    -1,   809,    35,
+      36,    37,    38,    39,    -1,    41,    42,    -1,    -1,    45,
+      -1,    -1,    48,    -1,    50,    51,    -1,    -1,    54,    -1,
+      56,    -1,    -1,   823,    -1,    -1,    -1,    -1,     8,     9,
+      -1,    -1,    12,    -1,    14,    15,    -1,    -1,   849,    -1,
+      -1,    21,    -1,    -1,    24,   845,    26,    27,    -1,    -1,
+      -1,    -1,    -1,    -1,   864,    35,   856,    -1,   858,    39,
+     871,    -1,   872,    -1,    -1,    45,    -1,     7,     8,     9,
+      50,    51,   883,    13,    14,    15,    16,    17,    18,    19,
+      20,    21,    22,    23,    24,    25,    26,    27,    28,    29,
+      30,    31,    32,    33,    34,    35,    36,    37,    38,    39,
+      40,    41,    42,    43,    44,    45,    46,    47,    48,    49,
+      50,    51,    52,    53,    54,    55,    56,    57,     8,     9,
+      -1,    -1,    12,    13,    14,    15,    16,    17,    18,    19,
+      20,    21,    22,    23,    24,    25,    26,    27,    28,    29,
+      30,    31,    32,    33,    34,    35,    36,    37,    38,    39,
+      40,    41,    42,    43,    44,    45,    46,    47,    48,    49,
+      50,    51,    52,    53,    54,    55,    56,    57,     8,    -1,
       10,    -1,    -1,    13,    14,    15,    16,    17,    18,    19,
       20,    21,    22,    23,    24,    25,    26,    27,    28,    29,
       30,    31,    32,    33,    34,    35,    36,    37,    38,    39,
       40,    41,    42,    43,    44,    45,    46,    47,    48,    49,
-      50,    51,    52,    53,    54,     8,     9,    -1,    -1,    -1,
-      13,    14,    15,    16,    17,    18,    19,    20,    21,    22,
-      23,    24,    25,    26,    27,    28,    29,    30,    31,    32,
-      33,    34,    35,    36,    37,    38,    39,    40,    41,    42,
-      43,    44,    45,    46,    47,    48,    49,    50,    51,    52,
-      53,    54
+      50,    51,    52,    53,    54,    55,    56,    57,     8,     9,
+      -1,    -1,    -1,    13,    14,    15,    16,    17,    18,    19,
+      20,    21,    22,    23,    24,    25,    26,    27,    28,    29,
+      30,    31,    32,    33,    34,    35,    36,    37,    38,    39,
+      40,    41,    42,    43,    44,    45,    46,    47,    48,    49,
+      50,    51,    52,    53,    54,    55,    56,    57,     8,     9,
+      -1,    -1,    12,    -1,    14,    15,    -1,    -1,    -1,    -1,
+      -1,    -1,    -1,    -1,    24,    -1,    -1,    27,    -1,    -1,
+      -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,    39,
+      -1,    -1,    -1,    -1,    -1,    45,    -1,    -1,    -1,    49
 };
 
 /* YYSTOS[STATE-NUM] -- The (internal number of the) accessing
    symbol of state STATE-NUM.  */
 static const yytype_uint16 yystos[] =
 {
-       0,     4,    68,    71,    72,     0,     3,    70,    73,   273,
-     274,    16,    21,    33,    42,    89,    90,    55,     3,     8,
-       9,    93,    97,   267,    91,    97,    95,    97,    43,   273,
-     274,    74,   273,    12,    98,    60,    94,    98,    92,    98,
-      96,    57,    90,    56,    12,    14,    23,    26,    42,    46,
-      75,    76,    77,   267,    99,   267,    98,    98,    98,    12,
-      58,   140,   142,   273,   267,   267,    57,   267,    57,    65,
-     269,   270,   274,    78,   100,   273,   273,    80,    79,    12,
-      81,    58,    82,   273,    77,    57,    61,    55,   141,   142,
-      57,    57,    57,   273,     6,     7,    11,    12,    31,    55,
-      58,    61,   203,   218,   219,   220,   221,   226,   267,   143,
-     273,   101,   273,    66,   271,   272,   273,    31,    58,   217,
-     221,   217,   217,     6,    59,    83,    84,    85,   227,    59,
-     222,   204,    62,    14,    17,    19,    23,    40,    42,    50,
-      52,    54,    90,   144,   145,   146,   151,   152,   153,   154,
-     155,   156,   157,   158,   161,   164,   169,   171,   173,   231,
-     232,   234,   235,   267,    56,    12,    14,    20,    23,    26,
-      27,    28,    34,    35,    36,    38,    39,    42,    45,    47,
-      48,    51,    53,   102,   103,   104,   267,   273,    59,   142,
-     271,   272,    55,    86,   228,   273,   223,   273,   273,    19,
-     157,   231,    40,    54,   157,   157,   231,    30,    37,   157,
-     231,    12,    40,   274,   145,   274,   270,   270,   270,   156,
-       8,    10,    13,    14,    15,    16,    17,    18,    19,    20,
-      21,    22,    23,    24,    25,    26,    27,    28,    29,    30,
-      31,    32,    33,    34,    35,    36,    37,    38,    39,    40,
-      41,    42,    43,    44,    45,    46,    47,    48,    49,    50,
-      51,    52,    53,    54,    69,   266,   266,    58,   273,    27,
-      38,    45,    53,   267,    27,    38,    45,    53,   267,    57,
-     110,    57,    57,   109,    57,   118,    57,    27,    38,    45,
-      53,   267,   114,    57,    57,    57,   269,   270,   105,    59,
-      84,    32,    44,    87,    88,    56,   220,   226,   229,   230,
-      59,   220,   221,   224,   225,   226,    24,   205,   206,   207,
-     209,   210,   211,   267,   266,   266,    40,   266,   266,   266,
-      57,    57,   266,   266,   147,    60,   159,    58,    60,   236,
-      59,   112,   120,   116,    57,   107,   111,   119,   115,    57,
-     106,    12,    57,    12,   267,    57,    61,   212,    57,    61,
-     136,   113,   121,   117,    57,   108,    57,   267,   203,   140,
-     104,    57,    57,    57,   269,   270,   271,   272,   271,   272,
-      12,    69,   208,   265,   267,    62,   269,   270,   208,    58,
-      60,   238,   162,    60,   237,   140,   140,    60,   239,    57,
-      18,    29,    49,    57,   201,     7,    22,    49,    57,   249,
-      57,    57,    57,   140,    57,    57,    57,    57,   140,    57,
-       7,    31,    58,   130,   132,   262,    31,    85,   122,   213,
-       7,    31,    58,    85,   123,   125,   273,    57,    57,    57,
-     140,    57,    31,    58,   133,   135,   262,   218,    11,    11,
-      56,    88,   230,   225,    57,   207,    57,    59,    18,   249,
-     201,    18,   249,    18,   249,   273,    57,    58,    57,    31,
-     202,   219,   160,    59,    57,    57,     7,    31,    58,   250,
-     252,   253,    55,   241,   130,   123,   133,   217,   130,   123,
-     133,   217,   273,   261,   262,   273,   126,   273,   261,     7,
-     137,   138,   139,   130,   123,   133,   217,   273,   203,   219,
-      57,   163,    57,    57,    61,   165,     7,   263,   172,    55,
-     193,   240,     7,   233,    64,   273,    61,   254,   255,   273,
-      59,   131,   132,    12,   214,   215,   216,    55,   127,    59,
-     124,   125,   127,    63,    62,   271,   272,    59,   134,   135,
-     166,   193,   167,   168,   273,    31,    58,   183,   185,   263,
-      59,    61,   187,   273,   255,   187,   262,   264,   265,    59,
-     251,   252,   256,    12,    14,    20,    23,    26,    34,    42,
-      47,    48,    56,   242,   243,   244,   267,   271,   272,    63,
-      62,   271,   272,   273,   271,   272,     7,   139,   271,   272,
-     183,   183,   183,    12,   148,   149,   273,   186,    57,   188,
-      12,    14,    20,    23,    25,    26,    34,    42,    47,    48,
-      56,   194,   195,   196,   267,   271,   272,   273,   267,   267,
-      57,    57,   267,    57,   269,   270,   245,    59,   132,    12,
-     216,    20,    56,    88,   128,   129,    59,   125,    59,   135,
-     150,    62,   148,    59,   184,   185,    64,   170,   273,   267,
-     267,    57,    57,    57,   267,    57,   269,   270,   197,    59,
-     252,    14,    19,    23,    42,   173,   257,   258,   259,   260,
-     247,   246,    12,   267,   248,   267,    56,   244,    57,    57,
-     269,   270,   100,   271,   272,   264,   174,   265,     8,    11,
-     189,   190,   191,   268,   199,   198,   267,    12,   267,   200,
-     267,    56,   196,    57,    15,    62,   269,   270,    57,    57,
-      57,   218,   203,    56,   129,    61,    59,   185,   175,    62,
-     271,   272,    63,    57,    57,    57,   218,    57,   259,   217,
-     217,   217,   143,    55,   180,   191,    31,   192,   217,   217,
-     217,   140,    62,   273,    61,   176,   219,   273,    47,    56,
-     181,   182,   273,    57,   269,   270,    62,   156,   177,   178,
-     203,    56,   182,   265,   269,   270,   179,    62,   178,    57,
-     219
+       0,     4,    71,    74,    75,     0,     3,    73,    76,   295,
+     296,    17,    22,    34,    45,    94,    95,    58,     3,     8,
+       9,    98,   102,   289,    96,   102,   100,   102,    46,   295,
+     296,    77,   295,    12,   103,    63,    99,   103,    97,   103,
+     101,    60,    95,    59,    12,    14,    15,    24,    27,    39,
+      45,    49,    78,    79,    80,   289,   104,   289,   103,   103,
+     103,    12,    61,   153,   155,   295,   289,   289,   289,    60,
+     289,   289,    60,    68,   291,   292,   296,    81,   105,   295,
+     295,    83,    85,    82,    12,    84,    86,    61,    87,   295,
+      80,    60,    64,    58,   154,   155,    60,    60,    60,    60,
+      60,   295,     6,     7,    11,    12,    32,    58,    61,    64,
+     220,   235,   236,   237,   238,   243,   289,   156,   295,   106,
+     295,    69,   293,   294,   295,    32,    61,   234,   238,   234,
+     234,   234,   234,     6,    62,    88,    89,    90,   244,    62,
+     239,   221,    65,    14,    15,    18,    20,    24,    39,    43,
+      45,    53,    55,    57,    95,   157,   158,   159,   164,   165,
+     166,   167,   168,   169,   170,   171,   174,   177,   184,   186,
+     188,   248,   249,   251,   252,   289,    59,    12,    14,    15,
+      21,    24,    27,    28,    29,    35,    36,    37,    38,    39,
+      41,    42,    45,    48,    50,    51,    54,    56,   107,   108,
+     109,   289,   295,    62,   155,   293,   294,    58,    91,   245,
+     295,   240,   295,   295,    20,   170,   248,   170,   248,    43,
+      57,   170,   170,   248,   170,   248,    31,    40,   170,   248,
+      12,    43,   296,   158,   296,   292,   292,   292,   169,     8,
+      10,    13,    14,    15,    16,    17,    18,    19,    20,    21,
+      22,    23,    24,    25,    26,    27,    28,    29,    30,    31,
+      32,    33,    34,    35,    36,    37,    38,    39,    40,    41,
+      42,    43,    44,    45,    46,    47,    48,    49,    50,    51,
+      52,    53,    54,    55,    56,    57,    72,   288,   288,    61,
+     295,    28,    41,    48,    56,   289,    28,    41,    48,    56,
+     289,    28,    41,    48,    56,   289,    60,   117,    60,    60,
+     116,    60,    60,    28,    41,    48,    56,   289,   129,    60,
+      28,    41,    48,    56,   289,   123,    60,    60,    60,   291,
+     292,   110,    62,    89,    33,    47,    92,    93,    59,   237,
+     243,   246,   247,    62,   237,   238,   241,   242,   243,    25,
+     222,   223,   224,   226,   227,   228,   289,   288,   288,   288,
+     288,    43,   288,   288,   288,   288,   288,    60,    60,   288,
+     288,   160,    63,   172,    61,    63,   253,    62,   119,   131,
+     125,    60,   112,   121,   133,   127,    60,   114,   118,   130,
+     124,    60,   111,    12,    60,    12,   289,    60,    64,   229,
+     229,   120,   132,   126,    60,   113,    60,    64,   149,   122,
+     134,   128,    60,   115,    60,   289,   220,   153,   109,    60,
+      60,    60,   291,   292,   293,   294,   293,   294,    12,    72,
+     225,   287,   289,    65,   291,   292,   225,    61,    63,   255,
+      63,   257,   175,    63,   254,    63,   256,   153,   153,    63,
+     258,    60,    19,    30,    52,    60,   218,     7,    23,    52,
+      60,   270,    60,    60,    60,   153,    60,    60,    60,    60,
+     153,    60,    60,    60,    60,   153,    60,     7,    32,    61,
+     143,   145,   283,    32,    90,   135,   230,    60,    60,    60,
+     153,    60,     7,    32,    61,    90,   136,   138,   295,    60,
+      60,    60,   153,    60,    32,    61,   146,   148,   283,   235,
+      11,    11,    59,    93,   247,   242,    60,   224,    60,    62,
+      19,   270,    19,   270,   218,    19,   270,    19,   270,    19,
+     270,   295,    60,    61,    60,    32,   219,   236,   173,    62,
+      60,    60,     7,    32,    61,   271,   273,   274,    58,   260,
+     143,   136,   146,   234,   143,   136,   146,   234,   143,   136,
+     146,   234,   295,   282,   283,   295,   143,   136,   146,   234,
+     139,   295,   282,     7,   150,   151,   152,   143,   136,   146,
+     234,   295,   220,   236,    60,    60,   176,    60,    60,    60,
+      64,   178,     7,   284,   187,    58,   208,   259,     7,   250,
+      67,   295,    64,   275,   276,   295,    62,   144,   145,    12,
+     231,   232,   233,    58,   140,    62,   137,   138,   140,    66,
+      65,   293,   294,    62,   147,   148,   179,   181,   208,   182,
+     180,   183,   295,     7,    32,    61,   198,   200,   284,   285,
+      62,    64,   202,   295,   276,   202,   283,   286,   287,    62,
+     272,   273,   277,    12,    14,    15,    21,    24,    27,    35,
+      39,    45,    50,    51,    59,   261,   262,   263,   289,   293,
+     294,    66,    65,   293,   294,   295,   293,   294,     7,   152,
+     293,   294,   198,   198,   198,   198,   198,    12,   161,   162,
+     295,   201,    60,   203,    12,    14,    15,    21,    24,    26,
+      27,    35,    39,    45,    50,    51,    59,   209,   210,   211,
+     289,   293,   294,   295,   289,   289,   289,    60,    60,   289,
+     289,    60,   291,   292,   264,    62,   145,    12,   233,    21,
+      59,    93,   141,   142,    62,   138,    62,   148,   163,    65,
+     161,    62,   199,   200,    67,   185,   295,   289,   289,   289,
+      60,    60,    60,   289,   289,    60,   291,   292,   212,    62,
+     273,    14,    15,    20,    24,    39,    45,   188,   278,   279,
+     280,   281,   266,   268,   265,    12,   289,   267,   269,   289,
+      59,   263,    60,    60,   291,   292,   105,   293,   294,   286,
+     189,   287,     8,    11,   204,   205,   206,   290,   214,   216,
+     213,   289,    12,   289,   215,   217,   289,    59,   211,    60,
+      16,    65,   291,   292,    60,    60,    60,    60,    60,   235,
+     220,    59,   142,    64,    62,   200,   190,    65,   293,   294,
+      66,    60,    60,    60,    60,    60,   235,    60,   280,   234,
+     234,   234,   234,   234,   156,    58,   195,   206,    32,   207,
+     234,   234,   234,   234,   234,   153,    65,   295,    64,   191,
+     236,   295,    50,    59,   196,   197,   295,    60,   291,   292,
+      65,   169,   192,   193,   220,    59,   197,   287,   291,   292,
+     194,    65,   193,    60,   236
 };
 
 #define yyerrok		(yyerrstatus = 0)
@@ -3350,10 +3473,10 @@ yyreduce:
   YY_REDUCE_PRINT (yyn);
   switch (yyn)
     {
-        case 46:
+        case 49:
 
 /* Line 1455 of yacc.c  */
-#line 1271 "pxr/usd/sdf/textFileFormat.yy"
+#line 1299 "pxr/usd/sdf/textFileFormat.yy"
     {
 
         // Store the names of the root prims.
@@ -3364,10 +3487,10 @@ yyreduce:
     ;}
     break;
 
-  case 47:
+  case 50:
 
 /* Line 1455 of yacc.c  */
-#line 1282 "pxr/usd/sdf/textFileFormat.yy"
+#line 1310 "pxr/usd/sdf/textFileFormat.yy"
     {
             _MatchMagicIdentifier((yyvsp[(1) - (1)]), context);
             context->nameChildrenStack.push_back(std::vector<TfToken>());
@@ -3379,10 +3502,10 @@ yyreduce:
         ;}
     break;
 
-  case 50:
+  case 53:
 
 /* Line 1455 of yacc.c  */
-#line 1295 "pxr/usd/sdf/textFileFormat.yy"
+#line 1323 "pxr/usd/sdf/textFileFormat.yy"
     {
             // Abort if error after layer metadata.
             ABORT_IF_ERROR(context->seenError);
@@ -3394,10 +3517,10 @@ yyreduce:
         ;}
     break;
 
-  case 56:
+  case 59:
 
 /* Line 1455 of yacc.c  */
-#line 1321 "pxr/usd/sdf/textFileFormat.yy"
+#line 1349 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Comment, 
@@ -3405,85 +3528,123 @@ yyreduce:
         ;}
     break;
 
-  case 57:
-
-/* Line 1455 of yacc.c  */
-#line 1326 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataStart((yyvsp[(1) - (1)]), SdfSpecTypePseudoRoot, context);
-        ;}
-    break;
-
-  case 58:
-
-/* Line 1455 of yacc.c  */
-#line 1328 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
-        ;}
-    break;
-
-  case 59:
-
-/* Line 1455 of yacc.c  */
-#line 1335 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
-            context->listOpType = SdfListOpTypeDeleted;
-        ;}
-    break;
-
   case 60:
 
 /* Line 1455 of yacc.c  */
-#line 1338 "pxr/usd/sdf/textFileFormat.yy"
+#line 1354 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+            _GenericMetadataStart((yyvsp[(1) - (1)]), SdfSpecTypePseudoRoot, context);
         ;}
     break;
 
   case 61:
 
 /* Line 1455 of yacc.c  */
-#line 1341 "pxr/usd/sdf/textFileFormat.yy"
+#line 1356 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
-            context->listOpType = SdfListOpTypeAdded;
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
         ;}
     break;
 
   case 62:
 
 /* Line 1455 of yacc.c  */
-#line 1344 "pxr/usd/sdf/textFileFormat.yy"
+#line 1363 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
+            context->listOpType = SdfListOpTypeDeleted;
         ;}
     break;
 
   case 63:
 
 /* Line 1455 of yacc.c  */
-#line 1347 "pxr/usd/sdf/textFileFormat.yy"
+#line 1366 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
-            context->listOpType = SdfListOpTypeOrdered;
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
         ;}
     break;
 
   case 64:
 
 /* Line 1455 of yacc.c  */
-#line 1350 "pxr/usd/sdf/textFileFormat.yy"
+#line 1369 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
+            context->listOpType = SdfListOpTypeAdded;
         ;}
     break;
 
   case 65:
 
 /* Line 1455 of yacc.c  */
-#line 1355 "pxr/usd/sdf/textFileFormat.yy"
+#line 1372 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+        ;}
+    break;
+
+  case 66:
+
+/* Line 1455 of yacc.c  */
+#line 1375 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
+            context->listOpType = SdfListOpTypePrepended;
+        ;}
+    break;
+
+  case 67:
+
+/* Line 1455 of yacc.c  */
+#line 1378 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+        ;}
+    break;
+
+  case 68:
+
+/* Line 1455 of yacc.c  */
+#line 1381 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
+            context->listOpType = SdfListOpTypeAppended;
+        ;}
+    break;
+
+  case 69:
+
+/* Line 1455 of yacc.c  */
+#line 1384 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+        ;}
+    break;
+
+  case 70:
+
+/* Line 1455 of yacc.c  */
+#line 1387 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePseudoRoot, context);
+            context->listOpType = SdfListOpTypeOrdered;
+        ;}
+    break;
+
+  case 71:
+
+/* Line 1455 of yacc.c  */
+#line 1390 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePseudoRoot, context);
+        ;}
+    break;
+
+  case 72:
+
+/* Line 1455 of yacc.c  */
+#line 1395 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Documentation, 
@@ -3491,10 +3652,10 @@ yyreduce:
         ;}
     break;
 
-  case 68:
+  case 75:
 
 /* Line 1455 of yacc.c  */
-#line 1367 "pxr/usd/sdf/textFileFormat.yy"
+#line 1407 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 SdfPath::AbsoluteRootPath(), SdfFieldKeys->SubLayers, 
@@ -3508,10 +3669,10 @@ yyreduce:
         ;}
     break;
 
-  case 71:
+  case 78:
 
 /* Line 1455 of yacc.c  */
-#line 1386 "pxr/usd/sdf/textFileFormat.yy"
+#line 1426 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->subLayerPaths.push_back(context->layerRefPath);
             context->subLayerOffsets.push_back(context->layerRefOffset);
@@ -3519,10 +3680,10 @@ yyreduce:
         ;}
     break;
 
-  case 72:
+  case 79:
 
 /* Line 1455 of yacc.c  */
-#line 1394 "pxr/usd/sdf/textFileFormat.yy"
+#line 1434 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->layerRefPath = (yyvsp[(1) - (1)]).Get<std::string>();
             context->layerRefOffset = SdfLayerOffset();
@@ -3530,90 +3691,90 @@ yyreduce:
         ;}
     break;
 
-  case 77:
+  case 84:
 
 /* Line 1455 of yacc.c  */
-#line 1412 "pxr/usd/sdf/textFileFormat.yy"
+#line 1452 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->layerRefOffset.SetOffset( (yyvsp[(3) - (3)]).Get<double>() );
             ABORT_IF_ERROR(context->seenError);
         ;}
     break;
 
-  case 78:
+  case 85:
 
 /* Line 1455 of yacc.c  */
-#line 1416 "pxr/usd/sdf/textFileFormat.yy"
+#line 1456 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->layerRefOffset.SetScale( (yyvsp[(3) - (3)]).Get<double>() );
             ABORT_IF_ERROR(context->seenError);
         ;}
     break;
 
-  case 81:
+  case 88:
 
 /* Line 1455 of yacc.c  */
-#line 1432 "pxr/usd/sdf/textFileFormat.yy"
+#line 1472 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->specifier = SdfSpecifierDef;
             context->typeName = TfToken();
         ;}
     break;
 
-  case 83:
+  case 90:
 
 /* Line 1455 of yacc.c  */
-#line 1436 "pxr/usd/sdf/textFileFormat.yy"
+#line 1476 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->specifier = SdfSpecifierDef;
             context->typeName = TfToken((yyvsp[(2) - (2)]).Get<std::string>());
         ;}
     break;
 
-  case 85:
+  case 92:
 
 /* Line 1455 of yacc.c  */
-#line 1440 "pxr/usd/sdf/textFileFormat.yy"
+#line 1480 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->specifier = SdfSpecifierClass;
             context->typeName = TfToken();
         ;}
     break;
 
-  case 87:
+  case 94:
 
 /* Line 1455 of yacc.c  */
-#line 1444 "pxr/usd/sdf/textFileFormat.yy"
+#line 1484 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->specifier = SdfSpecifierClass;
             context->typeName = TfToken((yyvsp[(2) - (2)]).Get<std::string>());
         ;}
     break;
 
-  case 89:
+  case 96:
 
 /* Line 1455 of yacc.c  */
-#line 1448 "pxr/usd/sdf/textFileFormat.yy"
+#line 1488 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->specifier = SdfSpecifierOver;
             context->typeName = TfToken();
         ;}
     break;
 
-  case 91:
+  case 98:
 
 /* Line 1455 of yacc.c  */
-#line 1452 "pxr/usd/sdf/textFileFormat.yy"
+#line 1492 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->specifier = SdfSpecifierOver;
             context->typeName = TfToken((yyvsp[(2) - (2)]).Get<std::string>());
         ;}
     break;
 
-  case 93:
+  case 100:
 
 /* Line 1455 of yacc.c  */
-#line 1456 "pxr/usd/sdf/textFileFormat.yy"
+#line 1496 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->PrimOrder, 
@@ -3622,30 +3783,30 @@ yyreduce:
         ;}
     break;
 
-  case 94:
+  case 101:
 
 /* Line 1455 of yacc.c  */
-#line 1466 "pxr/usd/sdf/textFileFormat.yy"
+#line 1506 "pxr/usd/sdf/textFileFormat.yy"
     { (yyval) = (yyvsp[(1) - (1)]); ;}
     break;
 
-  case 95:
+  case 102:
 
 /* Line 1455 of yacc.c  */
-#line 1467 "pxr/usd/sdf/textFileFormat.yy"
+#line 1507 "pxr/usd/sdf/textFileFormat.yy"
     { 
             (yyval) = std::string( (yyvsp[(1) - (3)]).Get<std::string>() + '.'
                     + (yyvsp[(3) - (3)]).Get<std::string>() ); 
         ;}
     break;
 
-  case 96:
+  case 103:
 
 /* Line 1455 of yacc.c  */
-#line 1474 "pxr/usd/sdf/textFileFormat.yy"
+#line 1514 "pxr/usd/sdf/textFileFormat.yy"
     {
             TfToken name((yyvsp[(1) - (1)]).Get<std::string>());
-            if (not SdfPath::IsValidIdentifier(name)) {
+            if (!SdfPath::IsValidIdentifier(name)) {
                 Err(context, "'%s' is not a valid prim name", name.GetText());
             }
             context->path = context->path.AppendChild(name);
@@ -3668,27 +3829,27 @@ yyreduce:
                 context->path, SdfFieldKeys->Specifier, 
                 context->specifier, context);
 
-            if (not context->typeName.IsEmpty())
+            if (!context->typeName.IsEmpty())
                 _SetField(
                     context->path, SdfFieldKeys->TypeName, 
                     context->typeName, context);
         ;}
     break;
 
-  case 97:
+  case 104:
 
 /* Line 1455 of yacc.c  */
-#line 1507 "pxr/usd/sdf/textFileFormat.yy"
+#line 1547 "pxr/usd/sdf/textFileFormat.yy"
     {
             // Store the names of our children
-            if (not context->nameChildrenStack.back().empty()) {
+            if (!context->nameChildrenStack.back().empty()) {
                 _SetField(
                     context->path, SdfChildrenKeys->PrimChildren,
                     context->nameChildrenStack.back(), context);
             }
 
             // Store the names of our properties, if there are any
-            if (not context->propertiesStack.back().empty()) {
+            if (!context->propertiesStack.back().empty()) {
                 _SetField(
                     context->path, SdfChildrenKeys->PropertyChildren,
                     context->propertiesStack.back(), context);
@@ -3703,10 +3864,10 @@ yyreduce:
         ;}
     break;
 
-  case 107:
+  case 114:
 
 /* Line 1455 of yacc.c  */
-#line 1555 "pxr/usd/sdf/textFileFormat.yy"
+#line 1595 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Comment, 
@@ -3714,85 +3875,123 @@ yyreduce:
         ;}
     break;
 
-  case 108:
-
-/* Line 1455 of yacc.c  */
-#line 1560 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataStart((yyvsp[(1) - (1)]), SdfSpecTypePrim, context);
-        ;}
-    break;
-
-  case 109:
-
-/* Line 1455 of yacc.c  */
-#line 1562 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataEnd(SdfSpecTypePrim, context);
-        ;}
-    break;
-
-  case 110:
-
-/* Line 1455 of yacc.c  */
-#line 1569 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
-            context->listOpType = SdfListOpTypeDeleted;
-        ;}
-    break;
-
-  case 111:
-
-/* Line 1455 of yacc.c  */
-#line 1572 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataEnd(SdfSpecTypePrim, context);
-        ;}
-    break;
-
-  case 112:
-
-/* Line 1455 of yacc.c  */
-#line 1575 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
-            context->listOpType = SdfListOpTypeAdded;
-        ;}
-    break;
-
-  case 113:
-
-/* Line 1455 of yacc.c  */
-#line 1578 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataEnd(SdfSpecTypePrim, context);
-        ;}
-    break;
-
-  case 114:
-
-/* Line 1455 of yacc.c  */
-#line 1581 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
-            context->listOpType = SdfListOpTypeOrdered;
-        ;}
-    break;
-
   case 115:
 
 /* Line 1455 of yacc.c  */
-#line 1584 "pxr/usd/sdf/textFileFormat.yy"
+#line 1600 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _GenericMetadataEnd(SdfSpecTypePrim, context);
+            _GenericMetadataStart((yyvsp[(1) - (1)]), SdfSpecTypePrim, context);
         ;}
     break;
 
   case 116:
 
 /* Line 1455 of yacc.c  */
-#line 1589 "pxr/usd/sdf/textFileFormat.yy"
+#line 1602 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        ;}
+    break;
+
+  case 117:
+
+/* Line 1455 of yacc.c  */
+#line 1609 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
+            context->listOpType = SdfListOpTypeDeleted;
+        ;}
+    break;
+
+  case 118:
+
+/* Line 1455 of yacc.c  */
+#line 1612 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        ;}
+    break;
+
+  case 119:
+
+/* Line 1455 of yacc.c  */
+#line 1615 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
+            context->listOpType = SdfListOpTypeAdded;
+        ;}
+    break;
+
+  case 120:
+
+/* Line 1455 of yacc.c  */
+#line 1618 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        ;}
+    break;
+
+  case 121:
+
+/* Line 1455 of yacc.c  */
+#line 1621 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
+            context->listOpType = SdfListOpTypePrepended;
+        ;}
+    break;
+
+  case 122:
+
+/* Line 1455 of yacc.c  */
+#line 1624 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        ;}
+    break;
+
+  case 123:
+
+/* Line 1455 of yacc.c  */
+#line 1627 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
+            context->listOpType = SdfListOpTypeAppended;
+        ;}
+    break;
+
+  case 124:
+
+/* Line 1455 of yacc.c  */
+#line 1630 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        ;}
+    break;
+
+  case 125:
+
+/* Line 1455 of yacc.c  */
+#line 1633 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypePrim, context);
+            context->listOpType = SdfListOpTypeOrdered;
+        ;}
+    break;
+
+  case 126:
+
+/* Line 1455 of yacc.c  */
+#line 1636 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypePrim, context);
+        ;}
+    break;
+
+  case 127:
+
+/* Line 1455 of yacc.c  */
+#line 1641 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Documentation, 
@@ -3800,10 +3999,10 @@ yyreduce:
         ;}
     break;
 
-  case 117:
+  case 128:
 
 /* Line 1455 of yacc.c  */
-#line 1596 "pxr/usd/sdf/textFileFormat.yy"
+#line 1648 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Kind, 
@@ -3811,10 +4010,10 @@ yyreduce:
         ;}
     break;
 
-  case 118:
+  case 129:
 
 /* Line 1455 of yacc.c  */
-#line 1603 "pxr/usd/sdf/textFileFormat.yy"
+#line 1655 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Permission, 
@@ -3823,20 +4022,20 @@ yyreduce:
         ;}
     break;
 
-  case 119:
+  case 130:
 
 /* Line 1455 of yacc.c  */
-#line 1611 "pxr/usd/sdf/textFileFormat.yy"
+#line 1663 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->layerRefPath = std::string();
             context->savedPath = SdfPath();
         ;}
     break;
 
-  case 120:
+  case 131:
 
 /* Line 1455 of yacc.c  */
-#line 1614 "pxr/usd/sdf/textFileFormat.yy"
+#line 1666 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Payload, 
@@ -3844,214 +4043,226 @@ yyreduce:
         ;}
     break;
 
-  case 121:
-
-/* Line 1455 of yacc.c  */
-#line 1620 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            context->inheritParsingTargetPaths.clear();
-        ;}
-    break;
-
-  case 122:
-
-/* Line 1455 of yacc.c  */
-#line 1622 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _PrimSetInheritListItems(SdfListOpTypeExplicit, context);
-        ;}
-    break;
-
-  case 123:
-
-/* Line 1455 of yacc.c  */
-#line 1625 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            context->inheritParsingTargetPaths.clear();
-        ;}
-    break;
-
-  case 124:
-
-/* Line 1455 of yacc.c  */
-#line 1627 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _PrimSetInheritListItems(SdfListOpTypeDeleted, context);
-        ;}
-    break;
-
-  case 125:
-
-/* Line 1455 of yacc.c  */
-#line 1630 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            context->inheritParsingTargetPaths.clear();
-        ;}
-    break;
-
-  case 126:
-
-/* Line 1455 of yacc.c  */
-#line 1632 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _PrimSetInheritListItems(SdfListOpTypeAdded, context);
-        ;}
-    break;
-
-  case 127:
-
-/* Line 1455 of yacc.c  */
-#line 1635 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            context->inheritParsingTargetPaths.clear();
-        ;}
-    break;
-
-  case 128:
-
-/* Line 1455 of yacc.c  */
-#line 1637 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _PrimSetInheritListItems(SdfListOpTypeOrdered, context);
-        ;}
-    break;
-
-  case 129:
-
-/* Line 1455 of yacc.c  */
-#line 1641 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            context->specializesParsingTargetPaths.clear();
-        ;}
-    break;
-
-  case 130:
-
-/* Line 1455 of yacc.c  */
-#line 1643 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            _PrimSetSpecializesListItems(SdfListOpTypeExplicit, context);
-        ;}
-    break;
-
-  case 131:
-
-/* Line 1455 of yacc.c  */
-#line 1646 "pxr/usd/sdf/textFileFormat.yy"
-    {
-            context->specializesParsingTargetPaths.clear();
-        ;}
-    break;
-
   case 132:
 
 /* Line 1455 of yacc.c  */
-#line 1648 "pxr/usd/sdf/textFileFormat.yy"
+#line 1672 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _PrimSetSpecializesListItems(SdfListOpTypeDeleted, context);
+            context->inheritParsingTargetPaths.clear();
         ;}
     break;
 
   case 133:
 
 /* Line 1455 of yacc.c  */
-#line 1651 "pxr/usd/sdf/textFileFormat.yy"
+#line 1674 "pxr/usd/sdf/textFileFormat.yy"
     {
-            context->specializesParsingTargetPaths.clear();
+            _PrimSetInheritListItems(SdfListOpTypeExplicit, context);
         ;}
     break;
 
   case 134:
 
 /* Line 1455 of yacc.c  */
-#line 1653 "pxr/usd/sdf/textFileFormat.yy"
+#line 1677 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _PrimSetSpecializesListItems(SdfListOpTypeAdded, context);
+            context->inheritParsingTargetPaths.clear();
         ;}
     break;
 
   case 135:
 
 /* Line 1455 of yacc.c  */
-#line 1656 "pxr/usd/sdf/textFileFormat.yy"
+#line 1679 "pxr/usd/sdf/textFileFormat.yy"
     {
-            context->specializesParsingTargetPaths.clear();
+            _PrimSetInheritListItems(SdfListOpTypeDeleted, context);
         ;}
     break;
 
   case 136:
 
 /* Line 1455 of yacc.c  */
-#line 1658 "pxr/usd/sdf/textFileFormat.yy"
+#line 1682 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _PrimSetSpecializesListItems(SdfListOpTypeOrdered, context);
+            context->inheritParsingTargetPaths.clear();
         ;}
     break;
 
   case 137:
 
 /* Line 1455 of yacc.c  */
-#line 1662 "pxr/usd/sdf/textFileFormat.yy"
+#line 1684 "pxr/usd/sdf/textFileFormat.yy"
     {
-            context->layerRefPath = std::string();
-            context->savedPath = SdfPath();
-            context->referenceParsingRefs.clear();
+            _PrimSetInheritListItems(SdfListOpTypeAdded, context);
         ;}
     break;
 
   case 138:
 
 /* Line 1455 of yacc.c  */
-#line 1666 "pxr/usd/sdf/textFileFormat.yy"
+#line 1687 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _PrimSetReferenceListItems(SdfListOpTypeExplicit, context);
+            context->inheritParsingTargetPaths.clear();
         ;}
     break;
 
   case 139:
 
 /* Line 1455 of yacc.c  */
-#line 1669 "pxr/usd/sdf/textFileFormat.yy"
+#line 1689 "pxr/usd/sdf/textFileFormat.yy"
     {
-            context->layerRefPath = std::string();
-            context->savedPath = SdfPath();
-            context->referenceParsingRefs.clear();
+            _PrimSetInheritListItems(SdfListOpTypePrepended, context);
         ;}
     break;
 
   case 140:
 
 /* Line 1455 of yacc.c  */
-#line 1673 "pxr/usd/sdf/textFileFormat.yy"
+#line 1692 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _PrimSetReferenceListItems(SdfListOpTypeDeleted, context);
+            context->inheritParsingTargetPaths.clear();
         ;}
     break;
 
   case 141:
 
 /* Line 1455 of yacc.c  */
-#line 1676 "pxr/usd/sdf/textFileFormat.yy"
+#line 1694 "pxr/usd/sdf/textFileFormat.yy"
     {
-            context->layerRefPath = std::string();
-            context->savedPath = SdfPath();
-            context->referenceParsingRefs.clear();
+            _PrimSetInheritListItems(SdfListOpTypeAppended, context);
         ;}
     break;
 
   case 142:
 
 /* Line 1455 of yacc.c  */
-#line 1680 "pxr/usd/sdf/textFileFormat.yy"
+#line 1697 "pxr/usd/sdf/textFileFormat.yy"
     {
-            _PrimSetReferenceListItems(SdfListOpTypeAdded, context);
+            context->inheritParsingTargetPaths.clear();
         ;}
     break;
 
   case 143:
 
 /* Line 1455 of yacc.c  */
-#line 1683 "pxr/usd/sdf/textFileFormat.yy"
+#line 1699 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetInheritListItems(SdfListOpTypeOrdered, context);
+        ;}
+    break;
+
+  case 144:
+
+/* Line 1455 of yacc.c  */
+#line 1703 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->specializesParsingTargetPaths.clear();
+        ;}
+    break;
+
+  case 145:
+
+/* Line 1455 of yacc.c  */
+#line 1705 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetSpecializesListItems(SdfListOpTypeExplicit, context);
+        ;}
+    break;
+
+  case 146:
+
+/* Line 1455 of yacc.c  */
+#line 1708 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->specializesParsingTargetPaths.clear();
+        ;}
+    break;
+
+  case 147:
+
+/* Line 1455 of yacc.c  */
+#line 1710 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetSpecializesListItems(SdfListOpTypeDeleted, context);
+        ;}
+    break;
+
+  case 148:
+
+/* Line 1455 of yacc.c  */
+#line 1713 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->specializesParsingTargetPaths.clear();
+        ;}
+    break;
+
+  case 149:
+
+/* Line 1455 of yacc.c  */
+#line 1715 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetSpecializesListItems(SdfListOpTypeAdded, context);
+        ;}
+    break;
+
+  case 150:
+
+/* Line 1455 of yacc.c  */
+#line 1718 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->specializesParsingTargetPaths.clear();
+        ;}
+    break;
+
+  case 151:
+
+/* Line 1455 of yacc.c  */
+#line 1720 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetSpecializesListItems(SdfListOpTypePrepended, context);
+        ;}
+    break;
+
+  case 152:
+
+/* Line 1455 of yacc.c  */
+#line 1723 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->specializesParsingTargetPaths.clear();
+        ;}
+    break;
+
+  case 153:
+
+/* Line 1455 of yacc.c  */
+#line 1725 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetSpecializesListItems(SdfListOpTypeAppended, context);
+        ;}
+    break;
+
+  case 154:
+
+/* Line 1455 of yacc.c  */
+#line 1728 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->specializesParsingTargetPaths.clear();
+        ;}
+    break;
+
+  case 155:
+
+/* Line 1455 of yacc.c  */
+#line 1730 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetSpecializesListItems(SdfListOpTypeOrdered, context);
+        ;}
+    break;
+
+  case 156:
+
+/* Line 1455 of yacc.c  */
+#line 1734 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->layerRefPath = std::string();
             context->savedPath = SdfPath();
@@ -4059,19 +4270,119 @@ yyreduce:
         ;}
     break;
 
-  case 144:
+  case 157:
 
 /* Line 1455 of yacc.c  */
-#line 1687 "pxr/usd/sdf/textFileFormat.yy"
+#line 1738 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetReferenceListItems(SdfListOpTypeExplicit, context);
+        ;}
+    break;
+
+  case 158:
+
+/* Line 1455 of yacc.c  */
+#line 1741 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->layerRefPath = std::string();
+            context->savedPath = SdfPath();
+            context->referenceParsingRefs.clear();
+        ;}
+    break;
+
+  case 159:
+
+/* Line 1455 of yacc.c  */
+#line 1745 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetReferenceListItems(SdfListOpTypeDeleted, context);
+        ;}
+    break;
+
+  case 160:
+
+/* Line 1455 of yacc.c  */
+#line 1748 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->layerRefPath = std::string();
+            context->savedPath = SdfPath();
+            context->referenceParsingRefs.clear();
+        ;}
+    break;
+
+  case 161:
+
+/* Line 1455 of yacc.c  */
+#line 1752 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetReferenceListItems(SdfListOpTypeAdded, context);
+        ;}
+    break;
+
+  case 162:
+
+/* Line 1455 of yacc.c  */
+#line 1755 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->layerRefPath = std::string();
+            context->savedPath = SdfPath();
+            context->referenceParsingRefs.clear();
+        ;}
+    break;
+
+  case 163:
+
+/* Line 1455 of yacc.c  */
+#line 1759 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetReferenceListItems(SdfListOpTypePrepended, context);
+        ;}
+    break;
+
+  case 164:
+
+/* Line 1455 of yacc.c  */
+#line 1762 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->layerRefPath = std::string();
+            context->savedPath = SdfPath();
+            context->referenceParsingRefs.clear();
+        ;}
+    break;
+
+  case 165:
+
+/* Line 1455 of yacc.c  */
+#line 1766 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetReferenceListItems(SdfListOpTypeAppended, context);
+        ;}
+    break;
+
+  case 166:
+
+/* Line 1455 of yacc.c  */
+#line 1769 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            context->layerRefPath = std::string();
+            context->savedPath = SdfPath();
+            context->referenceParsingRefs.clear();
+        ;}
+    break;
+
+  case 167:
+
+/* Line 1455 of yacc.c  */
+#line 1773 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimSetReferenceListItems(SdfListOpTypeOrdered, context);
         ;}
     break;
 
-  case 145:
+  case 168:
 
 /* Line 1455 of yacc.c  */
-#line 1692 "pxr/usd/sdf/textFileFormat.yy"
+#line 1778 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Relocates, 
@@ -4080,59 +4391,79 @@ yyreduce:
         ;}
     break;
 
-  case 146:
+  case 169:
 
 /* Line 1455 of yacc.c  */
-#line 1700 "pxr/usd/sdf/textFileFormat.yy"
+#line 1786 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimSetVariantSelection(context);
         ;}
     break;
 
-  case 147:
+  case 170:
 
 /* Line 1455 of yacc.c  */
-#line 1704 "pxr/usd/sdf/textFileFormat.yy"
+#line 1790 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimSetVariantSetNamesListItems(SdfListOpTypeExplicit, context); 
             context->nameVector.clear();
         ;}
     break;
 
-  case 148:
+  case 171:
 
 /* Line 1455 of yacc.c  */
-#line 1708 "pxr/usd/sdf/textFileFormat.yy"
+#line 1794 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimSetVariantSetNamesListItems(SdfListOpTypeDeleted, context);
             context->nameVector.clear();
         ;}
     break;
 
-  case 149:
+  case 172:
 
 /* Line 1455 of yacc.c  */
-#line 1712 "pxr/usd/sdf/textFileFormat.yy"
+#line 1798 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimSetVariantSetNamesListItems(SdfListOpTypeAdded, context);
             context->nameVector.clear();
         ;}
     break;
 
-  case 150:
+  case 173:
 
 /* Line 1455 of yacc.c  */
-#line 1716 "pxr/usd/sdf/textFileFormat.yy"
+#line 1802 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetVariantSetNamesListItems(SdfListOpTypePrepended, context);
+            context->nameVector.clear();
+        ;}
+    break;
+
+  case 174:
+
+/* Line 1455 of yacc.c  */
+#line 1806 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimSetVariantSetNamesListItems(SdfListOpTypeAppended, context);
+            context->nameVector.clear();
+        ;}
+    break;
+
+  case 175:
+
+/* Line 1455 of yacc.c  */
+#line 1810 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimSetVariantSetNamesListItems(SdfListOpTypeOrdered, context);
             context->nameVector.clear();
         ;}
     break;
 
-  case 151:
+  case 176:
 
 /* Line 1455 of yacc.c  */
-#line 1722 "pxr/usd/sdf/textFileFormat.yy"
+#line 1816 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->SymmetryFunction, 
@@ -4140,10 +4471,10 @@ yyreduce:
         ;}
     break;
 
-  case 152:
+  case 177:
 
 /* Line 1455 of yacc.c  */
-#line 1727 "pxr/usd/sdf/textFileFormat.yy"
+#line 1821 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->SymmetryFunction, 
@@ -4151,10 +4482,10 @@ yyreduce:
         ;}
     break;
 
-  case 153:
+  case 178:
 
 /* Line 1455 of yacc.c  */
-#line 1734 "pxr/usd/sdf/textFileFormat.yy"
+#line 1828 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->PrefixSubstitutions, 
@@ -4163,15 +4494,27 @@ yyreduce:
         ;}
     break;
 
-  case 162:
+  case 179:
 
 /* Line 1455 of yacc.c  */
-#line 1760 "pxr/usd/sdf/textFileFormat.yy"
+#line 1836 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _SetField(
+                context->path, SdfFieldKeys->SuffixSubstitutions, 
+                context->currentDictionaries[0], context);
+            context->currentDictionaries[0].clear();
+        ;}
+    break;
+
+  case 188:
+
+/* Line 1455 of yacc.c  */
+#line 1862 "pxr/usd/sdf/textFileFormat.yy"
     {
         if (context->layerRefPath.empty()) {
             Err(context, "Reference asset path must not be empty. If this "
                 "is intended to be an internal reference, remove the "
-                "'@@'.");
+                "'@' delimiters.");
         }
 
         SdfReference ref(context->layerRefPath,
@@ -4182,10 +4525,10 @@ yyreduce:
     ;}
     break;
 
-  case 163:
+  case 189:
 
 /* Line 1455 of yacc.c  */
-#line 1773 "pxr/usd/sdf/textFileFormat.yy"
+#line 1875 "pxr/usd/sdf/textFileFormat.yy"
     {
         // Internal references do not begin with an asset path so there's
         // no layer_ref rule, but we need to make sure we reset state the
@@ -4196,12 +4539,12 @@ yyreduce:
       ;}
     break;
 
-  case 164:
+  case 190:
 
 /* Line 1455 of yacc.c  */
-#line 1781 "pxr/usd/sdf/textFileFormat.yy"
+#line 1883 "pxr/usd/sdf/textFileFormat.yy"
     {
-        if (not (yyvsp[(1) - (3)]).Get<std::string>().empty()) {
+        if (!(yyvsp[(1) - (3)]).Get<std::string>().empty()) {
            _PathSetPrim((yyvsp[(1) - (3)]), context);
         }
         else {
@@ -4216,67 +4559,67 @@ yyreduce:
     ;}
     break;
 
-  case 178:
+  case 204:
 
 /* Line 1455 of yacc.c  */
-#line 1826 "pxr/usd/sdf/textFileFormat.yy"
+#line 1928 "pxr/usd/sdf/textFileFormat.yy"
     {
         _InheritAppendPath(context);
         ;}
     break;
 
-  case 185:
+  case 211:
 
 /* Line 1455 of yacc.c  */
-#line 1844 "pxr/usd/sdf/textFileFormat.yy"
+#line 1946 "pxr/usd/sdf/textFileFormat.yy"
     {
         _SpecializesAppendPath(context);
         ;}
     break;
 
-  case 191:
+  case 217:
 
 /* Line 1455 of yacc.c  */
-#line 1864 "pxr/usd/sdf/textFileFormat.yy"
+#line 1966 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelocatesAdd((yyvsp[(1) - (3)]), (yyvsp[(3) - (3)]), context);
         ;}
     break;
 
-  case 196:
+  case 222:
 
 /* Line 1455 of yacc.c  */
-#line 1880 "pxr/usd/sdf/textFileFormat.yy"
+#line 1982 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->nameVector.push_back(TfToken((yyvsp[(1) - (1)]).Get<std::string>()));
         ;}
     break;
 
-  case 201:
+  case 227:
 
 /* Line 1455 of yacc.c  */
-#line 1898 "pxr/usd/sdf/textFileFormat.yy"
+#line 2000 "pxr/usd/sdf/textFileFormat.yy"
     {;}
     break;
 
-  case 202:
+  case 228:
 
 /* Line 1455 of yacc.c  */
-#line 1899 "pxr/usd/sdf/textFileFormat.yy"
+#line 2001 "pxr/usd/sdf/textFileFormat.yy"
     {;}
     break;
 
-  case 203:
+  case 229:
 
 /* Line 1455 of yacc.c  */
-#line 1900 "pxr/usd/sdf/textFileFormat.yy"
+#line 2002 "pxr/usd/sdf/textFileFormat.yy"
     {;}
     break;
 
-  case 206:
+  case 232:
 
 /* Line 1455 of yacc.c  */
-#line 1906 "pxr/usd/sdf/textFileFormat.yy"
+#line 2008 "pxr/usd/sdf/textFileFormat.yy"
     {
         const std::string name = (yyvsp[(2) - (2)]).Get<std::string>();
         ERROR_IF_NOT_ALLOWED(context, SdfSchema::IsValidVariantIdentifier(name));
@@ -4288,17 +4631,17 @@ yyreduce:
     ;}
     break;
 
-  case 207:
+  case 233:
 
 /* Line 1455 of yacc.c  */
-#line 1914 "pxr/usd/sdf/textFileFormat.yy"
+#line 2016 "pxr/usd/sdf/textFileFormat.yy"
     {
 
         SdfPath variantSetPath = context->path;
         context->path = context->path.GetParentPath();
 
         // Create this VariantSetSpec if it does not already exist.
-        if (not _HasSpec(variantSetPath, context)) {
+        if (!_HasSpec(variantSetPath, context)) {
             _CreateSpec(variantSetPath, SdfSpecTypeVariantSet, context);
 
             // Add the name of this variant set to the VariantSets field
@@ -4317,10 +4660,10 @@ yyreduce:
     ;}
     break;
 
-  case 210:
+  case 236:
 
 /* Line 1455 of yacc.c  */
-#line 1945 "pxr/usd/sdf/textFileFormat.yy"
+#line 2047 "pxr/usd/sdf/textFileFormat.yy"
     {
         const std::string variantName = (yyvsp[(1) - (1)]).Get<std::string>();
         ERROR_IF_NOT_ALLOWED(
@@ -4344,18 +4687,18 @@ yyreduce:
     ;}
     break;
 
-  case 211:
+  case 237:
 
 /* Line 1455 of yacc.c  */
-#line 1965 "pxr/usd/sdf/textFileFormat.yy"
+#line 2067 "pxr/usd/sdf/textFileFormat.yy"
     {
         // Store the names of the prims and properties defined in this variant.
-        if (not context->nameChildrenStack.back().empty()) {
+        if (!context->nameChildrenStack.back().empty()) {
             _SetField(
                 context->path, SdfChildrenKeys->PrimChildren, 
                 context->nameChildrenStack.back(), context);
         }
-        if (not context->propertiesStack.back().empty()) {
+        if (!context->propertiesStack.back().empty()) {
             _SetField(
                 context->path, SdfChildrenKeys->PropertyChildren, 
                 context->propertiesStack.back(), context);
@@ -4370,10 +4713,10 @@ yyreduce:
     ;}
     break;
 
-  case 212:
+  case 238:
 
 /* Line 1455 of yacc.c  */
-#line 1988 "pxr/usd/sdf/textFileFormat.yy"
+#line 2090 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->PrimOrder, 
@@ -4382,10 +4725,10 @@ yyreduce:
         ;}
     break;
 
-  case 213:
+  case 239:
 
 /* Line 1455 of yacc.c  */
-#line 1997 "pxr/usd/sdf/textFileFormat.yy"
+#line 2099 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->PropertyOrder, 
@@ -4394,141 +4737,141 @@ yyreduce:
         ;}
     break;
 
-  case 216:
+  case 242:
 
 /* Line 1455 of yacc.c  */
-#line 2019 "pxr/usd/sdf/textFileFormat.yy"
+#line 2121 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->variability = VtValue(SdfVariabilityUniform);
     ;}
     break;
 
-  case 217:
+  case 243:
 
 /* Line 1455 of yacc.c  */
-#line 2022 "pxr/usd/sdf/textFileFormat.yy"
+#line 2124 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->variability = VtValue(SdfVariabilityConfig);
     ;}
     break;
 
-  case 218:
+  case 244:
 
 /* Line 1455 of yacc.c  */
-#line 2028 "pxr/usd/sdf/textFileFormat.yy"
+#line 2130 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->assoc = VtValue();
     ;}
     break;
 
-  case 219:
+  case 245:
 
 /* Line 1455 of yacc.c  */
-#line 2034 "pxr/usd/sdf/textFileFormat.yy"
+#line 2136 "pxr/usd/sdf/textFileFormat.yy"
     {
         _SetupValue((yyvsp[(1) - (1)]).Get<std::string>(), context);
     ;}
     break;
 
-  case 220:
+  case 246:
 
 /* Line 1455 of yacc.c  */
-#line 2037 "pxr/usd/sdf/textFileFormat.yy"
+#line 2139 "pxr/usd/sdf/textFileFormat.yy"
     {
         _SetupValue(std::string((yyvsp[(1) - (3)]).Get<std::string>() + "[]"), context);
     ;}
     break;
 
-  case 221:
+  case 247:
 
 /* Line 1455 of yacc.c  */
-#line 2043 "pxr/usd/sdf/textFileFormat.yy"
+#line 2145 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->variability = VtValue();
         context->custom = false;
     ;}
     break;
 
-  case 222:
+  case 248:
 
 /* Line 1455 of yacc.c  */
-#line 2047 "pxr/usd/sdf/textFileFormat.yy"
+#line 2149 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->custom = false;
     ;}
     break;
 
-  case 223:
+  case 249:
 
 /* Line 1455 of yacc.c  */
-#line 2053 "pxr/usd/sdf/textFileFormat.yy"
+#line 2155 "pxr/usd/sdf/textFileFormat.yy"
     {
         _PrimInitAttribute((yyvsp[(2) - (2)]), context);
 
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StartRecordingString();
         }
     ;}
     break;
 
-  case 224:
+  case 250:
 
 /* Line 1455 of yacc.c  */
-#line 2060 "pxr/usd/sdf/textFileFormat.yy"
+#line 2162 "pxr/usd/sdf/textFileFormat.yy"
     {
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StopRecordingString();
         }
     ;}
     break;
 
-  case 225:
+  case 251:
 
 /* Line 1455 of yacc.c  */
-#line 2065 "pxr/usd/sdf/textFileFormat.yy"
+#line 2167 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->path = context->path.GetParentPath();
     ;}
     break;
 
-  case 226:
+  case 252:
 
 /* Line 1455 of yacc.c  */
-#line 2071 "pxr/usd/sdf/textFileFormat.yy"
+#line 2173 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->custom = true;
         _PrimInitAttribute((yyvsp[(3) - (3)]), context);
 
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StartRecordingString();
         }
     ;}
     break;
 
-  case 227:
+  case 253:
 
 /* Line 1455 of yacc.c  */
-#line 2079 "pxr/usd/sdf/textFileFormat.yy"
+#line 2181 "pxr/usd/sdf/textFileFormat.yy"
     {
-        if (not context->values.valueTypeIsValid) {
+        if (!context->values.valueTypeIsValid) {
             context->values.StopRecordingString();
         }
     ;}
     break;
 
-  case 228:
+  case 254:
 
 /* Line 1455 of yacc.c  */
-#line 2084 "pxr/usd/sdf/textFileFormat.yy"
+#line 2186 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->path = context->path.GetParentPath();
     ;}
     break;
 
-  case 229:
+  case 255:
 
 /* Line 1455 of yacc.c  */
-#line 2090 "pxr/usd/sdf/textFileFormat.yy"
+#line 2192 "pxr/usd/sdf/textFileFormat.yy"
     {
         _PrimInitAttribute((yyvsp[(2) - (5)]), context);
         context->connParsingTargetPaths.clear();
@@ -4536,20 +4879,20 @@ yyreduce:
     ;}
     break;
 
-  case 230:
+  case 256:
 
 /* Line 1455 of yacc.c  */
-#line 2094 "pxr/usd/sdf/textFileFormat.yy"
+#line 2196 "pxr/usd/sdf/textFileFormat.yy"
     {
         _AttributeSetConnectionTargetsList(SdfListOpTypeExplicit, context);
         context->path = context->path.GetParentPath();
     ;}
     break;
 
-  case 231:
+  case 257:
 
 /* Line 1455 of yacc.c  */
-#line 2098 "pxr/usd/sdf/textFileFormat.yy"
+#line 2200 "pxr/usd/sdf/textFileFormat.yy"
     {
         _PrimInitAttribute((yyvsp[(3) - (6)]), context);
         context->connParsingTargetPaths.clear();
@@ -4557,20 +4900,62 @@ yyreduce:
     ;}
     break;
 
-  case 232:
+  case 258:
 
 /* Line 1455 of yacc.c  */
-#line 2102 "pxr/usd/sdf/textFileFormat.yy"
+#line 2204 "pxr/usd/sdf/textFileFormat.yy"
     {
         _AttributeSetConnectionTargetsList(SdfListOpTypeAdded, context);
         context->path = context->path.GetParentPath();
     ;}
     break;
 
-  case 233:
+  case 259:
 
 /* Line 1455 of yacc.c  */
-#line 2106 "pxr/usd/sdf/textFileFormat.yy"
+#line 2208 "pxr/usd/sdf/textFileFormat.yy"
+    {
+        _PrimInitAttribute((yyvsp[(3) - (6)]), context);
+        context->connParsingTargetPaths.clear();
+        context->connParsingAllowConnectionData = true;
+    ;}
+    break;
+
+  case 260:
+
+/* Line 1455 of yacc.c  */
+#line 2212 "pxr/usd/sdf/textFileFormat.yy"
+    {
+        _AttributeSetConnectionTargetsList(SdfListOpTypePrepended, context);
+        context->path = context->path.GetParentPath();
+    ;}
+    break;
+
+  case 261:
+
+/* Line 1455 of yacc.c  */
+#line 2216 "pxr/usd/sdf/textFileFormat.yy"
+    {
+        _PrimInitAttribute((yyvsp[(3) - (6)]), context);
+        context->connParsingTargetPaths.clear();
+        context->connParsingAllowConnectionData = true;
+    ;}
+    break;
+
+  case 262:
+
+/* Line 1455 of yacc.c  */
+#line 2220 "pxr/usd/sdf/textFileFormat.yy"
+    {
+        _AttributeSetConnectionTargetsList(SdfListOpTypeAppended, context);
+        context->path = context->path.GetParentPath();
+    ;}
+    break;
+
+  case 263:
+
+/* Line 1455 of yacc.c  */
+#line 2224 "pxr/usd/sdf/textFileFormat.yy"
     {
         _PrimInitAttribute((yyvsp[(3) - (6)]), context);
         context->connParsingTargetPaths.clear();
@@ -4578,20 +4963,20 @@ yyreduce:
     ;}
     break;
 
-  case 234:
+  case 264:
 
 /* Line 1455 of yacc.c  */
-#line 2110 "pxr/usd/sdf/textFileFormat.yy"
+#line 2228 "pxr/usd/sdf/textFileFormat.yy"
     {
         _AttributeSetConnectionTargetsList(SdfListOpTypeDeleted, context);
         context->path = context->path.GetParentPath();
     ;}
     break;
 
-  case 235:
+  case 265:
 
 /* Line 1455 of yacc.c  */
-#line 2114 "pxr/usd/sdf/textFileFormat.yy"
+#line 2232 "pxr/usd/sdf/textFileFormat.yy"
     {
         _PrimInitAttribute((yyvsp[(3) - (6)]), context);
         context->connParsingTargetPaths.clear();
@@ -4599,20 +4984,20 @@ yyreduce:
     ;}
     break;
 
-  case 236:
+  case 266:
 
 /* Line 1455 of yacc.c  */
-#line 2118 "pxr/usd/sdf/textFileFormat.yy"
+#line 2236 "pxr/usd/sdf/textFileFormat.yy"
     {
         _AttributeSetConnectionTargetsList(SdfListOpTypeOrdered, context);
         context->path = context->path.GetParentPath();
     ;}
     break;
 
-  case 237:
+  case 267:
 
 /* Line 1455 of yacc.c  */
-#line 2125 "pxr/usd/sdf/textFileFormat.yy"
+#line 2243 "pxr/usd/sdf/textFileFormat.yy"
     {
         _PrimInitAttribute((yyvsp[(2) - (8)]), context);
         context->mapperTarget = context->savedPath;
@@ -4620,10 +5005,10 @@ yyreduce:
     ;}
     break;
 
-  case 238:
+  case 268:
 
 /* Line 1455 of yacc.c  */
-#line 2130 "pxr/usd/sdf/textFileFormat.yy"
+#line 2248 "pxr/usd/sdf/textFileFormat.yy"
     {
         SdfPath targetPath = context->path.GetTargetPath();
         context->path = context->path.GetParentPath(); // pop mapper
@@ -4642,19 +5027,19 @@ yyreduce:
     ;}
     break;
 
-  case 239:
+  case 269:
 
 /* Line 1455 of yacc.c  */
-#line 2149 "pxr/usd/sdf/textFileFormat.yy"
+#line 2267 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimInitAttribute((yyvsp[(2) - (5)]), context);
         ;}
     break;
 
-  case 240:
+  case 270:
 
 /* Line 1455 of yacc.c  */
-#line 2152 "pxr/usd/sdf/textFileFormat.yy"
+#line 2270 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->TimeSamples,
@@ -4663,10 +5048,10 @@ yyreduce:
         ;}
     break;
 
-  case 246:
+  case 276:
 
 /* Line 1455 of yacc.c  */
-#line 2174 "pxr/usd/sdf/textFileFormat.yy"
+#line 2292 "pxr/usd/sdf/textFileFormat.yy"
     {
         const std::string mapperName((yyvsp[(1) - (1)]).Get<std::string>());
         if (_HasSpec(context->path, context)) {
@@ -4678,10 +5063,10 @@ yyreduce:
     ;}
     break;
 
-  case 250:
+  case 280:
 
 /* Line 1455 of yacc.c  */
-#line 2194 "pxr/usd/sdf/textFileFormat.yy"
+#line 2312 "pxr/usd/sdf/textFileFormat.yy"
     {
         _SetField(
             context->path, SdfChildrenKeys->MapperArgChildren, 
@@ -4690,10 +5075,10 @@ yyreduce:
     ;}
     break;
 
-  case 253:
+  case 283:
 
 /* Line 1455 of yacc.c  */
-#line 2208 "pxr/usd/sdf/textFileFormat.yy"
+#line 2326 "pxr/usd/sdf/textFileFormat.yy"
     {
             TfToken mapperParamName((yyvsp[(2) - (2)]).Get<std::string>());
             context->mapperArgsNameVector.push_back(mapperParamName);
@@ -4704,10 +5089,10 @@ yyreduce:
         ;}
     break;
 
-  case 254:
+  case 284:
 
 /* Line 1455 of yacc.c  */
-#line 2215 "pxr/usd/sdf/textFileFormat.yy"
+#line 2333 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->MapperArgValue, 
@@ -4716,10 +5101,10 @@ yyreduce:
         ;}
     break;
 
-  case 260:
+  case 290:
 
 /* Line 1455 of yacc.c  */
-#line 2235 "pxr/usd/sdf/textFileFormat.yy"
+#line 2353 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->SymmetryArgs, 
@@ -4728,28 +5113,28 @@ yyreduce:
         ;}
     break;
 
-  case 267:
+  case 297:
 
 /* Line 1455 of yacc.c  */
-#line 2256 "pxr/usd/sdf/textFileFormat.yy"
+#line 2374 "pxr/usd/sdf/textFileFormat.yy"
     {
             _AttributeAppendConnectionPath(context);
         ;}
     break;
 
-  case 268:
+  case 298:
 
 /* Line 1455 of yacc.c  */
-#line 2259 "pxr/usd/sdf/textFileFormat.yy"
+#line 2377 "pxr/usd/sdf/textFileFormat.yy"
     {
             _AttributeAppendConnectionPath(context);
         ;}
     break;
 
-  case 269:
+  case 299:
 
 /* Line 1455 of yacc.c  */
-#line 2261 "pxr/usd/sdf/textFileFormat.yy"
+#line 2379 "pxr/usd/sdf/textFileFormat.yy"
     {
             // XXX: See comment in relationship_target_and_opt_marker about
             //      markers in reorder/delete statements.
@@ -4759,7 +5144,7 @@ yyreduce:
 
                 // Create the connection spec object if one doesn't already
                 // exist to parent the marker data.
-                if (not _HasSpec(specPath, context)) {
+                if (!_HasSpec(specPath, context)) {
                     _CreateSpec(specPath, SdfSpecTypeConnection, context);
                 }
 
@@ -4769,37 +5154,37 @@ yyreduce:
         ;}
     break;
 
-  case 270:
+  case 300:
 
 /* Line 1455 of yacc.c  */
-#line 2285 "pxr/usd/sdf/textFileFormat.yy"
+#line 2403 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->timeSamples = SdfTimeSampleMap();
     ;}
     break;
 
-  case 276:
+  case 306:
 
 /* Line 1455 of yacc.c  */
-#line 2301 "pxr/usd/sdf/textFileFormat.yy"
+#line 2419 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->timeSampleTime = (yyvsp[(1) - (2)]).Get<double>();
     ;}
     break;
 
-  case 277:
+  case 307:
 
 /* Line 1455 of yacc.c  */
-#line 2304 "pxr/usd/sdf/textFileFormat.yy"
+#line 2422 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->timeSamples[ context->timeSampleTime ] = context->currentValue;
     ;}
     break;
 
-  case 278:
+  case 308:
 
 /* Line 1455 of yacc.c  */
-#line 2308 "pxr/usd/sdf/textFileFormat.yy"
+#line 2426 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->timeSampleTime = (yyvsp[(1) - (3)]).Get<double>();
         context->timeSamples[ context->timeSampleTime ] 
@@ -4807,10 +5192,10 @@ yyreduce:
     ;}
     break;
 
-  case 287:
+  case 317:
 
 /* Line 1455 of yacc.c  */
-#line 2338 "pxr/usd/sdf/textFileFormat.yy"
+#line 2456 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Comment,
@@ -4818,85 +5203,123 @@ yyreduce:
         ;}
     break;
 
-  case 288:
+  case 318:
 
 /* Line 1455 of yacc.c  */
-#line 2343 "pxr/usd/sdf/textFileFormat.yy"
+#line 2461 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(1) - (1)]), SdfSpecTypeAttribute, context);
         ;}
     break;
 
-  case 289:
+  case 319:
 
 /* Line 1455 of yacc.c  */
-#line 2345 "pxr/usd/sdf/textFileFormat.yy"
+#line 2463 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeAttribute, context);
         ;}
     break;
 
-  case 290:
+  case 320:
 
 /* Line 1455 of yacc.c  */
-#line 2352 "pxr/usd/sdf/textFileFormat.yy"
+#line 2470 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeAttribute, context);
             context->listOpType = SdfListOpTypeDeleted;
         ;}
     break;
 
-  case 291:
+  case 321:
 
 /* Line 1455 of yacc.c  */
-#line 2355 "pxr/usd/sdf/textFileFormat.yy"
+#line 2473 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeAttribute, context);
         ;}
     break;
 
-  case 292:
+  case 322:
 
 /* Line 1455 of yacc.c  */
-#line 2358 "pxr/usd/sdf/textFileFormat.yy"
+#line 2476 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeAttribute, context);
             context->listOpType = SdfListOpTypeAdded;
         ;}
     break;
 
-  case 293:
+  case 323:
 
 /* Line 1455 of yacc.c  */
-#line 2361 "pxr/usd/sdf/textFileFormat.yy"
+#line 2479 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeAttribute, context);
         ;}
     break;
 
-  case 294:
+  case 324:
 
 /* Line 1455 of yacc.c  */
-#line 2364 "pxr/usd/sdf/textFileFormat.yy"
+#line 2482 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeAttribute, context);
+            context->listOpType = SdfListOpTypePrepended;
+        ;}
+    break;
+
+  case 325:
+
+/* Line 1455 of yacc.c  */
+#line 2485 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypeAttribute, context);
+        ;}
+    break;
+
+  case 326:
+
+/* Line 1455 of yacc.c  */
+#line 2488 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeAttribute, context);
+            context->listOpType = SdfListOpTypeAppended;
+        ;}
+    break;
+
+  case 327:
+
+/* Line 1455 of yacc.c  */
+#line 2491 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypeAttribute, context);
+        ;}
+    break;
+
+  case 328:
+
+/* Line 1455 of yacc.c  */
+#line 2494 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeAttribute, context);
             context->listOpType = SdfListOpTypeOrdered;
         ;}
     break;
 
-  case 295:
+  case 329:
 
 /* Line 1455 of yacc.c  */
-#line 2367 "pxr/usd/sdf/textFileFormat.yy"
+#line 2497 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeAttribute, context);
         ;}
     break;
 
-  case 296:
+  case 330:
 
 /* Line 1455 of yacc.c  */
-#line 2372 "pxr/usd/sdf/textFileFormat.yy"
+#line 2502 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Documentation,
@@ -4904,10 +5327,10 @@ yyreduce:
         ;}
     break;
 
-  case 297:
+  case 331:
 
 /* Line 1455 of yacc.c  */
-#line 2379 "pxr/usd/sdf/textFileFormat.yy"
+#line 2509 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Permission,
@@ -4916,10 +5339,10 @@ yyreduce:
         ;}
     break;
 
-  case 298:
+  case 332:
 
 /* Line 1455 of yacc.c  */
-#line 2386 "pxr/usd/sdf/textFileFormat.yy"
+#line 2516 "pxr/usd/sdf/textFileFormat.yy"
     {
              _SetField(
                  context->path, SdfFieldKeys->DisplayUnit,
@@ -4928,10 +5351,10 @@ yyreduce:
         ;}
     break;
 
-  case 299:
+  case 333:
 
 /* Line 1455 of yacc.c  */
-#line 2394 "pxr/usd/sdf/textFileFormat.yy"
+#line 2524 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->SymmetryFunction,
@@ -4939,10 +5362,10 @@ yyreduce:
         ;}
     break;
 
-  case 300:
+  case 334:
 
 /* Line 1455 of yacc.c  */
-#line 2399 "pxr/usd/sdf/textFileFormat.yy"
+#line 2529 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->SymmetryFunction,
@@ -4950,10 +5373,10 @@ yyreduce:
         ;}
     break;
 
-  case 303:
+  case 337:
 
 /* Line 1455 of yacc.c  */
-#line 2412 "pxr/usd/sdf/textFileFormat.yy"
+#line 2542 "pxr/usd/sdf/textFileFormat.yy"
     {
         _SetField(
             context->path, SdfFieldKeys->Default,
@@ -4961,10 +5384,10 @@ yyreduce:
     ;}
     break;
 
-  case 304:
+  case 338:
 
 /* Line 1455 of yacc.c  */
-#line 2417 "pxr/usd/sdf/textFileFormat.yy"
+#line 2547 "pxr/usd/sdf/textFileFormat.yy"
     {
         _SetField(
             context->path, SdfFieldKeys->Default,
@@ -4972,82 +5395,82 @@ yyreduce:
     ;}
     break;
 
-  case 305:
+  case 339:
 
 /* Line 1455 of yacc.c  */
-#line 2429 "pxr/usd/sdf/textFileFormat.yy"
+#line 2559 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryBegin(context);
         ;}
     break;
 
-  case 306:
+  case 340:
 
 /* Line 1455 of yacc.c  */
-#line 2432 "pxr/usd/sdf/textFileFormat.yy"
+#line 2562 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryEnd(context);
         ;}
     break;
 
-  case 311:
+  case 345:
 
 /* Line 1455 of yacc.c  */
-#line 2448 "pxr/usd/sdf/textFileFormat.yy"
+#line 2578 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryInsertValue((yyvsp[(2) - (4)]), context);
         ;}
     break;
 
-  case 312:
+  case 346:
 
 /* Line 1455 of yacc.c  */
-#line 2451 "pxr/usd/sdf/textFileFormat.yy"
+#line 2581 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryInsertDictionary((yyvsp[(2) - (4)]), context);
         ;}
     break;
 
-  case 317:
+  case 351:
 
 /* Line 1455 of yacc.c  */
-#line 2469 "pxr/usd/sdf/textFileFormat.yy"
+#line 2599 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryInitScalarFactory((yyvsp[(1) - (1)]), context);
     ;}
     break;
 
-  case 318:
+  case 352:
 
 /* Line 1455 of yacc.c  */
-#line 2475 "pxr/usd/sdf/textFileFormat.yy"
+#line 2605 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryInitShapedFactory((yyvsp[(1) - (3)]), context);
     ;}
     break;
 
-  case 319:
+  case 353:
 
 /* Line 1455 of yacc.c  */
-#line 2485 "pxr/usd/sdf/textFileFormat.yy"
+#line 2615 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryBegin(context);
         ;}
     break;
 
-  case 320:
+  case 354:
 
 /* Line 1455 of yacc.c  */
-#line 2488 "pxr/usd/sdf/textFileFormat.yy"
+#line 2618 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryEnd(context);
         ;}
     break;
 
-  case 325:
+  case 359:
 
 /* Line 1455 of yacc.c  */
-#line 2504 "pxr/usd/sdf/textFileFormat.yy"
+#line 2634 "pxr/usd/sdf/textFileFormat.yy"
     {
             _DictionaryInitScalarFactory(Value(std::string("string")), context);
             _ValueAppendAtomic((yyvsp[(3) - (3)]), context);
@@ -5056,10 +5479,10 @@ yyreduce:
         ;}
     break;
 
-  case 326:
+  case 360:
 
 /* Line 1455 of yacc.c  */
-#line 2517 "pxr/usd/sdf/textFileFormat.yy"
+#line 2647 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->currentValue = VtValue();
         if (context->values.IsRecordingString()) {
@@ -5068,29 +5491,29 @@ yyreduce:
     ;}
     break;
 
-  case 327:
+  case 361:
 
 /* Line 1455 of yacc.c  */
-#line 2523 "pxr/usd/sdf/textFileFormat.yy"
+#line 2653 "pxr/usd/sdf/textFileFormat.yy"
     {
         _ValueSetList(context);
     ;}
     break;
 
-  case 328:
+  case 362:
 
 /* Line 1455 of yacc.c  */
-#line 2533 "pxr/usd/sdf/textFileFormat.yy"
+#line 2663 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->currentValue.Swap(context->currentDictionaries[0]);
             context->currentDictionaries[0].clear();
         ;}
     break;
 
-  case 330:
+  case 364:
 
 /* Line 1455 of yacc.c  */
-#line 2538 "pxr/usd/sdf/textFileFormat.yy"
+#line 2668 "pxr/usd/sdf/textFileFormat.yy"
     {
             // This is only here to allow 'None' metadata values for
             // an explicit list operation on an SdfListOp-valued field.
@@ -5103,37 +5526,37 @@ yyreduce:
     ;}
     break;
 
-  case 331:
+  case 365:
 
 /* Line 1455 of yacc.c  */
-#line 2551 "pxr/usd/sdf/textFileFormat.yy"
+#line 2681 "pxr/usd/sdf/textFileFormat.yy"
     {
             _ValueSetAtomic(context);
         ;}
     break;
 
-  case 332:
+  case 366:
 
 /* Line 1455 of yacc.c  */
-#line 2554 "pxr/usd/sdf/textFileFormat.yy"
+#line 2684 "pxr/usd/sdf/textFileFormat.yy"
     {
             _ValueSetTuple(context);
         ;}
     break;
 
-  case 333:
+  case 367:
 
 /* Line 1455 of yacc.c  */
-#line 2557 "pxr/usd/sdf/textFileFormat.yy"
+#line 2687 "pxr/usd/sdf/textFileFormat.yy"
     {
             _ValueSetList(context);
         ;}
     break;
 
-  case 334:
+  case 368:
 
 /* Line 1455 of yacc.c  */
-#line 2560 "pxr/usd/sdf/textFileFormat.yy"
+#line 2690 "pxr/usd/sdf/textFileFormat.yy"
     {
             // Set the recorded string on the ParserValueContext. Normally
             // 'values' is able to keep track of the parsed string, but in this
@@ -5147,37 +5570,37 @@ yyreduce:
         ;}
     break;
 
-  case 335:
+  case 369:
 
 /* Line 1455 of yacc.c  */
-#line 2571 "pxr/usd/sdf/textFileFormat.yy"
+#line 2701 "pxr/usd/sdf/textFileFormat.yy"
     {
             _ValueSetCurrentToSdfPath((yyvsp[(1) - (1)]), context);
         ;}
     break;
 
-  case 336:
+  case 370:
 
 /* Line 1455 of yacc.c  */
-#line 2577 "pxr/usd/sdf/textFileFormat.yy"
+#line 2707 "pxr/usd/sdf/textFileFormat.yy"
     {
             _ValueAppendAtomic((yyvsp[(1) - (1)]), context);
         ;}
     break;
 
-  case 337:
+  case 371:
 
 /* Line 1455 of yacc.c  */
-#line 2580 "pxr/usd/sdf/textFileFormat.yy"
+#line 2710 "pxr/usd/sdf/textFileFormat.yy"
     {
             _ValueAppendAtomic((yyvsp[(1) - (1)]), context);
         ;}
     break;
 
-  case 338:
+  case 372:
 
 /* Line 1455 of yacc.c  */
-#line 2583 "pxr/usd/sdf/textFileFormat.yy"
+#line 2713 "pxr/usd/sdf/textFileFormat.yy"
     {
             // The ParserValueContext needs identifiers to be stored as TfToken
             // instead of std::string to be able to distinguish between them.
@@ -5185,10 +5608,10 @@ yyreduce:
         ;}
     break;
 
-  case 339:
+  case 373:
 
 /* Line 1455 of yacc.c  */
-#line 2588 "pxr/usd/sdf/textFileFormat.yy"
+#line 2718 "pxr/usd/sdf/textFileFormat.yy"
     {
             // The ParserValueContext needs asset paths to be stored as
             // SdfAssetPath instead of std::string to be able to distinguish
@@ -5197,95 +5620,95 @@ yyreduce:
         ;}
     break;
 
-  case 340:
+  case 374:
 
 /* Line 1455 of yacc.c  */
-#line 2601 "pxr/usd/sdf/textFileFormat.yy"
+#line 2731 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->values.BeginList();
         ;}
     break;
 
-  case 341:
+  case 375:
 
 /* Line 1455 of yacc.c  */
-#line 2604 "pxr/usd/sdf/textFileFormat.yy"
+#line 2734 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->values.EndList();
         ;}
     break;
 
-  case 348:
+  case 382:
 
 /* Line 1455 of yacc.c  */
-#line 2629 "pxr/usd/sdf/textFileFormat.yy"
+#line 2759 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->values.BeginTuple();
         ;}
     break;
 
-  case 349:
+  case 383:
 
 /* Line 1455 of yacc.c  */
-#line 2631 "pxr/usd/sdf/textFileFormat.yy"
+#line 2761 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->values.EndTuple();
         ;}
     break;
 
-  case 355:
+  case 389:
 
 /* Line 1455 of yacc.c  */
-#line 2654 "pxr/usd/sdf/textFileFormat.yy"
+#line 2784 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->custom = false;
         context->variability = VtValue(SdfVariabilityUniform);
     ;}
     break;
 
-  case 356:
+  case 390:
 
 /* Line 1455 of yacc.c  */
-#line 2658 "pxr/usd/sdf/textFileFormat.yy"
+#line 2788 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->custom = true;
         context->variability = VtValue(SdfVariabilityUniform);
     ;}
     break;
 
-  case 357:
+  case 391:
 
 /* Line 1455 of yacc.c  */
-#line 2662 "pxr/usd/sdf/textFileFormat.yy"
+#line 2792 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->custom = true;
         context->variability = VtValue(SdfVariabilityVarying);
     ;}
     break;
 
-  case 358:
+  case 392:
 
 /* Line 1455 of yacc.c  */
-#line 2666 "pxr/usd/sdf/textFileFormat.yy"
+#line 2796 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->custom = false;
         context->variability = VtValue(SdfVariabilityVarying);
     ;}
     break;
 
-  case 359:
+  case 393:
 
 /* Line 1455 of yacc.c  */
-#line 2673 "pxr/usd/sdf/textFileFormat.yy"
+#line 2803 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimInitRelationship((yyvsp[(2) - (5)]), context); 
         ;}
     break;
 
-  case 360:
+  case 394:
 
 /* Line 1455 of yacc.c  */
-#line 2676 "pxr/usd/sdf/textFileFormat.yy"
+#line 2806 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->TimeSamples,
@@ -5294,10 +5717,10 @@ yyreduce:
         ;}
     break;
 
-  case 361:
+  case 395:
 
 /* Line 1455 of yacc.c  */
-#line 2685 "pxr/usd/sdf/textFileFormat.yy"
+#line 2815 "pxr/usd/sdf/textFileFormat.yy"
     { 
             _PrimInitRelationship((yyvsp[(2) - (6)]), context);
 
@@ -5312,88 +5735,128 @@ yyreduce:
         ;}
     break;
 
-  case 362:
+  case 396:
 
 /* Line 1455 of yacc.c  */
-#line 2700 "pxr/usd/sdf/textFileFormat.yy"
+#line 2830 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimInitRelationship((yyvsp[(2) - (2)]), context);
             context->relParsingAllowTargetData = true;
         ;}
     break;
 
-  case 363:
+  case 397:
 
 /* Line 1455 of yacc.c  */
-#line 2705 "pxr/usd/sdf/textFileFormat.yy"
+#line 2835 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelationshipSetTargetsList(SdfListOpTypeExplicit, context);
             _PrimEndRelationship(context);
         ;}
     break;
 
-  case 364:
+  case 398:
 
 /* Line 1455 of yacc.c  */
-#line 2710 "pxr/usd/sdf/textFileFormat.yy"
+#line 2840 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimInitRelationship((yyvsp[(3) - (3)]), context);
         ;}
     break;
 
-  case 365:
+  case 399:
 
 /* Line 1455 of yacc.c  */
-#line 2713 "pxr/usd/sdf/textFileFormat.yy"
+#line 2843 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelationshipSetTargetsList(SdfListOpTypeDeleted, context); 
             _PrimEndRelationship(context);
         ;}
     break;
 
-  case 366:
+  case 400:
 
 /* Line 1455 of yacc.c  */
-#line 2718 "pxr/usd/sdf/textFileFormat.yy"
+#line 2848 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimInitRelationship((yyvsp[(3) - (3)]), context);
             context->relParsingAllowTargetData = true;
         ;}
     break;
 
-  case 367:
+  case 401:
 
 /* Line 1455 of yacc.c  */
-#line 2722 "pxr/usd/sdf/textFileFormat.yy"
+#line 2852 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelationshipSetTargetsList(SdfListOpTypeAdded, context);
             _PrimEndRelationship(context);
         ;}
     break;
 
-  case 368:
+  case 402:
 
 /* Line 1455 of yacc.c  */
-#line 2727 "pxr/usd/sdf/textFileFormat.yy"
+#line 2856 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimInitRelationship((yyvsp[(3) - (3)]), context);
+            context->relParsingAllowTargetData = true;
+        ;}
+    break;
+
+  case 403:
+
+/* Line 1455 of yacc.c  */
+#line 2860 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _RelationshipSetTargetsList(SdfListOpTypePrepended, context);
+            _PrimEndRelationship(context);
+        ;}
+    break;
+
+  case 404:
+
+/* Line 1455 of yacc.c  */
+#line 2864 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PrimInitRelationship((yyvsp[(3) - (3)]), context);
+            context->relParsingAllowTargetData = true;
+        ;}
+    break;
+
+  case 405:
+
+/* Line 1455 of yacc.c  */
+#line 2868 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _RelationshipSetTargetsList(SdfListOpTypeAppended, context);
+            _PrimEndRelationship(context);
+        ;}
+    break;
+
+  case 406:
+
+/* Line 1455 of yacc.c  */
+#line 2873 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimInitRelationship((yyvsp[(3) - (3)]), context);
         ;}
     break;
 
-  case 369:
+  case 407:
 
 /* Line 1455 of yacc.c  */
-#line 2730 "pxr/usd/sdf/textFileFormat.yy"
+#line 2876 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelationshipSetTargetsList(SdfListOpTypeOrdered, context);
             _PrimEndRelationship(context);
         ;}
     break;
 
-  case 370:
+  case 408:
 
 /* Line 1455 of yacc.c  */
-#line 2735 "pxr/usd/sdf/textFileFormat.yy"
+#line 2881 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PrimInitRelationship((yyvsp[(2) - (5)]), context);
             context->relParsingAllowTargetData = true;
@@ -5403,10 +5866,10 @@ yyreduce:
         ;}
     break;
 
-  case 371:
+  case 409:
 
 /* Line 1455 of yacc.c  */
-#line 2742 "pxr/usd/sdf/textFileFormat.yy"
+#line 2888 "pxr/usd/sdf/textFileFormat.yy"
     {
             // This clause only defines relational attributes for a target,
             // it does not add to the relationship target list. However, we 
@@ -5416,10 +5879,10 @@ yyreduce:
         ;}
     break;
 
-  case 382:
+  case 420:
 
 /* Line 1455 of yacc.c  */
-#line 2771 "pxr/usd/sdf/textFileFormat.yy"
+#line 2917 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Comment,
@@ -5427,85 +5890,123 @@ yyreduce:
         ;}
     break;
 
-  case 383:
+  case 421:
 
 /* Line 1455 of yacc.c  */
-#line 2776 "pxr/usd/sdf/textFileFormat.yy"
+#line 2922 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(1) - (1)]), SdfSpecTypeRelationship, context);
         ;}
     break;
 
-  case 384:
+  case 422:
 
 /* Line 1455 of yacc.c  */
-#line 2778 "pxr/usd/sdf/textFileFormat.yy"
+#line 2924 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeRelationship, context);
         ;}
     break;
 
-  case 385:
+  case 423:
 
 /* Line 1455 of yacc.c  */
-#line 2785 "pxr/usd/sdf/textFileFormat.yy"
+#line 2931 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeRelationship, context);
             context->listOpType = SdfListOpTypeDeleted;
         ;}
     break;
 
-  case 386:
+  case 424:
 
 /* Line 1455 of yacc.c  */
-#line 2788 "pxr/usd/sdf/textFileFormat.yy"
+#line 2934 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeRelationship, context);
         ;}
     break;
 
-  case 387:
+  case 425:
 
 /* Line 1455 of yacc.c  */
-#line 2791 "pxr/usd/sdf/textFileFormat.yy"
+#line 2937 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeRelationship, context);
             context->listOpType = SdfListOpTypeAdded;
         ;}
     break;
 
-  case 388:
+  case 426:
 
 /* Line 1455 of yacc.c  */
-#line 2794 "pxr/usd/sdf/textFileFormat.yy"
+#line 2940 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeRelationship, context);
         ;}
     break;
 
-  case 389:
+  case 427:
 
 /* Line 1455 of yacc.c  */
-#line 2797 "pxr/usd/sdf/textFileFormat.yy"
+#line 2943 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeRelationship, context);
+            context->listOpType = SdfListOpTypePrepended;
+        ;}
+    break;
+
+  case 428:
+
+/* Line 1455 of yacc.c  */
+#line 2946 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypeRelationship, context);
+        ;}
+    break;
+
+  case 429:
+
+/* Line 1455 of yacc.c  */
+#line 2949 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeRelationship, context);
+            context->listOpType = SdfListOpTypeAppended;
+        ;}
+    break;
+
+  case 430:
+
+/* Line 1455 of yacc.c  */
+#line 2952 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _GenericMetadataEnd(SdfSpecTypeRelationship, context);
+        ;}
+    break;
+
+  case 431:
+
+/* Line 1455 of yacc.c  */
+#line 2955 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataStart((yyvsp[(2) - (2)]), SdfSpecTypeRelationship, context);
             context->listOpType = SdfListOpTypeOrdered;
         ;}
     break;
 
-  case 390:
+  case 432:
 
 /* Line 1455 of yacc.c  */
-#line 2800 "pxr/usd/sdf/textFileFormat.yy"
+#line 2958 "pxr/usd/sdf/textFileFormat.yy"
     {
             _GenericMetadataEnd(SdfSpecTypeRelationship, context);
         ;}
     break;
 
-  case 391:
+  case 433:
 
 /* Line 1455 of yacc.c  */
-#line 2805 "pxr/usd/sdf/textFileFormat.yy"
+#line 2963 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Documentation,
@@ -5513,10 +6014,10 @@ yyreduce:
         ;}
     break;
 
-  case 392:
+  case 434:
 
 /* Line 1455 of yacc.c  */
-#line 2812 "pxr/usd/sdf/textFileFormat.yy"
+#line 2970 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->Permission,
@@ -5525,10 +6026,10 @@ yyreduce:
         ;}
     break;
 
-  case 393:
+  case 435:
 
 /* Line 1455 of yacc.c  */
-#line 2820 "pxr/usd/sdf/textFileFormat.yy"
+#line 2978 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->SymmetryFunction,
@@ -5536,10 +6037,10 @@ yyreduce:
         ;}
     break;
 
-  case 394:
+  case 436:
 
 /* Line 1455 of yacc.c  */
-#line 2825 "pxr/usd/sdf/textFileFormat.yy"
+#line 2983 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->SymmetryFunction, 
@@ -5547,37 +6048,37 @@ yyreduce:
         ;}
     break;
 
-  case 398:
+  case 440:
 
 /* Line 1455 of yacc.c  */
-#line 2839 "pxr/usd/sdf/textFileFormat.yy"
+#line 2997 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->relParsingTargetPaths = SdfPathVector();
         ;}
     break;
 
-  case 399:
+  case 441:
 
 /* Line 1455 of yacc.c  */
-#line 2842 "pxr/usd/sdf/textFileFormat.yy"
+#line 3000 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->relParsingTargetPaths = SdfPathVector();
         ;}
     break;
 
-  case 404:
+  case 446:
 
 /* Line 1455 of yacc.c  */
-#line 2858 "pxr/usd/sdf/textFileFormat.yy"
+#line 3016 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelationshipAppendTargetPath((yyvsp[(1) - (1)]), context);
         ;}
     break;
 
-  case 405:
+  case 447:
 
 /* Line 1455 of yacc.c  */
-#line 2861 "pxr/usd/sdf/textFileFormat.yy"
+#line 3019 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelationshipAppendTargetPath((yyvsp[(1) - (3)]), context);
 
@@ -5602,10 +6103,10 @@ yyreduce:
         ;}
     break;
 
-  case 408:
+  case 450:
 
 /* Line 1455 of yacc.c  */
-#line 2891 "pxr/usd/sdf/textFileFormat.yy"
+#line 3049 "pxr/usd/sdf/textFileFormat.yy"
     {
             _RelationshipInitTarget(context->relParsingTargetPaths->back(), 
                                     context);
@@ -5614,7 +6115,7 @@ yyreduce:
 
             context->propertiesStack.push_back(std::vector<TfToken>());
 
-            if (not context->relParsingAllowTargetData) {
+            if (!context->relParsingAllowTargetData) {
                 Err(context, 
                     "Relational attributes cannot be specified in lists of "
                     "targets to be deleted or reordered");
@@ -5622,12 +6123,12 @@ yyreduce:
         ;}
     break;
 
-  case 409:
+  case 451:
 
 /* Line 1455 of yacc.c  */
-#line 2905 "pxr/usd/sdf/textFileFormat.yy"
+#line 3063 "pxr/usd/sdf/textFileFormat.yy"
     {
-        if (not context->propertiesStack.back().empty()) {
+        if (!context->propertiesStack.back().empty()) {
             _SetField(
                 context->path, SdfChildrenKeys->PropertyChildren, 
                 context->propertiesStack.back(), context);
@@ -5638,18 +6139,18 @@ yyreduce:
     ;}
     break;
 
-  case 414:
+  case 456:
 
 /* Line 1455 of yacc.c  */
-#line 2929 "pxr/usd/sdf/textFileFormat.yy"
+#line 3087 "pxr/usd/sdf/textFileFormat.yy"
     {
         ;}
     break;
 
-  case 416:
+  case 458:
 
 /* Line 1455 of yacc.c  */
-#line 2935 "pxr/usd/sdf/textFileFormat.yy"
+#line 3093 "pxr/usd/sdf/textFileFormat.yy"
     {
             _SetField(
                 context->path, SdfFieldKeys->PropertyOrder, 
@@ -5658,62 +6159,71 @@ yyreduce:
         ;}
     break;
 
-  case 417:
+  case 459:
 
 /* Line 1455 of yacc.c  */
-#line 2948 "pxr/usd/sdf/textFileFormat.yy"
+#line 3106 "pxr/usd/sdf/textFileFormat.yy"
     {
         context->savedPath = SdfPath();
     ;}
     break;
 
-  case 419:
+  case 461:
 
 /* Line 1455 of yacc.c  */
-#line 2955 "pxr/usd/sdf/textFileFormat.yy"
+#line 3113 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PathSetPrim((yyvsp[(1) - (1)]), context);
         ;}
     break;
 
-  case 420:
+  case 462:
 
 /* Line 1455 of yacc.c  */
-#line 2961 "pxr/usd/sdf/textFileFormat.yy"
+#line 3119 "pxr/usd/sdf/textFileFormat.yy"
     {
             _PathSetProperty((yyvsp[(1) - (1)]), context);
         ;}
     break;
 
-  case 421:
+  case 463:
 
 /* Line 1455 of yacc.c  */
-#line 2967 "pxr/usd/sdf/textFileFormat.yy"
+#line 3125 "pxr/usd/sdf/textFileFormat.yy"
+    {
+            _PathSetPrimOrPropertyScenePath((yyvsp[(1) - (1)]), context);
+        ;}
+    break;
+
+  case 464:
+
+/* Line 1455 of yacc.c  */
+#line 3131 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->marker = context->savedPath.GetString();
         ;}
     break;
 
-  case 422:
+  case 465:
 
 /* Line 1455 of yacc.c  */
-#line 2970 "pxr/usd/sdf/textFileFormat.yy"
+#line 3134 "pxr/usd/sdf/textFileFormat.yy"
     {
             context->marker = (yyvsp[(1) - (1)]).Get<std::string>();
         ;}
     break;
 
-  case 431:
+  case 474:
 
 /* Line 1455 of yacc.c  */
-#line 3002 "pxr/usd/sdf/textFileFormat.yy"
+#line 3166 "pxr/usd/sdf/textFileFormat.yy"
     { (yyval) = (yyvsp[(1) - (1)]); ;}
     break;
 
 
 
 /* Line 1455 of yacc.c  */
-#line 5694 "pxr/usd/sdf/textFileFormat.tab.cpp"
+#line 6204 "pxr/usd/sdf/textFileFormat.tab.cpp"
       default: break;
     }
   YY_SYMBOL_PRINT ("-> $$ =", yyr1[yyn], &yyval, &yyloc);
@@ -5925,7 +6435,7 @@ yyreturn:
 
 
 /* Line 1675 of yacc.c  */
-#line 3034 "pxr/usd/sdf/textFileFormat.yy"
+#line 3198 "pxr/usd/sdf/textFileFormat.yy"
 
 
 //--------------------------------------------------------------------
@@ -5936,7 +6446,7 @@ void textFileFormatYyerror(Sdf_TextParserContext *context, const char *msg)
     const std::string nextToken(textFileFormatYyget_text(context->scanner), 
                                 textFileFormatYyget_leng(context->scanner));
     const bool isNewlineToken = 
-        (nextToken.length() == 1 and nextToken[0] == '\n');
+        (nextToken.length() == 1 && nextToken[0] == '\n');
 
     int errLineNumber = context->menvaLineNo;
 
@@ -5956,7 +6466,7 @@ void textFileFormatYyerror(Sdf_TextParserContext *context, const char *msg)
         errLineNumber);
 
     // Append file context, if known.
-    if (not context->fileContext.empty()) {
+    if (!context->fileContext.empty()) {
         s += " in file " + context->fileContext;
     }
     s += "\n";
@@ -5979,125 +6489,82 @@ static void _ReportParseError(Sdf_TextParserContext *context,
 
 // Helper class for generating/managing the buffer used by flex.
 //
-// This class attempts to mmap the given file and pass that buffer along
-// for flex to use. Normally, flex reads data from a given file in blocks
-// of 8KB, which leads to O(n^2) behavior when trying to match strings that 
-// are over this size. Giving flex a pre-filled buffer avoids this behavior.
-struct Sdf_MMappedFlexBuffer : public boost::noncopyable
+// This simply reads the given file entirely into memory, padded as flex
+// requires, and passes it along. Normally, flex reads data from a given file in
+// blocks of 8KB, which leads to O(n^2) behavior when trying to match strings
+// that are over this size. Giving flex a pre-filled buffer avoids this
+// behavior.
+struct Sdf_MemoryFlexBuffer : public boost::noncopyable
 {
 public:
-    Sdf_MMappedFlexBuffer(FILE* file, const std::string& name, yyscan_t scanner);
-    ~Sdf_MMappedFlexBuffer();
+    Sdf_MemoryFlexBuffer(FILE* file, const std::string& name, yyscan_t scanner);
+    ~Sdf_MemoryFlexBuffer();
 
     yy_buffer_state *GetBuffer() { return _flexBuffer; }
 
 private:
     yy_buffer_state *_flexBuffer;
 
-    char*  _fileBuffer;
-    size_t _fileBufferSize;
-
-    char*  _paddingBuffer;
-    size_t _paddingBufferSize;
+    std::unique_ptr<char[]> _fileBuffer;
 
     yyscan_t _scanner;
 };
 
-Sdf_MMappedFlexBuffer::Sdf_MMappedFlexBuffer(FILE* file, 
+Sdf_MemoryFlexBuffer::Sdf_MemoryFlexBuffer(FILE* file, 
                                            const std::string& name,
                                            yyscan_t scanner)
-    : _flexBuffer(NULL),
-      _fileBuffer(NULL), _fileBufferSize(0), 
-      _paddingBuffer(NULL), _paddingBufferSize(0),
-      _scanner(scanner)
+    : _flexBuffer(nullptr)
+    , _scanner(scanner)
 {
-    const int fd = fileno(file);
-
-    struct stat fileInfo;
-    if (fstat(fd, &fileInfo) != 0) {
+    int64_t fileSize = ArchGetFileLength(file);
+    if (fileSize == -1) {
         TF_RUNTIME_ERROR("Error retrieving file size for @%s@: %s", 
-                         name.c_str(), strerror(errno));
+                         name.c_str(), ArchStrerror(errno).c_str());
         return;
     }
 
-    // flex requires 2 bytes of NUL padding at the end of any buffers it
-    // is given. We can't guarantee that the file we're mmap'ing will meet
-    // this requirement, so we're going to fake it.
-    const size_t paddingBytesRequired = 2;
+    // flex requires 2 bytes of null padding at the end of any buffers it is
+    // given.  We'll allocate a buffer with 2 padding bytes, then read the
+    // entire file in.
+    static const size_t paddingBytesRequired = 2;
 
-    // First, establish an mmap for the given file along with the additional
-    // padding bytes.
-    const size_t fileSize = fileInfo.st_size;
-    const size_t fileBufferSize = fileSize + paddingBytesRequired;
+    std::unique_ptr<char[]> buffer(new char[fileSize + paddingBytesRequired]);
 
-#if defined(ARCH_HAS_MMAP_MAP_POPULATE)
-    const int mmapFlags = MAP_PRIVATE | MAP_POPULATE;
-#else
-    const int mmapFlags = MAP_PRIVATE;
-#endif
-
-    char* fileSpace = static_cast<char*>(
-        mmap(NULL, fileBufferSize,
-             PROT_READ | PROT_WRITE, mmapFlags, fd, 0));
-    if (fileSpace == MAP_FAILED) {
-        TF_RUNTIME_ERROR("Failed to mmap file @%s@: %s", 
-                         name.c_str(), strerror(errno));
-        return;
-    }
-
-    _fileBuffer = fileSpace;
-    _fileBufferSize = fileBufferSize;
-
-    // Check whether the required padding fits in the last page used by the
-    // file mmap, or if it would spill over into the next page.
-    //
-    // If the padding fits in the last page, it's safe to access those bytes
-    // (even though they are outside the file).
-    // 
-    // If the padding spills over, accessing those bytes results in a SIGBUS.
-    // To avoid this, we try to create an anonymous mmap for the padding that 
-    // is contiguous with the last page. flex will see the two mmap'd space
-    // as one contiguous buffer and can then access the padding bytes safely.
-    const size_t pageSize = sysconf(_SC_PAGESIZE);
-    const size_t numberOfPagesUsedByFile = (fileSize - 1 + pageSize) / pageSize;
-    const size_t totalBytesUsedByPages = numberOfPagesUsedByFile * pageSize;
-
-    if (fileBufferSize > totalBytesUsedByPages) { 
-        char* paddingSpace = _fileBuffer + totalBytesUsedByPages;
-        if (mmap(paddingSpace, paddingBytesRequired, 
-                PROT_READ | PROT_WRITE, 
-                MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0) == MAP_FAILED) {
-
-            // If we can't create this mmap for some reason, fall back to
-            // creating a flex buffer by copying all of the data out of
-            // the mmap'd file.
-            TF_WARN("Can't mmap extra space for @%s@: %s. "
-                    "Copying entire layer into memory.", 
-                    name.c_str(), strerror(errno));
-            _flexBuffer = textFileFormatYy_scan_bytes(_fileBuffer, fileSize, _scanner);
-            return;
+    fseek(file, 0, SEEK_SET);
+    clearerr(file);
+    if (fread(buffer.get(), 1, fileSize, file) !=
+        static_cast<size_t>(fileSize)) {
+        if (feof(file)) {
+            TF_RUNTIME_ERROR("Failed to read file contents @%s@: "
+                             "premature end-of-file",
+                             name.c_str());
         }
-
-        _paddingBuffer = paddingSpace;
-        _paddingBufferSize = paddingBytesRequired;
+        else if (ferror(file)) {
+            TF_RUNTIME_ERROR("Failed to read file contents @%s@: "
+                             "an error occurred while reading",
+                             name.c_str());
+        }
+        else {
+            TF_RUNTIME_ERROR("Failed to read file contents @%s@: "
+                             "fread() reported incomplete read but "
+                             "neither feof() nor ferror() returned "
+                             "nonzero",
+                             name.c_str());
+        }
+        return;
     }
 
-    _flexBuffer = textFileFormatYy_scan_buffer(_fileBuffer, _fileBufferSize, _scanner);
+    // Set null padding.
+    memset(buffer.get() + fileSize, '\0', paddingBytesRequired);
+    _fileBuffer = std::move(buffer);
+    _flexBuffer = textFileFormatYy_scan_buffer(
+        _fileBuffer.get(), fileSize + paddingBytesRequired, _scanner);
 }
 
-Sdf_MMappedFlexBuffer::~Sdf_MMappedFlexBuffer()
+Sdf_MemoryFlexBuffer::~Sdf_MemoryFlexBuffer()
 {
-    if (_flexBuffer) {
+    if (_flexBuffer)
         textFileFormatYy_delete_buffer(_flexBuffer, _scanner);
-    }
-
-    if (_fileBuffer) {
-        munmap(_fileBuffer, _fileBufferSize);
-    }
-
-    if (_paddingBuffer) {
-        munmap(_paddingBuffer, _paddingBufferSize);
-    }
 }
 
 #ifdef SDF_PARSER_DEBUG_MODE
@@ -6137,7 +6604,8 @@ bool Sdf_ParseMenva(const std::string & fileContext, FILE *fin,
     context.magicIdentifierToken = magicId;
     context.versionString = versionString;
     context.metadataOnly = metadataOnly;
-    context.values.errorReporter = boost::bind(_ReportParseError, &context, _1);
+    context.values.errorReporter =
+        std::bind(_ReportParseError, &context, std::placeholders::_1);
 
     // Initialize the scanner, allowing it to be reentrant.
     textFileFormatYylex_init(&context.scanner);
@@ -6145,7 +6613,7 @@ bool Sdf_ParseMenva(const std::string & fileContext, FILE *fin,
 
     int status = -1;
     {
-        Sdf_MMappedFlexBuffer input(fin, fileContext, context.scanner);
+        Sdf_MemoryFlexBuffer input(fin, fileContext, context.scanner);
         yy_buffer_state *buf = input.GetBuffer();
 
         // Continue parsing if we have a valid input buffer. If there 
@@ -6186,7 +6654,8 @@ bool Sdf_ParseMenvaFromString(const std::string & menvaString,
     context.data = data;
     context.magicIdentifierToken = magicId;
     context.versionString = versionString;
-    context.values.errorReporter = boost::bind(_ReportParseError, &context, _1);
+    context.values.errorReporter =
+        std::bind(_ReportParseError, &context, std::placeholders::_1);
 
     // Initialize the scanner, allowing it to be reentrant.
     textFileFormatYylex_init(&context.scanner);

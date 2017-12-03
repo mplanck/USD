@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdKatana/usdInPluginRegistry.h"
 
 #include "pxr/usd/kind/registry.h"
@@ -28,6 +29,13 @@
 
 #include "pxr/base/plug/plugin.h"
 #include "pxr/base/plug/registry.h"
+
+#include <FnLogging/FnLogging.h>
+
+FnLogSetup("UsdInPluginRegistry");
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 typedef std::map<std::string, std::string> _UsdTypeRegistry;
 static _UsdTypeRegistry _usdTypeReg;
@@ -121,11 +129,17 @@ PxrUsdKatanaUsdInPluginRegistry::_DoFindKind(
         const _KindRegistry& reg)
 {
     // can cache this if it becomes an issue.
-    for (TfToken currKind = kind;
-            not currKind.IsEmpty();
-            currKind = KindRegistry::GetBaseKind(currKind)) {
+    TfToken currKind = kind;
+    while (!currKind.IsEmpty()) {
         if (TfMapLookup(reg, currKind, opName)) {
             return true;
+        }
+        if (KindRegistry::HasKind(currKind)) {
+            currKind = KindRegistry::GetBaseKind(currKind);
+        }
+        else {
+            FnLogWarn(TfStringPrintf("Unknown kind: '%s'", currKind.GetText()));
+            return false;
         }
     }
 
@@ -149,3 +163,93 @@ PxrUsdKatanaUsdInPluginRegistry::FindKindForSite(
 {
     return _DoFindKind(kind, opName, _kindExtReg);
 }
+
+typedef std::map<std::string, PxrUsdKatanaUsdInPluginRegistry::OpDirectExecFnc>
+        _OpDirectExecFncTable;
+
+static _OpDirectExecFncTable _opDirectExecFncTable;
+
+void PxrUsdKatanaUsdInPluginRegistry::RegisterOpDirectExecFnc(
+       const std::string& opName,
+       OpDirectExecFnc fnc)
+{
+    _opDirectExecFncTable[opName] = fnc;
+}
+    
+void PxrUsdKatanaUsdInPluginRegistry::ExecuteOpDirectExecFnc(
+        const std::string& opName,
+        const PxrUsdKatanaUsdInPrivateData& privateData,
+        FnKat::GroupAttribute opArgs,
+        FnKat::GeolibCookInterface& interface)
+{
+    _OpDirectExecFncTable::iterator I = _opDirectExecFncTable.find(opName);
+    
+    if (I != _opDirectExecFncTable.end())
+    {
+        (*((*I).second))(privateData, opArgs, interface);
+    }
+}
+
+
+typedef std::vector<PxrUsdKatanaUsdInPluginRegistry::LightListFnc>
+        _LightListFncList;
+static _LightListFncList _lightListFncList;
+
+
+void
+PxrUsdKatanaUsdInPluginRegistry::RegisterLightListFnc(LightListFnc fnc)
+{
+    _lightListFncList.push_back(fnc);
+}
+
+void
+PxrUsdKatanaUsdInPluginRegistry::ExecuteLightListFncs(
+        PxrUsdKatanaUtilsLightListAccess& lightList)
+{
+    for (auto i : _lightListFncList)
+    {
+        (*i)(lightList);
+    }
+}
+
+
+typedef std::vector<PxrUsdKatanaUsdInPluginRegistry::OpDirectExecFnc>
+        _LocationDecoratorFncList;
+
+static _LocationDecoratorFncList _locationDecoratorFncList;
+
+
+void
+PxrUsdKatanaUsdInPluginRegistry::RegisterLocationDecoratorOp(
+        const std::string& opName)
+{
+    _OpDirectExecFncTable::iterator I = _opDirectExecFncTable.find(opName);
+    
+    if (I != _opDirectExecFncTable.end())
+    {
+        _locationDecoratorFncList.push_back((*I).second);
+    }
+    
+}
+
+FnKat::GroupAttribute
+PxrUsdKatanaUsdInPluginRegistry::ExecuteLocationDecoratorOps(
+        const PxrUsdKatanaUsdInPrivateData& privateData,
+        FnKat::GroupAttribute opArgs,
+        FnKat::GeolibCookInterface& interface)
+{
+    for (auto i : _locationDecoratorFncList)
+    {
+        (*i)(privateData, opArgs, interface);
+        
+        opArgs = privateData.updateExtensionOpArgs(opArgs);
+    }
+    
+    return opArgs;
+}
+
+
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

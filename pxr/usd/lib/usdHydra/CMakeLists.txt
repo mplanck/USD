@@ -1,7 +1,7 @@
 set(PXR_PREFIX pxr/usd)
 set(PXR_PACKAGE usdHydra)
 
-pxr_shared_library(usdHydra
+pxr_library(usdHydra
 
     LIBRARIES
         tf
@@ -17,7 +17,10 @@ pxr_shared_library(usdHydra
         ptexTexture
         tokens
 
-    CPPFILES
+    PUBLIC_HEADERS
+        api.h
+
+    PYTHON_CPPFILES
         moduleDeps.cpp
 
     PYMODULE_CPPFILES
@@ -30,10 +33,12 @@ pxr_shared_library(usdHydra
         wrapPtexTexture.cpp
         wrapTokens.cpp
 
-    PYTHON_FILES
+    PYMODULE_FILES
         __init__.py
 
     RESOURCE_FILES
+        generatedSchema.usda
         plugInfo.json
+        schema.usda:usdHydra/schema.usda
 )
 

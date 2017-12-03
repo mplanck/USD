@@ -24,15 +24,22 @@
 #ifndef USDIMAGING_INSTANCER_CONTEXT_H
 #define USDIMAGING_INSTANCER_CONTEXT_H
 
+#include "pxr/pxr.h"
+#include "pxr/usdImaging/usdImaging/api.h"
 #include "pxr/usd/sdf/path.h"
 
 #include <boost/shared_ptr.hpp>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef boost::shared_ptr<class UsdImagingPrimAdapter> UsdImagingPrimAdapterSharedPtr;
 
 /// \class UsdImagingInstancerContext
+///
 /// Object used by instancer prim adapters to pass along context
 /// about the instancer and instance prim to prototype prim adapters.
+///
 class UsdImagingInstancerContext
 {
 public:
@@ -42,13 +49,16 @@ public:
     /// The name of the child prim, typically used for prototypes.
     TfToken childName;
 
-    /// The surface shader path bound to the instance prim
+    /// The path to the material bound to the instance prim
     /// being processed.
-    SdfPath instanceSurfaceShaderPath;
+    SdfPath instanceMaterialId;
 
     /// The instancer's prim Adapter. Useful when an adapter is needed, but the
     /// default adapter may be overriden for the sake of instancing.
     UsdImagingPrimAdapterSharedPtr instancerAdapter;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USDIMAGING_INSTANCER_CONTEXT_H

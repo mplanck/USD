@@ -31,6 +31,9 @@
 
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_DECLARE_WEAK_AND_REF_PTRS(GlfUVTextureStorageData);
 
 GlfUVTextureStorageDataRefPtr
@@ -51,7 +54,7 @@ GlfUVTextureStorageData::~GlfUVTextureStorageData()
     }
 }
 
-int GlfUVTextureStorageData::ComputeBytesUsed() const
+size_t GlfUVTextureStorageData::ComputeBytesUsed() const
 {
     if (_rawBuffer) {
         return _resizedWidth * _resizedHeight * _bytesPerPixel;
@@ -60,12 +63,12 @@ int GlfUVTextureStorageData::ComputeBytesUsed() const
     }
 }
 
-bool GlfUVTextureStorageData::HasRawBuffer() const
+bool GlfUVTextureStorageData::HasRawBuffer(int mipLevel) const
 {
     return (_rawBuffer != nullptr);
 }
 
-unsigned char * GlfUVTextureStorageData::GetRawBuffer() const
+unsigned char * GlfUVTextureStorageData::GetRawBuffer(int mipLevel) const
 {
     return _rawBuffer;
 }
@@ -115,10 +118,6 @@ bool GlfUVTextureStorageData::Read(int degradeLevel, bool generateMipmap) {
     }    
 
     _rawBuffer = new unsigned char[_size];
-    if (_rawBuffer == nullptr) {
-        TF_RUNTIME_ERROR("Unable to allocate buffer.");
-        return false;
-    }
 
     // Transfer value from Storage Data into raw buffer
     for (int y=0; y < _resizedHeight; ++y) {
@@ -129,6 +128,12 @@ bool GlfUVTextureStorageData::Read(int degradeLevel, bool generateMipmap) {
     }
 
     return true; 
+}
+
+int GlfUVTextureStorageData::GetNumMipLevels() const 
+{
+    if (_rawBuffer) return 1;
+    return 0;
 }
 
 bool GlfUVTextureStorageData::IsCompressed() const {
@@ -151,3 +156,6 @@ GlfUVTextureStorageData::GlfUVTextureStorageData(
 {
     /* nothing */
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

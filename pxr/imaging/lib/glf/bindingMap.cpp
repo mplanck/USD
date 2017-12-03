@@ -26,9 +26,11 @@
 #include "pxr/imaging/glf/glew.h"
 
 #include "pxr/imaging/glf/bindingMap.h"
-#include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/stl.h"
 #include "pxr/base/tf/type.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 int
 GlfBindingMap::GetSamplerUnit(std::string const & name)
@@ -40,7 +42,7 @@ int
 GlfBindingMap::GetSamplerUnit(TfToken const & name)
 {
     int samplerUnit = -1;
-    if (not TfMapLookup(_samplerBindings, name, &samplerUnit)) {
+    if (!TfMapLookup(_samplerBindings, name, &samplerUnit)) {
         // XXX error check < MAX_TEXTURE_IMAGE_UNITS
         samplerUnit = _samplerBindings.size();
         _samplerBindings[name] = samplerUnit;
@@ -59,7 +61,7 @@ int
 GlfBindingMap::GetAttributeIndex(TfToken const & name)
 {
     int attribIndex = -1;
-    if (not TfMapLookup(_attribBindings, name, &attribIndex)) {
+    if (!TfMapLookup(_attribBindings, name, &attribIndex)) {
         return -1;
     }
     return attribIndex;
@@ -68,10 +70,10 @@ GlfBindingMap::GetAttributeIndex(TfToken const & name)
 void
 GlfBindingMap::AssignSamplerUnitsToProgram(GLuint program)
 {
-    TF_FOR_ALL(it, _samplerBindings) {
-        GLint loc = glGetUniformLocation(program, it->first.GetText());
+    for (BindingMap::value_type const& p : _samplerBindings) {
+        GLint loc = glGetUniformLocation(program, p.first.GetText());
         if (loc != -1) {
-            glProgramUniform1i(program, loc, it->second);
+            glProgramUniform1i(program, loc, p.second);
         }
     }
 }
@@ -86,7 +88,7 @@ int
 GlfBindingMap::GetUniformBinding(TfToken const & name)
 {
     int binding = -1;
-    if (not TfMapLookup(_uniformBindings, name, &binding)) {
+    if (!TfMapLookup(_uniformBindings, name, &binding)) {
         binding = (int)_uniformBindings.size();
         _uniformBindings[name] = binding;
     }
@@ -109,10 +111,10 @@ GlfBindingMap::HasUniformBinding(TfToken const & name) const
 void
 GlfBindingMap::AssignUniformBindingsToProgram(GLuint program)
 {
-    TF_FOR_ALL(it, _uniformBindings) {
-        GLuint uboIndex = glGetUniformBlockIndex(program, it->first.GetText());
+    for (BindingMap::value_type const& p : _uniformBindings) {
+        GLuint uboIndex = glGetUniformBlockIndex(program, p.first.GetText());
         if (uboIndex != GL_INVALID_INDEX) {
-            glUniformBlockBinding(program, uboIndex, it->second);
+            glUniformBlockBinding(program, uboIndex, p.second);
         }
     }
 }
@@ -243,21 +245,30 @@ GlfBindingMap::Debug() const
 
     // sort for comparing baseline in testGlfBindingMap
     std::map<TfToken, int> attribBindings, samplerBindings, uniformBindings;
-    TF_FOR_ALL (it, _attribBindings) { attribBindings.insert(*it); }
-    TF_FOR_ALL (it, _samplerBindings) { samplerBindings.insert(*it); }
-    TF_FOR_ALL (it, _uniformBindings) { uniformBindings.insert(*it); }
-    
+    for (BindingMap::value_type const& p : _attribBindings ) {
+        attribBindings.insert(p);
+    }
+    for (BindingMap::value_type const& p : _samplerBindings ) {
+        samplerBindings.insert(p);
+    }
+    for (BindingMap::value_type const& p : _uniformBindings ) {
+        uniformBindings.insert(p);
+    }
+
     printf(" Attribute bindings\n");
-    TF_FOR_ALL (it, attribBindings) {
-        printf("  %s : %d\n", it->first.GetText(), it->second);
+    for (BindingMap::value_type const& p : attribBindings ) {
+        printf("  %s : %d\n", p.first.GetText(), p.second);
     }
     printf(" Sampler bindings\n");
-    TF_FOR_ALL (it, samplerBindings) {
-        printf("  %s : %d\n", it->first.GetText(), it->second);
+    for (BindingMap::value_type const& p : samplerBindings) {
+        printf("  %s : %d\n", p.first.GetText(), p.second);
     }
     printf(" Uniform bindings\n");
-    TF_FOR_ALL (it, uniformBindings) {
-        printf("  %s : %d\n", it->first.GetText(), it->second);
+    for (BindingMap::value_type const& p : uniformBindings) {
+        printf("  %s : %d\n", p.first.GetText(), p.second);
     }
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

@@ -24,45 +24,53 @@
 #ifndef PXRUSDMAYA_USDWRITEJOB_H
 #define PXRUSDMAYA_USDWRITEJOB_H
 
+/// \file usdWriteJob.h
+
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
 #include "usdMaya/Chaser.h"
 
 #include "usdMaya/util.h"
-#include "usdMaya/MayaPrimWriter.h"
+#include "usdMaya/ModelKindWriter.h"
+
+#include "usdMaya/usdWriteJobCtx.h"
+
+#include <maya/MObjectHandle.h>
 
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class usdWriteJob
 {
   public:
 
+    PXRUSDMAYA_API
     usdWriteJob(const JobExportArgs & iArgs);
 
+    PXRUSDMAYA_API
     ~usdWriteJob();
 
     // returns true if the stage can be created successfully
+    PXRUSDMAYA_API
     bool beginJob(const std::string &fileName,
             bool append, 
             double startTime,
             double endTime);
+    PXRUSDMAYA_API
     void evalJob(double iFrame);
+    PXRUSDMAYA_API
     void endJob();
+    PXRUSDMAYA_API
     TfToken writeVariants(const UsdPrim &usdRootPrim);
 
   private:
     void perFrameCallback(double iFrame);
     void postCallback();
-    bool addToPrimWriterList(MDagPath &curDag);
-    void makeModelHierarchy(UsdPrimSiblingRange const &usdRootPrims);
+    bool needToTraverse(const MDagPath& curDag);
     
   private:
-    JobExportArgs mArgs;
-
-    // List of the primitive writers to iterate over
-    std::vector<MayaPrimWriterPtr> mMayaPrimWriterList;
-
-    // Stage used to write out USD file
-    UsdStageRefPtr mStage;
-
     // Name of the created/appended USD file
     std::string mFileName;
     
@@ -71,17 +79,18 @@ class usdWriteJob
     
     // List of renderLayerObjects. Currently used for variants
     MObjectArray mRenderLayerObjs;
-    
-    // USD Maya Prim mapping used for variants
+
     PxrUsdMayaUtil::MDagPathMap<SdfPath>::Type mDagPathToUsdPathMap;
-    
-    // Paths on mStage at which we added usd references or authored kind
-    std::vector<SdfPath> mPathsThatMayHaveKind;
-    
-    bool mExportedGprims;
 
     PxrUsdMayaChaserRefPtrVector mChasers;
+
+    PxrUsdMaya_ModelKindWriter mModelKindWriter;
+
+    usdWriteJobCtx mJobCtx;
 };
 
-typedef shared_ptr < usdWriteJob > usdWriteJobPtr;
+typedef std::shared_ptr<usdWriteJob> usdWriteJobPtr;
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // PXRUSDMAYA_USDWRITEJOB_H

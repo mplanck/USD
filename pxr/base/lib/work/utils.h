@@ -24,12 +24,18 @@
 #ifndef WORK_UTILS_H
 #define WORK_UTILS_H
 
-///
 ///\file work/utils.h
 
+#include "pxr/pxr.h"
+#include "pxr/base/work/api.h"
 #include "pxr/base/work/detachedTask.h"
 
 #include <utility>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+WORK_API
+bool Work_ShouldSynchronizeAsyncDestroyCalls();
 
 template <class T>
 struct Work_AsyncDestroyHelper {
@@ -37,7 +43,7 @@ struct Work_AsyncDestroyHelper {
     T obj;
 };
 
-/// \brief Swap \p obj with a default-constructed T instance, return and arrange
+/// Swap \p obj with a default-constructed T instance, return and arrange
 /// for the swapped-out instance to be destroyed asynchronously.  This means
 /// that any code that obj's destructor might invoke must be safe to run both
 /// concurrently with other code and at any point in the future.  This might not
@@ -50,17 +56,20 @@ void WorkSwapDestroyAsync(T &obj)
     using std::swap;
     Work_AsyncDestroyHelper<T> helper;
     swap(helper.obj, obj);
-    WorkRunDetachedTask(std::move(helper));
+    if (!Work_ShouldSynchronizeAsyncDestroyCalls())
+        WorkRunDetachedTask(std::move(helper));
 }
 
-/// \brief Like WorkSwapDestroyAsync() but instead, move from \p obj, leaving it
+/// Like WorkSwapDestroyAsync() but instead, move from \p obj, leaving it
 /// in a moved-from state instead of a default constructed state.
 template <class T>
 void WorkMoveDestroyAsync(T &obj)
 {
     Work_AsyncDestroyHelper<T> helper { std::move(obj) };
-    WorkRunDetachedTask(std::move(helper));
+    if (!Work_ShouldSynchronizeAsyncDestroyCalls())
+        WorkRunDetachedTask(std::move(helper));
 }
 
-#endif // WORK_UTILS_H
+PXR_NAMESPACE_CLOSE_SCOPE
 
+#endif // WORK_UTILS_H

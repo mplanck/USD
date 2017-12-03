@@ -21,19 +21,26 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/proxyPolicies.h
-
 #ifndef SDF_PROXYPOLICIES_H
 #define SDF_PROXYPOLICIES_H
 
+/// \file sdf/proxyPolicies.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/usd/sdf/declareHandles.h"
 #include "pxr/usd/sdf/path.h"
 #include "pxr/usd/sdf/spec.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 class SdfReference;
 class SdfMapperSpec;
 
+/// \class SdfNameKeyPolicy
+///
 /// Key policy for \c std::string names.
+///
 class SdfNameKeyPolicy {
 public:
     typedef std::string value_type;
@@ -50,7 +57,10 @@ public:
     }
 };
 
+/// \class SdfNameTokenKeyPolicy
+///
 /// Key policy for \c TfToken names.
+///
 class SdfNameTokenKeyPolicy {
 public:
     typedef TfToken value_type;
@@ -67,7 +77,10 @@ public:
     }
 };
 
+/// \class SdfPathKeyPolicy
+///
 /// Key policy for \c SdfPath; converts all SdfPaths to absolute.
+///
 class SdfPathKeyPolicy {
 public:
     typedef SdfPath value_type;
@@ -118,12 +131,15 @@ private:
 template <>
 struct Vt_DefaultValueFactory<SdfPathKeyPolicy> {
     static Vt_DefaultValueHolder Invoke() {
-        TF_AXIOM(false and "Failed VtValue::Get<SdfPathKeyPolicy> not allowed");
+        TF_AXIOM(false && "Failed VtValue::Get<SdfPathKeyPolicy> not allowed");
         return Vt_DefaultValueHolder::Create((void*)0);
     }
 };
 
+/// \class SdfReferenceTypePolicy
+///
 /// List editor type policy for \c SdfReference.
+///
 class SdfReferenceTypePolicy {
 public:
     typedef SdfReference value_type;
@@ -144,12 +160,15 @@ public:
 template <>
 struct Vt_DefaultValueFactory<SdfReferenceTypePolicy> {
     static Vt_DefaultValueHolder Invoke() {
-        TF_AXIOM(false and "Failed VtValue::Get<SdfReferenceTypePolicy> not allowed");
+        TF_AXIOM(false && "Failed VtValue::Get<SdfReferenceTypePolicy> not allowed");
         return Vt_DefaultValueHolder::Create((void*)0);
     }
 };
 
+/// \class SdfSubLayerTypePolicy
+///
 /// List editor type policy for sublayers.
+///
 class SdfSubLayerTypePolicy {
 public:
     typedef std::string value_type;
@@ -166,22 +185,31 @@ public:
     }
 };
 
+/// \class SdfConnectionMapperViewPredicate
+///
 /// Predicate for connection mappers.  Don't include connections that don't
 /// have a mapper.
+///
 class SdfConnectionMapperViewPredicate {
 public:
-    bool operator()(const SdfHandle<SdfMapperSpec>& x) const;
+    SDF_API bool operator()(const SdfHandle<SdfMapperSpec>& x) const;
 };
 
+/// \class SdfConnectionMapperValuePolicy
+///
 /// Value policy for connection mappers.
+///
 class SdfConnectionMapperValuePolicy {
 public:
     typedef SdfHandle<SdfMapperSpec> value_type;
 
 };
 
+/// \class SdfRelocatesMapProxyValuePolicy
+///
 /// Map edit proxy value policy for relocates maps.  This absolutizes all
 /// paths.
+///
 class SdfRelocatesMapProxyValuePolicy {
 public:
     typedef std::map<SdfPath, SdfPath> Type;
@@ -189,16 +217,23 @@ public:
     typedef Type::mapped_type mapped_type;
     typedef Type::value_type value_type;
 
+    SDF_API
     static Type CanonicalizeType(const SdfSpecHandle& v, const Type& x);
+    SDF_API
     static key_type CanonicalizeKey(const SdfSpecHandle& v,
                                     const key_type& x);
+    SDF_API
     static mapped_type CanonicalizeValue(const SdfSpecHandle& v,
                                          const mapped_type& x);
+    SDF_API
     static value_type CanonicalizePair(const SdfSpecHandle& v,
                                        const value_type& x);
 };
 
+/// \class SdfGenericSpecViewPredicate
+///
 /// Predicate for viewing properties.
+///
 class SdfGenericSpecViewPredicate {
 public:
     SdfGenericSpecViewPredicate(SdfSpecType type) : _type(type) { }
@@ -217,16 +252,24 @@ private:
     SdfSpecType _type;
 };
 
+/// \class SdfAttributeViewPredicate
+///
 /// Predicate for viewing attributes.
+///
 class SdfAttributeViewPredicate : public SdfGenericSpecViewPredicate {
 public:
     SdfAttributeViewPredicate();
 };
 
+/// \class SdfRelationshipViewPredicate
+///
 /// Predicate for viewing relationships.
+///
 class SdfRelationshipViewPredicate : public SdfGenericSpecViewPredicate {
 public:
     SdfRelationshipViewPredicate();
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_PROXYPOLICIES_H

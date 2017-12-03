@@ -21,10 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file alembicUtil.h
 #ifndef USDABC_ALEMBICUTIL_H
 #define USDABC_ALEMBICUTIL_H
 
+/// \file usdAbc/alembicUtil.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/usdAbc/alembicReader.h"
 #include "pxr/usd/sdf/abstractData.h"
 #include "pxr/usd/sdf/schema.h"
@@ -50,6 +52,18 @@
 #include <map>
 #include <string>
 #include <vector>
+
+
+namespace Alembic {
+namespace Util {
+namespace ALEMBIC_VERSION_NS {
+    template <> struct PODTraitsFromType<PXR_NS::GfHalf> 
+        : public Float16PODTraits {};
+}}}// end namespace Alembic
+
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class SdfAbstractDataValue;
 
@@ -115,6 +129,7 @@ TF_DECLARE_PUBLIC_TOKENS(UsdAbcPropertyNames, USD_ABC_PROPERTY_NAMES);
     (gprimDataRender) \
     (riName) \
     (riType) \
+    (singleSampleAsDefault) \
     /* end */
 TF_DECLARE_PUBLIC_TOKENS(UsdAbcCustomMetadata, USD_ABC_CUSTOM_METADATA);
 
@@ -424,7 +439,7 @@ public:
     /// Returns \c false iff the data is valid.
     bool operator!() const
     {
-        return not _IsValid();
+        return !_IsValid();
     }
 
     /// Returns the raw data.
@@ -641,7 +656,7 @@ struct _ConvertPODToUsdVec {
 template <>
 struct _ConvertPODToUsd<GfVec2i, int32_t,   2> : _ConvertPODToUsdVec<GfVec2i>{};
 template <>
-struct _ConvertPODToUsd<GfVec2h, half,      2> : _ConvertPODToUsdVec<GfVec2h>{};
+struct _ConvertPODToUsd<GfVec2h, GfHalf,    2> : _ConvertPODToUsdVec<GfVec2h>{};
 template <>
 struct _ConvertPODToUsd<GfVec2f, float32_t, 2> : _ConvertPODToUsdVec<GfVec2f>{};
 template <>
@@ -649,7 +664,7 @@ struct _ConvertPODToUsd<GfVec2d, float64_t, 2> : _ConvertPODToUsdVec<GfVec2d>{};
 template <>
 struct _ConvertPODToUsd<GfVec3i, int32_t,   3> : _ConvertPODToUsdVec<GfVec3i>{};
 template <>
-struct _ConvertPODToUsd<GfVec3h, half,      3> : _ConvertPODToUsdVec<GfVec3h>{};
+struct _ConvertPODToUsd<GfVec3h, GfHalf,    3> : _ConvertPODToUsdVec<GfVec3h>{};
 template <>
 struct _ConvertPODToUsd<GfVec3f, float32_t, 3> : _ConvertPODToUsdVec<GfVec3f>{};
 template <>
@@ -657,7 +672,7 @@ struct _ConvertPODToUsd<GfVec3d, float64_t, 3> : _ConvertPODToUsdVec<GfVec3d>{};
 template <>
 struct _ConvertPODToUsd<GfVec4i, int32_t,   4> : _ConvertPODToUsdVec<GfVec4i>{};
 template <>
-struct _ConvertPODToUsd<GfVec4h, half,      4> : _ConvertPODToUsdVec<GfVec4h>{};
+struct _ConvertPODToUsd<GfVec4h, GfHalf,    4> : _ConvertPODToUsdVec<GfVec4h>{};
 template <>
 struct _ConvertPODToUsd<GfVec4f, float32_t, 4> : _ConvertPODToUsdVec<GfVec4f>{};
 template <>
@@ -775,7 +790,7 @@ template <>
 struct _ConvertPODFromUsd<GfVec2i, int32_t,   2> :
     _ConvertPODFromUsdVec<GfVec2i> { };
 template <>
-struct _ConvertPODFromUsd<GfVec2h, half,      2> :
+struct _ConvertPODFromUsd<GfVec2h, GfHalf,    2> :
     _ConvertPODFromUsdVec<GfVec2h> { };
 template <>
 struct _ConvertPODFromUsd<GfVec2f, float32_t, 2> :
@@ -787,7 +802,7 @@ template <>
 struct _ConvertPODFromUsd<GfVec3i, int32_t,   3> :
     _ConvertPODFromUsdVec<GfVec3i> { };
 template <>
-struct _ConvertPODFromUsd<GfVec3h, half,      3> :
+struct _ConvertPODFromUsd<GfVec3h, GfHalf,    3> :
     _ConvertPODFromUsdVec<GfVec3h> { };
 template <>
 struct _ConvertPODFromUsd<GfVec3f, float32_t, 3> :
@@ -799,7 +814,7 @@ template <>
 struct _ConvertPODFromUsd<GfVec4i, int32_t,   4> :
     _ConvertPODFromUsdVec<GfVec4i> { };
 template <>
-struct _ConvertPODFromUsd<GfVec4h, half,      4> :
+struct _ConvertPODFromUsd<GfVec4h, GfHalf,    4> :
     _ConvertPODFromUsdVec<GfVec4h> { };
 template <>
 struct _ConvertPODFromUsd<GfVec4f, float32_t, 4> :
@@ -1036,7 +1051,7 @@ UsdAbc_ReverseOrderImpl(
         const int count = counts[k];
 
         // Bail out with failure if we run out of items.
-        if (not TF_VERIFY(j + count <= n)) {
+        if (!TF_VERIFY(j + count <= n)) {
             return false;
         }
 
@@ -1050,5 +1065,8 @@ UsdAbc_ReverseOrderImpl(
 }
 
 } // namespace UsdAbc_AlembicUtil
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USDABC_ALEMBICUTIL_H

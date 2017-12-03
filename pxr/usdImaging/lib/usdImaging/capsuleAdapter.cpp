@@ -39,6 +39,9 @@
 
 #include <cmath>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_REGISTRY_FUNCTION(TfType)
 {
     typedef UsdImagingCapsuleAdapter Adapter;
@@ -50,82 +53,48 @@ UsdImagingCapsuleAdapter::~UsdImagingCapsuleAdapter()
 {
 }
 
+bool
+UsdImagingCapsuleAdapter::IsSupported(UsdImagingIndexProxy const* index) const
+{
+    return index->IsRprimTypeSupported(HdPrimTypeTokens->mesh);
+}
+
 SdfPath
 UsdImagingCapsuleAdapter::Populate(UsdPrim const& prim, 
                             UsdImagingIndexProxy* index,
                             UsdImagingInstancerContext const* instancerContext)
 
 {
-    index->InsertMesh(prim.GetPath(),
-                      GetShaderBinding(prim),
-                      instancerContext);
-    HD_PERF_COUNTER_INCR(UsdImagingTokens->usdPopulatedPrimCount);
-
-    return prim.GetPath();
-}
-
-void 
-UsdImagingCapsuleAdapter::TrackVariabilityPrep(UsdPrim const& prim,
-                                              SdfPath const& cachePath,
-                                              int requestedBits,
-                                              UsdImagingInstancerContext const* 
-                                                  instancerContext)
-{
-    // Let the base class track what it needs.
-    BaseAdapter::TrackVariabilityPrep(
-        prim, cachePath, requestedBits, instancerContext);
+    return _AddRprim(HdPrimTypeTokens->mesh,
+                     prim, index, GetMaterialId(prim), instancerContext);
 }
 
 void 
 UsdImagingCapsuleAdapter::TrackVariability(UsdPrim const& prim,
                                           SdfPath const& cachePath,
-                                          int requestedBits,
-                                          int* dirtyBits,
+                                          HdDirtyBits* timeVaryingBits,
                                           UsdImagingInstancerContext const* 
                                               instancerContext)
 {
     BaseAdapter::TrackVariability(
-        prim, cachePath, requestedBits, dirtyBits, instancerContext);
+        prim, cachePath, timeVaryingBits, instancerContext);
     // WARNING: This method is executed from multiple threads, the value cache
     // has been carefully pre-populated to avoid mutating the underlying
     // container during update.
 
-    if (requestedBits & HdChangeTracker::DirtyPoints) {
-        if (not _IsVarying(prim, 
-                           UsdGeomTokens->radius,
-                           HdChangeTracker::DirtyPoints,
-                           UsdImagingTokens->usdVaryingPrimVar,
-                           dirtyBits, 
-                           /*isInherited*/false)) {
-            _IsVarying(prim, 
-                       UsdGeomTokens->height,
+    if (!_IsVarying(prim,
+                       UsdGeomTokens->radius,
                        HdChangeTracker::DirtyPoints,
                        UsdImagingTokens->usdVaryingPrimVar,
-                       dirtyBits,
-                       /*isInherited*/false);
-        }
+                       timeVaryingBits,
+                       /*isInherited*/false)) {
+        _IsVarying(prim,
+                   UsdGeomTokens->height,
+                   HdChangeTracker::DirtyPoints,
+                   UsdImagingTokens->usdVaryingPrimVar,
+                   timeVaryingBits,
+                   /*isInherited*/false);
     }
-}
-
-void 
-UsdImagingCapsuleAdapter::UpdateForTimePrep(UsdPrim const& prim,
-                                   SdfPath const& cachePath, 
-                                   UsdTimeCode time,
-                                   int requestedBits,
-                                   UsdImagingInstancerContext const* 
-                                       instancerContext)
-{
-    BaseAdapter::UpdateForTimePrep(
-        prim, cachePath, time, requestedBits, instancerContext);
-    // This adapter will never mark these as dirty, however the client may
-    // explicitly ask for them, after the initial cached value is gone.
-    
-    UsdImagingValueCache* valueCache = _GetValueCache();
-    if (requestedBits & HdChangeTracker::DirtyTopology)
-        valueCache->GetTopology(cachePath);
-
-    if (requestedBits & HdChangeTracker::DirtyPoints)
-        valueCache->GetPoints(cachePath);
 }
 
 // Thread safe.
@@ -134,13 +103,12 @@ void
 UsdImagingCapsuleAdapter::UpdateForTime(UsdPrim const& prim,
                                SdfPath const& cachePath, 
                                UsdTimeCode time,
-                               int requestedBits,
-                               int* resultBits,
+                               HdDirtyBits requestedBits,
                                UsdImagingInstancerContext const* 
                                    instancerContext)
 {
     BaseAdapter::UpdateForTime(
-        prim, cachePath, time, requestedBits, resultBits, instancerContext);
+        prim, cachePath, time, requestedBits, instancerContext);
     UsdImagingValueCache* valueCache = _GetValueCache();
     if (requestedBits & HdChangeTracker::DirtyTopology) {
         valueCache->GetTopology(cachePath) = GetMeshTopology();
@@ -312,7 +280,7 @@ _GenerateCapsuleMeshTopology()
         indices[index++] = top;
     }
 
-    TF_VERIFY(face == numCounts and index == numIndices);
+    TF_VERIFY(face == numCounts && index == numIndices);
 
     return HdMeshTopology(PxOsdOpenSubdivTokens->catmark,
                           HdTokens->rightHanded,
@@ -328,3 +296,6 @@ UsdImagingCapsuleAdapter::GetMeshTopology()
 
     return VtValue(capsuleTopo);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

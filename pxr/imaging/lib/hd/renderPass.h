@@ -24,31 +24,33 @@
 #ifndef HD_RENDER_PASS_H
 #define HD_RENDER_PASS_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/imaging/hd/changeTracker.h"
-#include "pxr/imaging/hd/commandBuffer.h"
 #include "pxr/imaging/hd/rprimCollection.h"
 #include "pxr/imaging/hd/task.h"
 
-#include "pxr/imaging/glf/simpleLight.h"
-
 #include <boost/shared_ptr.hpp>
 
-class HdCommandBuffer;
+PXR_NAMESPACE_OPEN_SCOPE
+
 class HdRenderIndex;
 class HdSceneDelegate;
-
 
 typedef boost::shared_ptr<class HdDirtyList> HdDirtyListSharedPtr;
 typedef boost::shared_ptr<class HdRenderPassState> HdRenderPassStateSharedPtr;
 typedef boost::shared_ptr<class HdRenderPass> HdRenderPassSharedPtr;
 
+/// \class HdRenderPass
+///
 /// A single draw pass to a render target/buffer.
 ///
 class HdRenderPass : boost::noncopyable {
 public:
-    HdRenderPass(HdRenderIndex *index);
-    HdRenderPass(HdRenderIndex *index, const HdRprimCollection &collection);
+    HD_API
+    HdRenderPass(HdRenderIndex *index, HdRprimCollection const& collection);
+    HD_API
     virtual ~HdRenderPass();
 
     /// Returns the HdRprimCollection to be drawn by this RenderPass.
@@ -56,6 +58,7 @@ public:
 
     /// Sets the HdRprimCollection, note that this may invalidate internal
     /// caches used to accelerate drawing.
+    HD_API
     void SetRprimCollection(HdRprimCollection const& col);
 
     /// Returns the dirty list (maintained in the change tracker) for
@@ -64,35 +67,53 @@ public:
         return _dirtyList;
     }
 
-    /// Execute render pass task
-    void Execute(HdRenderPassStateSharedPtr const &renderPassState);
+    /// Returns the most recent list of render tags that this render pass
+    /// has found in the render items included in the collection.
+    HD_API
+    TfTokenVector const &GetRenderTags();
 
     /// Sync the render pass resources
+    HD_API
     void Sync();
 
     /// Return the render index
     HdRenderIndex * const GetRenderIndex() const { return _renderIndex; }
 
-private:
-    void _PrepareCommandBuffer(HdRenderPassStateSharedPtr const &renderPasssState);
+    /// Execute all of the buckets in this renderpass.
+    HD_API
+    void Execute(HdRenderPassStateSharedPtr const &renderPassState);
+    /// Execute a subset of buckets of this renderpass.
+    HD_API
+    void Execute(HdRenderPassStateSharedPtr const &renderPassState,
+                 TfTokenVector const &renderTags);
+    /// Execute a single bucket of this renderpass.
+    HD_API
+    void Execute(HdRenderPassStateSharedPtr const &renderPassState,
+                 TfToken const &renderTag);
 
+    /// Optional API: Hooks for progressive rendering.
+    virtual void ResetImage() {}
+    virtual bool IsConverged() const { return true; }
+
+protected:
+    /// Virtual API: Execute the buckets corresponding to renderTags;
+    /// renderTags.empty() implies execute everything.
+    virtual void _Execute(HdRenderPassStateSharedPtr const &renderPassState,
+                         TfTokenVector const &renderTags) = 0;
+
+    /// Optional API: let derived classes mark their collection tracking as dirty.
+    virtual void _MarkCollectionDirty() {}
+
+    /// Optional API: let derived classes sync data.
+    virtual void _Sync() {}
+
+private:
     // ---------------------------------------------------------------------- //
     // Change Tracking State
     // ---------------------------------------------------------------------- //
     // The renderIndex to which this renderPass belongs
     // (can't change after construction)
     HdRenderIndex * const _renderIndex;
-
-    // The version number of the currently held collection.
-    int _collectionVersion;
-
-    // A flag indicating that the held collection changed since this renderPass
-    // was last drawn.
-    //
-    // When _collectionChanged is true, it indicates that _collectionVersion is
-    // no longer accurate, because _collectionVersion was stored for the
-    // previously held collection.
-    bool _collectionChanged;
 
     // cached dirty prims list
     HdDirtyListSharedPtr _dirtyList;
@@ -101,10 +122,8 @@ private:
     // Core RenderPass State
     // ---------------------------------------------------------------------- //
     HdRprimCollection _collection;
-    HdCommandBuffer _cmdBuffer;
-
-    bool _lastCullingDisabledState;
-
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HD_RENDER_PASS_H

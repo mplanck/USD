@@ -24,8 +24,10 @@
 #ifndef USD_PRIMDATA_H
 #define USD_PRIMDATA_H
 
-/// \file primData.h
+/// \file usd/primData.h
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/primFlags.h"
 #include "pxr/usd/sdf/types.h"
@@ -41,11 +43,14 @@
 #include <boost/intrusive_ptr.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 TF_DECLARE_WEAK_PTRS(UsdStage);
 
-//
 // Private class that stores cached prim information and defines the prim tree
 // on a UsdStage.
 //
@@ -73,7 +78,7 @@ public:
     /// \name Prim Data & Behavior
     // --------------------------------------------------------------------- //
 
-    /// \brief Returns the composed path for the prim.
+    /// Returns the composed path for the prim.
     ///
     /// This path is absolute with respect to the current stage and may require
     /// translation when used in the context of individual layers of which the 
@@ -85,7 +90,7 @@ public:
 
     UsdStage *GetStage() const { return _stage; }
 
-    /// \brief Returns the composed type name for the prim.
+    /// Returns the composed type name for the prim.
     /// Note that this value is cached and is efficient to query.
     const TfToken &GetTypeName() const { return _typeName; };
 
@@ -120,16 +125,8 @@ public:
         return _flags[Usd_PrimHasDefiningSpecifierFlag]; 
     }
 
-    /// Return true if this prim is an instance of a shared master prim,
-    /// false otherwise.
-    bool IsInstance() const { return _flags[Usd_PrimInstanceFlag]; }
-
-    /// Return true if this prim is a shared master prim, false otherwise.
-    bool IsMaster() const { return IsInMaster() and GetPath().IsRootPrimPath(); }
-
-    /// Return true if this prim is a shared instance master,
-    /// false otherwise.
-    bool IsInMaster() const { return _flags[Usd_PrimMasterFlag]; }
+    /// Return true if this prim has one or more payload composition arcs.
+    bool HasPayload() const { return _flags[Usd_PrimHasPayloadFlag]; }
 
     /// Return true if attributes on this prim may have opinions in clips, 
     /// false otherwise. If true, the relevant clips will be examined for
@@ -137,15 +134,15 @@ public:
     bool MayHaveOpinionsInClips() const { return _flags[Usd_PrimClipsFlag]; }
 
     /// Return this prim's composed specifier.
+    USD_API
     SdfSpecifier GetSpecifier() const;
-
-public:
 
     // --------------------------------------------------------------------- //
     /// \name Parent & Stage
     // --------------------------------------------------------------------- //
 
     /// Return this prim's parent prim.  Return NULL if this is a root prim.
+    USD_API
     Usd_PrimDataConstPtr GetParent() const;
 
     // --------------------------------------------------------------------- //
@@ -168,6 +165,7 @@ public:
     ///
     /// In either of the above two cases, this prim index will not have the 
     /// same path as the prim's path.
+    USD_API
     const class PcpPrimIndex &GetPrimIndex() const;
 
     /// Return a const reference to the source PcpPrimIndex for this prim.
@@ -176,6 +174,7 @@ public:
     /// this is the prim index for the instance that was chosen to serve
     /// as the master for all other instances.  This prim index will not
     /// have the same path as the prim's path.
+    USD_API
     const class PcpPrimIndex &GetSourcePrimIndex() const;
 
     // --------------------------------------------------------------------- //
@@ -187,7 +186,7 @@ public:
 
     // Return this prim data's next sibling if it has one, NULL otherwise.
     Usd_PrimDataPtr GetNextSibling() const {
-        return not _nextSiblingOrParent.BitsAs<bool>() ?
+        return !_nextSiblingOrParent.BitsAs<bool>() ?
             _nextSiblingOrParent.Get() : NULL;
     }
 
@@ -211,13 +210,40 @@ public:
         }
         return NULL;
     }
+    
+    // Return the prim data at \p path.  If \p path indicates a prim
+    // beneath an instance, return the prim data for the corresponding 
+    // prim in the instance's master.
+    USD_API Usd_PrimDataConstPtr 
+    GetPrimDataAtPathOrInMaster(const SdfPath &path) const;
+
+    // --------------------------------------------------------------------- //
+    // Instancing
+    // --------------------------------------------------------------------- //
+
+    /// Return true if this prim is an instance of a shared master prim,
+    /// false otherwise.
+    bool IsInstance() const { return _flags[Usd_PrimInstanceFlag]; }
+
+    /// Return true if this prim is a shared master prim, false otherwise.
+    bool IsMaster() const { return IsInMaster() && GetPath().IsRootPrimPath(); }
+
+    /// Return true if this prim is a child of a shared master prim,
+    /// false otherwise.
+    bool IsInMaster() const { return _flags[Usd_PrimMasterFlag]; }
+
+    /// If this prim is an instance, return the prim data for the corresponding
+    /// master.  Otherwise, return NULL.
+    USD_API Usd_PrimDataConstPtr GetMaster() const;
 
     // --------------------------------------------------------------------- //
     // Private Members
     // --------------------------------------------------------------------- //
 private:
 
+    USD_API
     Usd_PrimData(UsdStage *stage, const SdfPath& path);
+    USD_API
     ~Usd_PrimData();
 
     // Compute and store cached flags.
@@ -293,19 +319,19 @@ private:
     TfToken _typeName;
     Usd_PrimData *_firstChild;
     TfPointerAndBits<Usd_PrimData> _nextSiblingOrParent;
+    mutable std::atomic<int64_t> _refCount;
     Usd_PrimFlagBits _flags;
 
-    // Reference count and intrusive_ptr core primitives implementation.
-    mutable std::atomic_int _refCount;
-
+    // intrusive_ptr core primitives implementation.
     friend void intrusive_ptr_add_ref(const Usd_PrimData *prim) {
-        ++prim->_refCount;
+        prim->_refCount.fetch_add(1, std::memory_order_relaxed);
     }
     friend void intrusive_ptr_release(const Usd_PrimData *prim) {
-        if (--prim->_refCount == 0)
+        if (prim->_refCount.fetch_sub(1, std::memory_order_release) == 1)
             delete prim;
     }
 
+    USD_API
     friend void Usd_IssueFatalPrimAccessError(Usd_PrimData const *p);
     friend std::string Usd_DescribePrimData(const Usd_PrimData *p);
 
@@ -437,40 +463,171 @@ Usd_PrimData::_GetSubtreeRange() const
     return Usd_PrimData::SubtreeRange(_SubtreeBegin(), _SubtreeEnd());
 }
 
-// Helpers for subtree iterators.
+// Helpers for instance proxies.
+
+// Return true if the prim with prim data \p p and proxy prim path
+// \p proxyPrimPath represents an instance proxy.
+template <class PrimDataPtr>
+inline bool
+Usd_IsInstanceProxy(const PrimDataPtr &p, const SdfPath &proxyPrimPath)
+{
+    return !proxyPrimPath.IsEmpty();
+}
+
+// Helpers for subtree traversals.
+
+// Create a predicate based on \p pred for use when traversing the
+// siblings or descendants of the prim with prim data \p p and proxy
+// prim path \p proxyPrimPath. This is used by prim traversal functions 
+// like UsdPrim::GetFilteredChildren, UsdPrim::GetFilteredDescendants, 
+// UsdPrim::GetFilteredNextSibling, and UsdPrimRange.
+template <class PrimDataPtr>
+inline Usd_PrimFlagsPredicate
+Usd_CreatePredicateForTraversal(const PrimDataPtr &p, 
+                                const SdfPath &proxyPrimPath,
+                                Usd_PrimFlagsPredicate pred)
+{
+    // Don't allow traversals beneath instances unless the client has
+    // explicitly requested it or the starting point is already beneath
+    // an instance (i.e., the starting point is an instance proxy).
+    if (!Usd_IsInstanceProxy(p, proxyPrimPath) && 
+        !pred.IncludeInstanceProxiesInTraversal()) {
+        pred.TraverseInstanceProxies(false);
+    }
+    return pred;
+}
+
+// Move \p p to its parent.  If \p proxyPrimPath is not empty, set it to 
+// its parent path.  If after this \p p is a master prim, move \p p to
+// the prim indicated by \p proxyPrimPath.  If \p p's path is then equal
+// to \p proxyPrimPath, set \p proxyPrimPath to the empty path.
+template <class PrimDataPtr>
+inline void
+Usd_MoveToParent(PrimDataPtr &p, SdfPath &proxyPrimPath)
+{
+    p = p->GetParent();
+
+    if (!proxyPrimPath.IsEmpty()) {
+        proxyPrimPath = proxyPrimPath.GetParentPath();
+
+        if (p && p->IsMaster()) {
+            p = p->GetPrimDataAtPathOrInMaster(proxyPrimPath);
+            if (TF_VERIFY(p, "No prim at <%s>", proxyPrimPath.GetText()) &&
+                p->GetPath() == proxyPrimPath) {
+                proxyPrimPath = SdfPath();
+            }
+        }
+    }
+}
 
 // Search for the next sibling that matches \p pred (up to \p end).  If such a
 // sibling exists, move \p p to it and return false.  If no such sibling exists
-// then move \p to its parent return true.  If \p end is reached while looking
-// for siblings, move \p p to \p end and return false.
+// then move \p p to its parent and return true.  If \p end is reached while 
+// looking for siblings, move \p p to \p end and return false.
+//
+// If \p proxyPrimPath is not empty, update it based on the new value of \p p:
+// - If \p p was moved to \p end, set \p proxyPrimPath to the empty path.
+// - If \p p was moved to a sibling, set the prim name for \p proxyPrimPath
+//   to the sibling's name.  
+// - If \p p was moved to a parent, set \p proxyPrimPath and \p p the same
+//   way as Usd_MoveToParent.
 template <class PrimDataPtr>
 inline bool
-Usd_MoveToNextSiblingOrParent(PrimDataPtr &p, PrimDataPtr end,
+Usd_MoveToNextSiblingOrParent(PrimDataPtr &p, SdfPath &proxyPrimPath,
+                              PrimDataPtr end,
                               const Usd_PrimFlagsPredicate &pred)
 {
+    // Either all siblings are instance proxies or none are. We can just 
+    // compute this once and reuse it as we scan for the next sibling.
+    const bool isInstanceProxy = Usd_IsInstanceProxy(p, proxyPrimPath);
+
     PrimDataPtr next = p->GetNextSibling();
-    while (next and next != end and not pred(next)) {
+    while (next && next != end && 
+           !Usd_EvalPredicate(pred, next, isInstanceProxy)) {
         p = next;
         next = p->GetNextSibling();
     }
     p = next ? next : p->GetParentLink();
-    return not next;
+
+    if (!proxyPrimPath.IsEmpty()) {
+        if (p == end) {
+            proxyPrimPath = SdfPath();
+        }
+        else if (p == next) {
+            proxyPrimPath = 
+                proxyPrimPath.GetParentPath().AppendChild(p->GetName());
+        }
+        else {
+            proxyPrimPath = proxyPrimPath.GetParentPath();
+            if (p && p->IsMaster()) {
+                p = p->GetPrimDataAtPathOrInMaster(proxyPrimPath);
+                if (TF_VERIFY(p, "No prim at <%s>", proxyPrimPath.GetText()) &&
+                    p->GetPath() == proxyPrimPath) {
+                    proxyPrimPath = SdfPath();
+                }
+            }
+        }
+    }
+
+    // Return true if we successfully moved to a parent, otherwise false.
+    return !next && p;
+}
+
+// Convenience method for calling the above with \p end = \c nullptr.
+template <class PrimDataPtr>
+inline bool
+Usd_MoveToNextSiblingOrParent(PrimDataPtr &p, SdfPath &proxyPrimPath,
+                              const Usd_PrimFlagsPredicate &pred)
+{
+    return Usd_MoveToNextSiblingOrParent(p, proxyPrimPath, 
+                                         PrimDataPtr(nullptr), pred);
 }
 
 // Search for the first direct child of \p p that matches \p pred (up to
-// \p _end).  If such a direct child exists, move \p p to it and return true.
-// Otherwise leave the iterator unchanged and return false.
+// \p end).  If the given \p p is an instance, search for direct children 
+// on the  corresponding master prim.  If such a direct child exists, 
+// move \p p to it, and return true.  Otherwise leave the iterator 
+// unchanged and return false.  
 template <class PrimDataPtr>
 inline bool
-Usd_MoveToChild(PrimDataPtr &p, PrimDataPtr end,
+Usd_MoveToChild(PrimDataPtr &p, SdfPath &proxyPrimPath,
+                PrimDataPtr end,
                 const Usd_PrimFlagsPredicate &pred)
 {
-    if (PrimDataPtr child = p->GetFirstChild()) {
+    bool isInstanceProxy = Usd_IsInstanceProxy(p, proxyPrimPath);
+
+    PrimDataPtr src = p;
+    if (src->IsInstance()) {
+        src = src->GetMaster();
+        isInstanceProxy = true;
+    }
+
+    if (PrimDataPtr child = src->GetFirstChild()) {
+        if (isInstanceProxy) {
+            proxyPrimPath = proxyPrimPath.IsEmpty() ?
+                p->GetPath().AppendChild(child->GetName()) :
+                proxyPrimPath.AppendChild(child->GetName());
+        }
+
         p = child;
-        if (pred(p) or not Usd_MoveToNextSiblingOrParent(p, end, pred))
+
+        if (Usd_EvalPredicate(pred, p, isInstanceProxy) || 
+            !Usd_MoveToNextSiblingOrParent(p, proxyPrimPath, end, pred)) {
             return true;
+        }
     }
     return false;
 }
+
+// Convenience method for calling the above with \p end = \c nullptr.
+template <class PrimDataPtr>
+inline bool
+Usd_MoveToChild(PrimDataPtr &p, SdfPath &proxyPrimPath,
+                const Usd_PrimFlagsPredicate &pred) 
+{
+    return Usd_MoveToChild(p, proxyPrimPath, PrimDataPtr(nullptr), pred);
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_PRIMDATA_H

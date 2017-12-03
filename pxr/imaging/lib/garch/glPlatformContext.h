@@ -21,26 +21,27 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file glPlatformContext.h
-
 #ifndef GARCH_GLPLATFORMCONTEXT_H
 #define GARCH_GLPLATFORMCONTEXT_H
 
+/// \file garch/glPlatformContext.h
+
+#include "pxr/pxr.h"
+#include "pxr/imaging/garch/api.h"
 #include "pxr/base/arch/defines.h"
 #include <cstddef>
 
-#if defined ARCH_OS_LINUX
+#if defined(ARCH_OS_LINUX)
 
 #include "pxr/imaging/garch/glPlatformContextGLX.h"
 
-#elif defined ARCH_OS_DARWIN
+#elif defined(ARCH_OS_DARWIN)
 
 #include "pxr/imaging/garch/glPlatformContextDarwin.h"
 
-#elif defined ARCH_OS_WINDOWS
+#elif defined(ARCH_OS_WINDOWS)
 
-// XXX: TODO
-// #include "pxr/imaging/garch/glPlatformContextWindows.h"
+#include "pxr/imaging/garch/glPlatformContextWindows.h"
 
 #else
 
@@ -48,7 +49,9 @@
 
 #endif
 
-GarchGLPlatformContextState GarchGetNullGLPlatformContextState();
+PXR_NAMESPACE_OPEN_SCOPE
+
+GARCH_API GarchGLPlatformContextState GarchGetNullGLPlatformContextState();
 
 inline
 size_t
@@ -56,5 +59,8 @@ hash_value(const GarchGLPlatformContextState& x)
 {
     return x.GetHash();
 }
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // GARCH_GLPLATFORMCONTEXT_H

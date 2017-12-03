@@ -24,32 +24,43 @@
 #ifndef TF_CALL_CONTEXT_H
 #define TF_CALL_CONTEXT_H
 
+/// \file tf/callContext.h
+/// Functions for recording call locations.
+///
+/// Many macros want to record the location in which they are invoked.  In
+/// fact, this is the most useful feature that function-like macros have over
+/// regular functions.  This code provides a standard way to collect and pass
+/// that contextual information around.  There are two parts.  First is a
+/// small structure which holds the contextual information.  Next is a macro
+/// which will produce a temporary structure containing the local contextual
+/// information. The intended usage is in a macro.
+
+#include "pxr/pxr.h"
+#include "pxr/base/tf/api.h"
 #include "pxr/base/arch/functionLite.h"
 
 #include <stddef.h>
 
-// Many macros want to record the location in which they are invoked.  In fact,
-// this is the most useful feature that function-like macros have over regular
-// functions.  This code provides a standard way to collect and pass that
-// contextual information around.  There are two parts.  First is a small
-// structure which holds the contextual information.  Next is a macro which will
-// produce a temporary structure containing the local contextual information.
-// The intended usage is in a macro.
+PXR_NAMESPACE_OPEN_SCOPE
 
-#if !defined(BUILD_COMPONENT_SRC_PREFIX)
-#error -DBUILD_COMPONENT_SRC_PREFIX was not specified.
-#endif
-
+/// \hideinitializer
 #define TF_CALL_CONTEXT \
-TfCallContext(BUILD_COMPONENT_SRC_PREFIX __FILE__, __ARCH_FUNCTION__, __LINE__, __ARCH_PRETTY_FUNCTION__)
+TfCallContext(__ARCH_FILE__, __ARCH_FUNCTION__, __LINE__, __ARCH_PRETTY_FUNCTION__)
 
 class TfCallContext
 {
 public:
-    TfCallContext(char const *file,
-                  char const *function,
-                  size_t line,
-                  char const *prettyFunction) :
+    constexpr TfCallContext()
+        : _file(nullptr)
+        , _function(nullptr)
+        , _line(0)
+        , _prettyFunction(nullptr)
+        , _hidden(false) {}
+    
+    constexpr TfCallContext(char const *file,
+                            char const *function,
+                            size_t line,
+                            char const *prettyFunction) :
         _file(file),
         _function(function),
         _line(line),
@@ -82,6 +93,8 @@ public:
     bool IsHidden() const {
         return _hidden;
     }
+
+    explicit operator bool() const { return _file && _function; }
     
   private:
 
@@ -92,10 +105,6 @@ public:
     mutable bool _hidden;
 };
 
-TfCallContext
-Tf_PythonCallContext(char const *fileName,
-                     char const *moduleName,
-                     char const *functionName,
-                     size_t line);
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_CALL_CONTEXT_H

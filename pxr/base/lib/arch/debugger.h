@@ -24,11 +24,16 @@
 #ifndef ARCH_DEBUGGER_H
 #define ARCH_DEBUGGER_H
 
-/// \file debugger.h
+/// \file arch/debugger.h
+/// Routines for interacting with a debugger.
 
+#include "pxr/pxr.h"
+#include "pxr/base/arch/api.h"
 #include "pxr/base/arch/attributes.h"
 
-/// \brief Stop in a debugger.
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// Stop in a debugger.
 ///
 /// This function will do one of the following:  start a debugger
 /// attached to this process stopped on this function;  stop in an
@@ -50,18 +55,20 @@
 /// attached terminal by putting the process into the foreground or
 /// background.
 /// 
+ARCH_API
 void ArchDebuggerTrap() ARCH_NOINLINE;
 
-/// \brief Cause debug traps to wait for the debugger or not.
+/// Cause debug traps to wait for the debugger or not.
 ///
 /// When \p wait is \c true the next call to \c ArchDebuggerTrap()
 /// will cause the process to wait for a signal.  The user can attach
 /// a debugger to continue the process.  The process will not wait
 /// again until another call to this function with \p wait \c true.
 /// 
+ARCH_API
 void ArchDebuggerWait(bool wait);
 
-/// \brief Attach a debugger
+/// Attach a debugger.
 ///
 /// Attaches the debugger by running the contents of the enviroment variable
 /// ARCH_DEBUGGER using /bin/sh.  Any '%p' in the contents of this variable
@@ -70,14 +77,23 @@ void ArchDebuggerWait(bool wait);
 ///
 /// Returns true if ARCH_DEBUGGER is set and the debugger was successfully
 /// launched, otherwise returns false.
+ARCH_API
 bool ArchDebuggerAttach() ARCH_NOINLINE;
 
-/// \brief Test if a debugger is attached
+/// Test if a debugger is attached
 ///
 /// Attempts to detect if a debugger is currently attached to the process.
+ARCH_API
 bool ArchDebuggerIsAttached() ARCH_NOINLINE;
 
-/// \brief Stop in the debugger.
+/// Abort.  This will try to avoid the JIT debugger if any if ARCH_AVOID_JIT
+/// is in the environment and the debugger isn't already attached.  In that
+/// case it will _exit(134).  If \p logging is \c false then this will
+/// attempt to bypass any crash logging.
+ARCH_API
+void ArchAbort(bool logging = true);
+
+/// Stop in the debugger.
 ///
 /// This macro expands to \c ArchDebuggerTrap() and, if necessary and
 /// possible, code to prevent optimization so the caller appears in the
@@ -88,5 +104,7 @@ bool ArchDebuggerIsAttached() ARCH_NOINLINE;
 #else
 #define ARCH_DEBUGGER_TRAP do { ArchDebuggerTrap(); } while (0)
 #endif
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // ARCH_DEBUGGER_H

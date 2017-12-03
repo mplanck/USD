@@ -24,12 +24,14 @@
 #ifndef SDF_LAYER_STATE_DELEGATE_H
 #define SDF_LAYER_STATE_DELEGATE_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/declareHandles.h"
 #include "pxr/usd/sdf/types.h"
-
 #include "pxr/base/tf/declarePtrs.h"
 #include "pxr/base/tf/refBase.h"
 #include "pxr/base/tf/weakBase.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 SDF_DECLARE_HANDLES(SdfLayer);
 
@@ -43,13 +45,16 @@ class SdfPath;
 class TfToken;
 
 /// \class SdfLayerStateDelegateBase
+///
 /// Maintains authoring state information for an associated layer. 
+///
 /// For example, layers rely on a state delegate to determine whether or
 /// not they have been dirtied by authoring operations.
 ///
 /// A layer's state delegate is invoked on every authoring operation on
 /// that layer. The delegate may keep track of these operations for various
 /// purposes.
+///
 class SdfLayerStateDelegateBase
     : public TfRefBase
     , public TfWeakBase
@@ -103,6 +108,23 @@ public:
     void MoveSpec(
         const SdfPath& oldPath,
         const SdfPath& newPath);
+
+    void PushChild(
+        const SdfPath& parentPath,
+        const TfToken& field,
+        const TfToken& value);
+    void PushChild(
+        const SdfPath& parentPath,
+        const TfToken& field,
+        const SdfPath& value);
+    void PopChild(
+        const SdfPath& parentPath,
+        const TfToken& field,
+        const TfToken& oldValue);
+    void PopChild(
+        const SdfPath& parentPath,
+        const TfToken& field,
+        const SdfPath& oldValue);
 
 protected:
     SdfLayerStateDelegateBase();
@@ -181,6 +203,30 @@ protected:
         const SdfPath& oldPath,
         const SdfPath& newPath) = 0;
 
+    /// Invoked when a child spec is pushed onto a parent's list of children.
+    virtual void _OnPushChild(
+        const SdfPath& parentPath,
+        const TfToken& fieldName,
+        const TfToken& value) = 0;
+
+    /// Invoked when a child spec is pushed onto a parent's list of children.
+    virtual void _OnPushChild(
+        const SdfPath& parentPath,
+        const TfToken& fieldName,
+        const SdfPath& value) = 0;
+
+    /// Invoked when a child spec is popped off a parent's list of children.
+    virtual void _OnPopChild(
+        const SdfPath& parentPath,
+        const TfToken& fieldName,
+        const TfToken& oldValue) = 0;
+
+    /// Invoked when a child spec is popped off a parent's list of children.
+    virtual void _OnPopChild(
+        const SdfPath& parentPath,
+        const TfToken& fieldName,
+        const SdfPath& oldValue) = 0;
+
 private:
     friend class SdfLayer;
     void _SetLayer(const SdfLayerHandle& layer);
@@ -202,56 +248,75 @@ protected:
     SdfSimpleLayerStateDelegate();
 
     // SdfLayerStateDelegateBase overrides
-    virtual bool _IsDirty();
-    virtual void _MarkCurrentStateAsClean();
-    virtual void _MarkCurrentStateAsDirty();
+    virtual bool _IsDirty() override;
+    virtual void _MarkCurrentStateAsClean() override;
+    virtual void _MarkCurrentStateAsDirty() override;
 
     virtual void _OnSetLayer(
-        const SdfLayerHandle& layer);
+        const SdfLayerHandle& layer) override;
 
     virtual void _OnSetField(
         const SdfAbstractDataSpecId& id,
         const TfToken& fieldName,
-        const VtValue& value);
+        const VtValue& value) override;
     virtual void _OnSetField(
         const SdfAbstractDataSpecId& id,
         const TfToken& fieldName,
-        const SdfAbstractDataConstValue& value);
+        const SdfAbstractDataConstValue& value) override;
     virtual void _OnSetFieldDictValueByKey(
         const SdfAbstractDataSpecId& id,
         const TfToken& fieldName,
         const TfToken& keyPath,
-        const VtValue& value);
+        const VtValue& value) override;
     virtual void _OnSetFieldDictValueByKey(
         const SdfAbstractDataSpecId& id,
         const TfToken& fieldName,
         const TfToken& keyPath,
-        const SdfAbstractDataConstValue& value);
+        const SdfAbstractDataConstValue& value) override;
 
     virtual void _OnSetTimeSample(
         const SdfAbstractDataSpecId& id,
         double time,
-        const VtValue& value);
+        const VtValue& value) override;
     virtual void _OnSetTimeSample(
         const SdfAbstractDataSpecId& id,
         double time,
-        const SdfAbstractDataConstValue& value);
+        const SdfAbstractDataConstValue& value) override;
 
     virtual void _OnCreateSpec(
         const SdfPath& path,
         SdfSpecType specType,
-        bool inert);
+        bool inert) override;
 
     virtual void _OnDeleteSpec(
         const SdfPath& path,
-        bool inert);
+        bool inert) override;
 
     virtual void _OnMoveSpec(
         const SdfPath& oldPath,
-        const SdfPath& newPath);
+        const SdfPath& newPath) override;
+
+    virtual void _OnPushChild(
+        const SdfPath& id,
+        const TfToken& fieldName,
+        const TfToken& value) override;
+    virtual void _OnPushChild(
+        const SdfPath& id,
+        const TfToken& fieldName,
+        const SdfPath& value) override;
+    virtual void _OnPopChild(
+        const SdfPath& id,
+        const TfToken& fieldName,
+        const TfToken& oldValue) override;
+    virtual void _OnPopChild(
+        const SdfPath& id,
+        const TfToken& fieldName,
+        const SdfPath& oldValue) override;
 
 private:
     bool _dirty;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_LAYER_STATE_DELEGATE_H

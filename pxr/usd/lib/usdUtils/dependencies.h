@@ -21,24 +21,38 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-///
-/// \file usdUtils/dependencies.h
-
 #ifndef USDUTILS_DEPENDENCIES_H
 #define USDUTILS_DEPENDENCIES_H
 
+/// \file usdUtils/dependencies.h
+///
+/// Utilities for extracting asset dependencies from a USD file.
+
+#include "pxr/pxr.h"
+#include "pxr/usd/usdUtils/api.h"
+
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 /// Parses the file at \p filePath, identifying external references, and
 /// sorting them into separate type-based buckets. Sublayers are returned in
 /// the \p sublayers vector, references, whether prim references or values
 /// from asset path attributes, are returned in the \p references vector.
 /// Payload paths are returned in \p payloads.
+///
+/// \note No recursive chasing of dependencies is performed; that is the
+/// client's responsibility, if desired.
+USDUTILS_API
 void UsdUtilsExtractExternalReferences(
     const std::string& filePath,
     std::vector<std::string>* subLayers,
     std::vector<std::string>* references,
     std::vector<std::string>* payloads);
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USDUTILS_DEPENDENCIES_H

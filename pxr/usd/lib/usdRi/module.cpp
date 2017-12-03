@@ -21,7 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/tf/pyModule.h"
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 TF_WRAP_MODULE
 {
@@ -33,7 +36,12 @@ TF_WRAP_MODULE
     TF_WRAP(UsdRiRisPattern);
         TF_WRAP(UsdRiRisOslPattern);
 
-    TF_WRAP(UsdRiLookAPI);
+    TF_WRAP(UsdRiLightAPI);
+    TF_WRAP(UsdRiLightFilterAPI);
+    TF_WRAP(UsdRiLightPortalAPI);
+    TF_WRAP(UsdRiMaterialAPI);
+    TF_WRAP(UsdRiTextureAPI);
+    TF_WRAP(UsdRiSplineAPI);
 
     TF_WRAP(UsdRiRisIntegrator);
     TF_WRAP(UsdRiRslShader);
@@ -42,4 +50,13 @@ TF_WRAP_MODULE
     TF_WRAP(UsdRiTokens);
 
     TF_WRAP(UsdRiRmanUtilities);
+
+    TF_WRAP(UsdRiPxrAovLight);
+    TF_WRAP(UsdRiPxrEnvDayLight);
+
+    TF_WRAP(UsdRiPxrBarnLightFilter);
+    TF_WRAP(UsdRiPxrIntMultLightFilter);
+    TF_WRAP(UsdRiPxrCookieLightFilter);
+    TF_WRAP(UsdRiPxrRampLightFilter);
+    TF_WRAP(UsdRiPxrRodLightFilter);
 }

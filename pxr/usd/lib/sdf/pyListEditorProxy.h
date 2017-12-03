@@ -21,11 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/pyListEditorProxy.h
-
 #ifndef SDF_PYLISTEDITORPROXY_H
 #define SDF_PYLISTEDITORPROXY_H
 
+/// \file sdf/pyListEditorProxy.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/listEditorProxy.h"
 #include "pxr/usd/sdf/listOp.h"
 #include "pxr/usd/sdf/pyListProxy.h"
@@ -38,6 +39,8 @@
 #include "pxr/base/tf/pyUtils.h"
 #include "pxr/base/tf/stringUtils.h"
 #include <boost/python.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 class Sdf_PyListEditorUtils {
 public:
@@ -57,7 +60,7 @@ public:
 
             TfPyLock pyLock;
             object result = _callback(_owner, value, op);
-            if (not TfPyIsNone(result)) {
+            if (! TfPyIsNone(result)) {
                 extract<V> e(result);
                 if (e.check()) {
                     return boost::optional<V>(e());
@@ -90,7 +93,7 @@ public:
 
             TfPyLock pyLock;
             object result = _callback(value);
-            if (not TfPyIsNone(result)) {
+            if (! TfPyIsNone(result)) {
                 extract<V> e(result);
                 if (e.check()) {
                     return boost::optional<V>(e());
@@ -140,14 +143,20 @@ private:
             .add_property("addedItems",
                 &Type::GetAddedItems,
                 &This::_SetAddedProxy)
+            .add_property("prependedItems",
+                &Type::GetPrependedItems,
+                &This::_SetPrependedProxy)
+            .add_property("appendedItems",
+                &Type::GetAppendedItems,
+                &This::_SetAppendedProxy)
             .add_property("deletedItems",
                 &Type::GetDeletedItems,
                 &This::_SetDeletedProxy)
             .add_property("orderedItems",
                 &Type::GetOrderedItems,
                 &This::_SetOrderedProxy)
-            .add_property("addedOrExplicitItems",
-                &Type::GetAddedOrExplicitItems)
+            .def("GetAddedOrExplicitItems", &Type::GetAddedOrExplicitItems,
+                return_value_policy<TfPySequenceToTuple>())
             .add_property("isExplicit", &Type::IsExplicit)
             .add_property("isOrderedOnly", &Type::IsOrderedOnly)
             .def("ApplyEditsToList",
@@ -168,6 +177,8 @@ private:
 
             // New API (see bug 8710)
             .def("Add", &Type::Add)
+            .def("Prepend", &Type::Prepend)
+            .def("Append", &Type::Append)
             .def("Remove", &Type::Remove)
             .def("Erase", &Type::Erase)
             ;
@@ -199,6 +210,16 @@ private:
     static void _SetAddedProxy(Type& x, const value_vector_type& v)
     {
         x.GetAddedItems() = v;
+    }
+
+    static void _SetPrependedProxy(Type& x, const value_vector_type& v)
+    {
+        x.GetPrependedItems() = v;
+    }
+
+    static void _SetAppendedProxy(Type& x, const value_vector_type& v)
+    {
+        x.GetAppendedItems() = v;
     }
 
     static void _SetDeletedProxy(Type& x, const value_vector_type& v)
@@ -235,4 +256,6 @@ private:
     }
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif // SDF_PYLISTEDITORPROXY_H

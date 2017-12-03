@@ -26,7 +26,12 @@
 
 /// \file primReaderArgs.h
 
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
 #include "pxr/usd/usd/prim.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 /// \class PxrUsdMayaPrimReaderArgs
 /// \brief This class holds read-only arguments that are passed into reader plugins for
@@ -36,20 +41,35 @@
 class PxrUsdMayaPrimReaderArgs
 {
 public:
+    PXRUSDMAYA_API
     PxrUsdMayaPrimReaderArgs(
             const UsdPrim& prim,
             const TfToken& shadingMode,
             const TfToken& defaultMeshScheme,
-            const bool readAnimData);
+            const bool readAnimData,
+            const bool useCustomFrameRange,
+            const double startTime,
+            const double endTime);
 
     /// \brief return the usd prim that should be read.
+    PXRUSDMAYA_API
     const UsdPrim& GetUsdPrim() const;
 
+    PXRUSDMAYA_API
     const TfToken& GetShadingMode() const;
 
+    PXRUSDMAYA_API
     const TfToken& GetDefaultMeshScheme() const;
 
+    PXRUSDMAYA_API
     const bool& GetReadAnimData() const;
+
+    PXRUSDMAYA_API
+    bool HasCustomFrameRange() const;
+    PXRUSDMAYA_API
+    double GetStartTime() const;
+    PXRUSDMAYA_API
+    double GetEndTime() const;
     
     bool ShouldImportUnboundShaders() const {
         // currently this is disabled.
@@ -61,6 +81,12 @@ private:
     const TfToken& _shadingMode;
     const TfToken& _defaultMeshScheme;
     const bool _readAnimData;
+    const bool _useCustomFrameRange;
+    const double _startTime;
+    const double _endTime;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDMAYA_PRIMREADERARGS_H

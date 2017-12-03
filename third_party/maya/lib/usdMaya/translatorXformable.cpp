@@ -21,10 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/translatorXformable.h"
 
 #include "usdMaya/translatorPrim.h"
+#include "usdMaya/translatorUtil.h"
+#include "usdMaya/xformStack.h"
 
+#include "pxr/base/tf/token.h"
 #include "pxr/usd/usdGeom/xformable.h"
 #include "pxr/usd/usdGeom/xform.h"
 #include "pxr/usd/usd/stage.h"
@@ -34,6 +38,7 @@
 #include <maya/MDagModifier.h>
 #include <maya/MFnAnimCurve.h>
 #include <maya/MFnTransform.h>
+#include <maya/MEulerRotation.h>
 #include <maya/MGlobal.h>
 #include <maya/MPlug.h>
 #include <maya/MTransformationMatrix.h>
@@ -42,83 +47,86 @@
 
 #include <boost/assign/list_of.hpp>
 #include <algorithm>
+#include <unordered_map>
 
-static const std::vector<std::string> _MAYA_OPS = boost::assign::list_of
-    ("translate")
-    ("rotatePivotTranslate")
-    ("rotatePivot")
-    ("rotate")
-    ("rotateAxis")
-    ("rotatePivotINV")
-    ("scalePivotTranslate")
-    ("scalePivot")
-    ("shear")
-    ("scale")
-    ("scalePivotINV");
-    
-static const std::vector<std::pair<int, int> > _MAYA_OPS_PIVOTPAIRS = boost::assign::list_of
-    ( std::make_pair(2, 5) )
-    ( std::make_pair(7, 10) );
+PXR_NAMESPACE_OPEN_SCOPE
 
-static const std::vector<std::string> _COMMON_OPS = boost::assign::list_of
-    ("translate")
-    ("pivot")
-    ("rotate")
-    ("scale")
-    ("pivotINV");
-
-static const std::vector<std::pair<int, int> > _COMMON_OPS_PIVOTPAIRS = boost::assign::list_of
-    ( std::make_pair(1, 4) );
-
-// This function retrieve a value for a given xformop and given time sample. It
+// This function retrieves a value for a given xformOp and given time sample. It
 // knows how to deal with different type of ops and angle conversion
 static bool _getXformOpAsVec3d(
-        const UsdGeomXformOp &xformop, 
-        GfVec3d &value, 
+        const UsdGeomXformOp &xformOp,
+        GfVec3d &value,
         const UsdTimeCode &usdTime)
 {
-    bool retValue=false; int rotAxis=-1; double angleMult=1;
-    UsdGeomXformOp::Type opType = xformop.GetOpType();
-    value=GfVec3d(0); if (opType == UsdGeomXformOp::TypeScale) value=GfVec3d(1);
+    bool retValue = false;
+
+    const UsdGeomXformOp::Type opType = xformOp.GetOpType();
+
+    if (opType == UsdGeomXformOp::TypeScale) {
+        value = GfVec3d(1.0);
+    } else {
+        value = GfVec3d(0.0);
+    }
+
+    // Check whether the XformOp is a type of rotation.
+    int rotAxis = -1;
+    double angleMult = GfDegreesToRadians(1.0);
 
     switch(opType) {
-        case UsdGeomXformOp::TypeRotateX: rotAxis=0; angleMult = GfDegreesToRadians(1.0); break;
-        case UsdGeomXformOp::TypeRotateY: rotAxis=1; angleMult = GfDegreesToRadians(1.0); break;
-        case UsdGeomXformOp::TypeRotateZ: rotAxis=2; angleMult = GfDegreesToRadians(1.0); break;
+        case UsdGeomXformOp::TypeRotateX:
+            rotAxis = 0;
+            break;
+        case UsdGeomXformOp::TypeRotateY:
+            rotAxis = 1;
+            break;
+        case UsdGeomXformOp::TypeRotateZ:
+            rotAxis = 2;
+            break;
         case UsdGeomXformOp::TypeRotateXYZ:
         case UsdGeomXformOp::TypeRotateXZY:
         case UsdGeomXformOp::TypeRotateYXZ:
         case UsdGeomXformOp::TypeRotateYZX:
         case UsdGeomXformOp::TypeRotateZXY:
         case UsdGeomXformOp::TypeRotateZYX:
-        angleMult = GfDegreesToRadians(1.0);
-        break;
-        default: break;
+            break;
+        default:
+            // This XformOp is not a rotation, so we're not converting an
+            // angular value from degrees to radians.
+            angleMult = 1.0;
+            break;
     }
-    
-    // If we encounter a transform op we tread it as a shear operation
+
+    // If we encounter a transform op, we treat it as a shear operation.
     if (opType == UsdGeomXformOp::TypeTransform) {
-        GfMatrix4d xform(1.0);
-        retValue=xformop.Get(&xform, usdTime);
-        if (retValue) {
-            value[0]=xform[1][0]; //xyVal
-            value[1]=xform[2][0]; //xzVal
-            value[2]=xform[2][1]; //yzVal
-        }
-    } else if (rotAxis!=-1) {
+        // GetOpTransform() handles the inverse op case for us.
+        GfMatrix4d xform = xformOp.GetOpTransform(usdTime);
+        value[0] = xform[1][0]; //xyVal
+        value[1] = xform[2][0]; //xzVal
+        value[2] = xform[2][1]; //yzVal
+        retValue = true;
+    } else if (rotAxis != -1) {
         // Single Axis rotation
-        double valued=0;
-        retValue=xformop.GetAs<double>(&valued, usdTime);
-        if (retValue) value[rotAxis]=valued*angleMult;
+        double valued = 0;
+        retValue = xformOp.GetAs<double>(&valued, usdTime);
+        if (retValue) {
+            if (xformOp.IsInverseOp()) {
+                valued = -valued;
+            }
+            value[rotAxis] = valued * angleMult;
+        }
     } else {
         GfVec3d valued;
-        retValue=xformop.GetAs<GfVec3d>(&valued, usdTime);
+        retValue = xformOp.GetAs<GfVec3d>(&valued, usdTime);
         if (retValue) {
-            value[0]=valued[0]*angleMult;
-            value[1]=valued[1]*angleMult;
-            value[2]=valued[2]*angleMult;
+            if (xformOp.IsInverseOp()) {
+                valued = -valued;
+            }
+            value[0] = valued[0] * angleMult;
+            value[1] = valued[1] * angleMult;
+            value[2] = valued[2] * angleMult;
         }
     }
+
     return retValue;
 }
 
@@ -129,7 +137,7 @@ static void _setAnimPlugData(MPlug plg, std::vector<double> &value, MTimeArray &
     MStatus status;
     MFnAnimCurve animFn;
     // Make the plug keyable before attaching an anim curve
-    if (not plg.isKeyable()) {
+    if (!plg.isKeyable()) {
         plg.setKeyable(true);
     }
     MObject animObj = animFn.create(plg, NULL, &status);
@@ -190,147 +198,13 @@ static void _setMayaAttribute(
     }
 }
 
-static std::string
-_GetOpName(const UsdGeomXformOp& xformOp)
-{
-    std::vector<std::string> opSplitName = xformOp.SplitName();
-
-    if (opSplitName.size() == 3) {
-        // if we have some specialized name, SplitName will give us something
-        // like: ['xformOp:translate:rotatePivot']
-        std::string opName = opSplitName[2];
-
-        // If the xformop has !invert!, add INV at the end of its name
-        if (xformOp.IsInverseOp()) {
-            opName += "INV";
-        }
-
-        return opName;
-    }
-
-    // if we don't have a name, convert it to a standard name
-    switch(xformOp.GetOpType()) {
-        case UsdGeomXformOp::TypeTranslate: 
-            return "translate"; 
-        break;
-
-        case UsdGeomXformOp::TypeScale: 
-            return "scale"; 
-        break;
-
-        case UsdGeomXformOp::TypeRotateX:
-        case UsdGeomXformOp::TypeRotateY:
-        case UsdGeomXformOp::TypeRotateZ:
-        case UsdGeomXformOp::TypeRotateXYZ:
-        case UsdGeomXformOp::TypeRotateXZY:
-        case UsdGeomXformOp::TypeRotateYXZ:
-        case UsdGeomXformOp::TypeRotateYZX:
-        case UsdGeomXformOp::TypeRotateZXY:
-        case UsdGeomXformOp::TypeRotateZYX:
-            return "rotate";
-        break;
-
-        case UsdGeomXformOp::TypeTransform: break;
-        case UsdGeomXformOp::TypeOrient: break;
-        case UsdGeomXformOp::TypeInvalid: break;
-        default: break;
-    }
-
-    // shouldn't be getting here.
-    return "";
-}
-
-// For each xformop, we want to find the corresponding opName.  There are 2
-// requirements:
-//  - the matches for each xformop must have increasing indexes in opNames.
-//  - pivotPairs must either both be matched or neither matched.
-//
-// this returns a vector of opNames.  The size of this vector will be 0 if no
-// complete match is found, or xformops.size() if a complete match is found.
-static std::vector<std::string> 
-_MatchXformOpNames(
-        const std::vector<UsdGeomXformOp>& xformops, 
-        const std::vector<std::string>& opNames,
-        const std::vector<std::pair<int, int> >& pivotPairs,
-        MTransformationMatrix::RotationOrder* MrotOrder)
-{
-
-    static const std::vector<std::string> _NO_MATCH;
-    std::vector<std::string> ret;
-
-    // nextOpName keeps track of where we will start looking for matches.  It
-    // will only move forward.
-    std::vector<std::string>::const_iterator nextOpName = opNames.begin();
-
-    std::vector<bool> opNamesFound(opNames.size(), false);
-
-    TF_FOR_ALL(iter, xformops) {
-        const UsdGeomXformOp& xformOp = *iter;
-        std::string opName = _GetOpName(xformOp);
-
-        // walk through opNames until we find one that matches
-        std::vector<std::string>::const_iterator findOp = std::find(
-                nextOpName,
-                opNames.end(),
-                opName);
-        if (findOp == opNames.end()) {
-            return _NO_MATCH;
-        }
-
-        // we found it
-
-        // if we're a rotate, set the maya rotation order (if it's relevant to
-        // this op)
-        if (opName == "rotate") {
-            switch(xformOp.GetOpType()) {
-                case UsdGeomXformOp::TypeRotateXYZ:
-                    *MrotOrder = MTransformationMatrix::kXYZ;
-                break;
-                case UsdGeomXformOp::TypeRotateXZY:
-                    *MrotOrder = MTransformationMatrix::kXZY;
-                break;
-                case UsdGeomXformOp::TypeRotateYXZ:
-                    *MrotOrder = MTransformationMatrix::kYXZ;
-                break;
-                case UsdGeomXformOp::TypeRotateYZX:
-                    *MrotOrder = MTransformationMatrix::kYZX;
-                break;
-                case UsdGeomXformOp::TypeRotateZXY:
-                    *MrotOrder = MTransformationMatrix::kZXY;
-                break;
-                case UsdGeomXformOp::TypeRotateZYX:
-                    *MrotOrder = MTransformationMatrix::kZYX;
-                break;
-
-                default: break;
-            }
-        }
-
-        // move the nextOpName pointer along.
-        ret.push_back(*findOp);
-        int nextOpNameIndex = findOp - opNames.begin();
-        opNamesFound[nextOpNameIndex] = true; 
-        nextOpName = findOp + 1;
-    }
-
-    // check pivot pairs
-    TF_FOR_ALL(pairIter, pivotPairs) {
-        if (opNamesFound[pairIter->first] != opNamesFound[pairIter->second]) {
-            return _NO_MATCH;
-        }
-    }
-
-    return ret;
-}
-
 // For each xformop, we gather it's data either time sampled or not and we push
 // it to the corresponding Maya xform
 static bool _pushUSDXformOpToMayaXform(
         const UsdGeomXformOp& xformop, 
-        const std::string& opName, 
+        const TfToken& opName,
         MFnDagNode &MdagNode,
-        bool *importedPivots,
-        bool readAnimData,
+        const PxrUsdMayaPrimReaderArgs& args,
         const PxrUsdMayaPrimReaderContext* context)
 {
     std::vector<double> xValue;
@@ -338,11 +212,11 @@ static bool _pushUSDXformOpToMayaXform(
     std::vector<double> zValue;
     GfVec3d value;
     std::vector<double> timeSamples;
-    if (readAnimData) {
-        xformop.GetTimeSamples(&timeSamples);
+    if (args.GetReadAnimData()) {
+        PxrUsdMayaTranslatorUtil::GetTimeSamples(xformop, args, &timeSamples);
     }
     MTimeArray timeArray;
-    if (not timeSamples.empty()) {
+    if (!timeSamples.empty()) {
         timeArray.setLength(timeSamples.size());
         xValue.resize(timeSamples.size());
         yValue.resize(timeSamples.size());
@@ -359,7 +233,7 @@ static bool _pushUSDXformOpToMayaXform(
         }
     } 
     else {
-        // pick the first avaiable sample or default
+        // pick the first available sample or default
         UsdTimeCode time=UsdTimeCode::EarliestTime();
         if (_getXformOpAsVec3d(xformop, value, time)) {
             xValue.resize(1);
@@ -372,22 +246,56 @@ static bool _pushUSDXformOpToMayaXform(
         }
     }
     if (xValue.size()) {
-        if (opName=="shear") {
-            _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString(opName.c_str()), "XY", "XZ", "YZ", context);
+        if (opName==PxrUsdMayaXformStackTokens->shear) {
+            _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString(opName.GetText()), "XY", "XZ", "YZ", context);
         } 
-        else if (opName=="pivot") {
+        else if (opName==PxrUsdMayaXformStackTokens->pivot) {
             _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString("rotatePivot"), "X", "Y", "Z", context);
             _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString("scalePivot"), "X", "Y", "Z", context);
-            if (*importedPivots) {
-                *importedPivots = true;
-            }
-        } 
-        else if (opName=="pivotTranslate") {
+        }
+        else if (opName==PxrUsdMayaXformStackTokens->pivotTranslate) {
             _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString("rotatePivotTranslate"), "X", "Y", "Z", context);
             _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString("scalePivotTranslate"), "X", "Y", "Z", context);
-        } 
+        }
         else {
-            _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString(opName.c_str()), "X", "Y", "Z", context);
+            if (opName==PxrUsdMayaXformStackTokens->rotate) {
+                MFnTransform trans;
+                if(trans.setObject(MdagNode.object()))
+                {
+                    auto MrotOrder =
+                            PxrUsdMayaXformStack::RotateOrderFromOpType<MTransformationMatrix::RotationOrder>(
+                                    xformop.GetOpType());
+                    MPlug plg = MdagNode.findPlug("rotateOrder");
+                    if ( !plg.isNull() ) {
+                        trans.setRotationOrder(MrotOrder, /*no need to reorder*/ false);
+                    }
+                }
+            }
+            else if(opName==PxrUsdMayaXformStackTokens->rotateAxis)
+            {
+                // Rotate axis only accepts input in XYZ form
+                // (though it's actually stored as a quaternion),
+                // so we need to convert other rotation orders to XYZ
+                const auto opType = xformop.GetOpType();
+                if (opType != UsdGeomXformOp::TypeRotateXYZ
+                        && opType != UsdGeomXformOp::TypeRotateX
+                        && opType != UsdGeomXformOp::TypeRotateY
+                        && opType != UsdGeomXformOp::TypeRotateZ)
+                {
+                    for (size_t i = 0u; i < xValue.size(); ++i)
+                    {
+                        auto MrotOrder =
+                                PxrUsdMayaXformStack::RotateOrderFromOpType<MEulerRotation::RotationOrder>(
+                                        xformop.GetOpType());
+                        MEulerRotation eulerRot(xValue[i], yValue[i], zValue[i], MrotOrder);
+                        eulerRot.reorderIt(MEulerRotation::kXYZ);
+                        xValue[i] = eulerRot.x;
+                        yValue[i] = eulerRot.y;
+                        zValue[i] = eulerRot.z;
+                    }
+                }
+            }
+            _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray, MString(opName.GetText()), "X", "Y", "Z", context);
         }
         return true;
     } 
@@ -402,7 +310,7 @@ static bool _isIdentityMatrix(GfMatrix4d m)
     bool isIdentity=true;
     for (unsigned int i=0; i<4; i++) {
         for (unsigned int j=0; j<4; j++) {
-            if ((i==j && GfIsClose(m[i][j], 1.0, 1e-9)==false) or
+            if ((i==j && GfIsClose(m[i][j], 1.0, 1e-9)==false) ||
                 (i!=j && GfIsClose(m[i][j], 0.0, 1e-9)==false)) {
                 isIdentity=false; break;
             }
@@ -415,6 +323,7 @@ static bool _isIdentityMatrix(GfMatrix4d m)
 static bool _pushUSDXformToMayaXform(
         const UsdGeomXformable &xformSchema, 
         MFnDagNode &MdagNode,
+        const PxrUsdMayaPrimReaderArgs& args,
         const PxrUsdMayaPrimReaderContext* context)
 {
     std::vector<double> TxVal, TyVal, TzVal;
@@ -425,9 +334,9 @@ static bool _pushUSDXformToMayaXform(
     GfMatrix4d localXform(1.0);
 
     std::vector<double> tSamples;
-    xformSchema.GetTimeSamples(&tSamples);
+    PxrUsdMayaTranslatorUtil::GetTimeSamples(xformSchema, args, &tSamples);
     MTimeArray timeArray;
-    if (not tSamples.empty()) {
+    if (!tSamples.empty()) {
         timeArray.setLength(tSamples.size());
         TxVal.resize(tSamples.size()); TyVal.resize(tSamples.size()); TzVal.resize(tSamples.size());
         RxVal.resize(tSamples.size()); RyVal.resize(tSamples.size()); RzVal.resize(tSamples.size());
@@ -438,7 +347,7 @@ static bool _pushUSDXformToMayaXform(
                                                    &resetsXformStack,
                                                    time)) {
                 xlate=GfVec3d(0); rotate=GfVec3d(0); scale=GfVec3d(1);
-                if (not _isIdentityMatrix(localXform)) {
+                if (!_isIdentityMatrix(localXform)) {
                      MGlobal::displayWarning("Decomposing non identity 4X4 matrix at: " 
                     + MString(xformSchema.GetPath().GetText()) + " At sample: " + tSamples[ti]);
                      PxrUsdMayaTranslatorXformable::ConvertUsdMatrixToComponents(
@@ -457,9 +366,11 @@ static bool _pushUSDXformToMayaXform(
     else {
         if (xformSchema.GetLocalTransformation(&localXform, &resetsXformStack)) {
             xlate=GfVec3d(0); rotate=GfVec3d(0); scale=GfVec3d(1);
-            if (not _isIdentityMatrix(localXform)) {
+            if (!_isIdentityMatrix(localXform)) {
                 MGlobal::displayWarning("Decomposing non identity 4X4 matrix at: " 
                     + MString(xformSchema.GetPath().GetText()));
+                // XXX if we want to support the old pivotPosition, we can pass
+                // it into this function..
                 PxrUsdMayaTranslatorXformable::ConvertUsdMatrixToComponents(
                         localXform, &xlate, &rotate, &scale);
             }
@@ -508,80 +419,39 @@ PxrUsdMayaTranslatorXformable::Read(
     std::vector<UsdGeomXformOp> xformops = xformSchema.GetOrderedXformOps(
         &resetsXformStack);
             
-    MTransformationMatrix::RotationOrder MrotOrder = MTransformationMatrix::kXYZ;
-
-    // This string array define the Xformops that are conformant to Maya and
-    // CommonAPI.
-    //
     // When we find ops, we match the ops by suffix ("" will define the basic
     // translate, rotate, scale) and by order. If we find an op with a
     // different name or out of order that will miss the match, we will rely on
     // matrix decomposition
 
-    std::vector<std::string> opNames;
-    if (opNames.empty()) {
-        // Check if the xforms are the generic Maya xform operators 
-        opNames = _MatchXformOpNames(xformops, 
-                _MAYA_OPS, _MAYA_OPS_PIVOTPAIRS, 
-                &MrotOrder);
-    }
+    PxrUsdMayaXformStack::OpClassList stackOps = \
+            PxrUsdMayaXformStack::FirstMatchingSubstack(
+                    {
+                        &PxrUsdMayaXformStack::MayaStack(),
+                        &PxrUsdMayaXformStack::CommonStack()
+                    },
+                    xformops);
 
-    if (opNames.empty()) {
-        // Check if the xforms are the CommonAPI
-        opNames = _MatchXformOpNames(xformops, 
-                _COMMON_OPS, _COMMON_OPS_PIVOTPAIRS,
-                &MrotOrder);
-    }
-
-    bool importedPivots = false;
     MFnDagNode MdagNode(mayaNode);
-    if (not opNames.empty()) {
-        // make sure opNames.size() == xformops.size()
-        for (unsigned int i=0; i < opNames.size(); i++) {
+    if (!stackOps.empty()) {
+        // make sure stackIndices.size() == xformops.size()
+        for (unsigned int i=0; i < stackOps.size(); i++) {
             const UsdGeomXformOp& xformop(xformops[i]);
-            const std::string& opName(opNames[i]);
+            const PxrUsdMayaXformOpClassification& opDef(stackOps[i]);
+            // If we got a valid stack, we have both the members of the inverted twins..
+            // ...so we can go ahead and skip the inverted twin
+            if (opDef.IsInvertedTwin()) continue;
 
-            if (opName=="rotate") {
-                MPlug plg = MdagNode.findPlug("rotateOrder");
-                if ( !plg.isNull() ) {
-                    MFnTransform trans; 
-                    trans.setObject(mayaNode);
-                    trans.setRotationOrder(MrotOrder, /*no need to reorder*/ false);
-                }
-            }
-            _pushUSDXformOpToMayaXform(xformop, opName, MdagNode, &importedPivots,
-                    args.GetReadAnimData(), context);
+            const TfToken& opName(opDef.GetName());
+
+            _pushUSDXformOpToMayaXform(xformop, opName, MdagNode, args, context);
         }
     } else {
-        // This xform can't be safely interpreted by Maya. Decompose Matrix
-        if (_pushUSDXformToMayaXform(xformSchema, MdagNode, context)==false) {
+        if (_pushUSDXformToMayaXform(xformSchema, MdagNode, args, context) == 
+                false) {
             MGlobal::displayError(
                     "Unable to successfully decompose matrix at USD Prim:" 
                     + MString(xformSchema.GetPath().GetText()));
-        }
-    }
-    
-
-    // XXX:bug 117525
-    // We support UsdGeomXformable.pivotPosition until we have robust
-    // interchange with pivots encoded as xformOps.
-    if (not importedPivots) {
-        GfVec3f pivotPosition(0.);
-        static const GfVec3f origin(0.);
-        static const TfToken pivotPosTok("pivotPosition");
-        if (xformSchema.GetPrim().GetAttribute(pivotPosTok).Get(
-                &pivotPosition, UsdTimeCode::Default())
-            and not GfIsClose(pivotPosition, origin, 1e-6)) {
-            MTimeArray timeArray;
-            std::vector<double> xValue(1, pivotPosition[0]);
-            std::vector<double> yValue(1, pivotPosition[1]);
-            std::vector<double> zValue(1, pivotPosition[2]);
-            _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray,
-                             MString("rotatePivot"), "X", "Y", "Z",
-                             context);
-            _setMayaAttribute(MdagNode, xValue, yValue, zValue, timeArray,
-                             MString("scalePivot"), "X", "Y", "Z",
-                             context);
         }
     }
 
@@ -591,4 +461,7 @@ PxrUsdMayaTranslatorXformable::Read(
     }
 }
 
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 

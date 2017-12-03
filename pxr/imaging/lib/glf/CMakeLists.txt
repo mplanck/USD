@@ -6,7 +6,15 @@ if (X11_FOUND)
     list(APPEND optionalPublicClasses testGLContext)
 endif()
 
-pxr_shared_library(glf
+set(optionalLibs "")
+set(optionalIncludeDirs "")
+if (PXR_ENABLE_PTEX_SUPPORT)
+    list(APPEND optionalPublicClasses ptexMipmapTextureLoader)
+    list(APPEND optionalLibs ${PTEX_LIBRARY})
+    list(APPEND optionalIncludeDirs ${PTEX_INCLUDE_DIR})
+endif()
+
+pxr_library(glf
     LIBRARIES
         arch
         garch
@@ -21,15 +29,17 @@ pxr_shared_library(glf
         ${OPENGL_gl_LIBRARY}
         ${OPENGL_glu_LIBRARY}
         ${OIIO_LIBRARIES}
-        ${PTEX_LIBRARY}
         ${GLEW_LIBRARY}
         ${X11_LIBRARIES}
+        ${OPENEXR_LIBRARY}
+        ${optionalLibs}
 
     INCLUDE_DIRS
         ${OIIO_INCLUDE_DIRS}
         ${Boost_INCLUDE_DIRS}
         ${GLEW_INCLUDE_DIR}
-        ${PTEX_INCLUDE_DIR}
+        ${OPENEXR_INCLUDE_DIRS}
+        ${optionalIncludeDirs}
 
     PUBLIC_CLASSES
         arrayTexture
@@ -48,7 +58,6 @@ pxr_shared_library(glf
         info
         package
         ptexTexture
-        ptexMipmapTextureLoader
         simpleLight
         simpleLightingContext
         simpleMaterial
@@ -68,13 +77,18 @@ pxr_shared_library(glf
         debugCodes
         glContextRegistry
 
+    PUBLIC_HEADERS
+        api.h
+        
     PRIVATE_HEADERS
         rankedTypeMap.h
 
     CPPFILES
         dictionary.cpp
-        moduleDeps.cpp
         oiioImage.cpp
+
+    PYTHON_CPPFILES
+        moduleDeps.cpp
 
     PYMODULE_CPPFILES
         module.cpp
@@ -82,12 +96,14 @@ pxr_shared_library(glf
         wrapDiagnostic.cpp
         wrapDrawTarget.cpp
         wrapGlew.cpp
+        wrapSimpleLight.cpp
+        wrapSimpleMaterial.cpp
         wrapTexture.cpp
         wrapTextureRegistry.cpp
         wrapUVTexture.cpp
         wrapUVTextureStorage.cpp
 
-    PYTHON_FILES
+    PYMODULE_FILES
         __init__.py
 
     RESOURCE_FILES

@@ -24,19 +24,20 @@
 #include "pxr/imaging/hd/drawItem.h"
 #include "pxr/imaging/hd/bufferArrayRange.h"
 #include "pxr/imaging/hd/geometricShader.h"
-#include "pxr/imaging/hd/shader.h"
-#include "pxr/imaging/hd/surfaceShader.h"
+#include "pxr/imaging/hd/shaderCode.h"
 
-#include "pxr/imaging/garch/gl.h"
 #include "pxr/base/gf/frustum.h"
 
 #include <boost/functional/hash.hpp>
 #include <iostream>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 HdDrawItem::HdDrawItem(HdRprimSharedData const *sharedData)
     : _sharedData(sharedData)
 {
-    HD_MALLOC_TAG_FUNCTION();
+    HF_MALLOC_TAG_FUNCTION();
 }
 
 HdDrawItem::~HdDrawItem()
@@ -44,18 +45,10 @@ HdDrawItem::~HdDrawItem()
     /*NOTHING*/
 }
 
-GLenum
-HdDrawItem::GetPrimitiveMode() const
+HdShaderCodeSharedPtr
+HdDrawItem::GetMaterial() const
 {
-    return _geometricShader
-        ? _geometricShader->GetPrimitiveMode()
-        : GL_POINTS;
-}
-
-HdShaderSharedPtr
-HdDrawItem::GetSurfaceShader() const
-{
-    return boost::static_pointer_cast<HdShader>(_sharedData->surfaceShader);
+    return _sharedData->material;
 }
 
 size_t
@@ -97,6 +90,7 @@ HdDrawItem::IntersectsViewVolume(GfMatrix4d const &viewProjMatrix) const
     }
 }
 
+HD_API
 std::ostream &operator <<(std::ostream &out, 
                                  const HdDrawItem& self) {
     out << "Draw Item:\n";
@@ -125,3 +119,6 @@ std::ostream &operator <<(std::ostream &out,
     }
     return out;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

@@ -24,16 +24,24 @@
 #ifndef HD_BINDING_H
 #define HD_BINDING_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 
 #include "pxr/imaging/hd/bufferResource.h"
 #include "pxr/imaging/hd/bufferArrayRange.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 typedef std::vector<class HdBinding> HdBindingVector;
 typedef std::vector<class HdBindingRequest> HdBindingRequestVector;
 
+/// \class HdBinding
+///
 /// Bindings are used for buffers or textures, it simple associates a binding
 /// type with a binding location.
+///
 class HdBinding {
 public:
     enum Type { // primvar, drawing coordinate and dispatch buffer bindings
@@ -155,7 +163,7 @@ public:
     /// buffer will be bound individually and exposed as independent arrays in
     /// the shader.
     bool IsBufferArray() const {
-        return _bar and not _isInterleaved;
+        return _bar && !_isInterleaved;
     }
 
     /// Like BufferArray binding requests, struct bindings have several buffers,
@@ -163,13 +171,13 @@ public:
     /// This type of binding request is exposed in the shader an array of
     ///  structs.
     bool IsInterleavedBufferArray() const {
-        return _bar and _isInterleaved;
+        return _bar && _isInterleaved;
     }
 
     /// This binding is typelss. CodeGen only allocate location and
     /// skip emitting declarations and accessors.
     bool IsTypeless() const {
-        return (not _bar) and (not _resource) and _glTypeName.IsEmpty();
+        return (!_bar) && (!_resource) && _glTypeName.IsEmpty();
     }
 
     // ---------------------------------------------------------------------- //
@@ -213,6 +221,7 @@ public:
     /// Note that this hash captures the structural state of the request, not
     /// the contents. For example, buffer array versions/reallocations will not
     /// affect hash, but changing the BAR pointer will.
+    HD_API
     size_t ComputeHash() const;
 
 private:
@@ -235,5 +244,8 @@ private:
     // GL type name used by CodeGen
     TfToken _glTypeName;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif  // HD_BINDING_H

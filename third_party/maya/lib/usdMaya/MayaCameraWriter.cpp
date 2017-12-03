@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdMaya/MayaCameraWriter.h"
 
 #include "usdMaya/JobArgs.h"
@@ -35,28 +36,31 @@
 #include <maya/MDagPath.h>
 #include <maya/MFnCamera.h>
 
+PXR_NAMESPACE_OPEN_SCOPE
 
-MayaCameraWriter::MayaCameraWriter(MDagPath & iDag, UsdStageRefPtr stage, const JobExportArgs & iArgs) :
-    MayaTransformWriter(iDag, stage, iArgs)
-{
-}
 
-/* virtual */
-UsdPrim MayaCameraWriter::write(const UsdTimeCode &usdTime)
+
+MayaCameraWriter::MayaCameraWriter(const MDagPath & iDag, const SdfPath& uPath, usdWriteJobCtx& jobCtx) :
+    MayaTransformWriter(iDag, uPath, false, jobCtx) // cameras are not instanced
 {
-    // == Write
     UsdGeomCamera primSchema =
         UsdGeomCamera::Define(getUsdStage(), getUsdPath());
     TF_AXIOM(primSchema);
-    UsdPrim prim = primSchema.GetPrim();
-    TF_AXIOM(prim);
+    mUsdPrim = primSchema.GetPrim();
+    TF_AXIOM(mUsdPrim);
+}
+
+/* virtual */
+void MayaCameraWriter::write(const UsdTimeCode &usdTime)
+{
+    // == Write
+    UsdGeomCamera primSchema(mUsdPrim);
 
     // Write parent class attrs
     writeTransformAttrs(usdTime, primSchema);
 
     // Write the attrs
     writeCameraAttrs(usdTime, primSchema);
-    return prim;
 }
 
 /* virtual */
@@ -122,3 +126,6 @@ bool MayaCameraWriter::writeCameraAttrs(const UsdTimeCode &usdTime, UsdGeomCamer
 
     return true;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

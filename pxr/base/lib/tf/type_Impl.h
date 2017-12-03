@@ -27,14 +27,13 @@
 #include "pxr/base/tf/mallocTag.h"
 #include "pxr/base/tf/singleton.h"
 
-#include <boost/bind.hpp>
 #include <boost/mpl/front.hpp>
 #include <boost/mpl/pop_front.hpp>
 #include <boost/mpl/vector.hpp>
 #include <boost/mpl/remove.hpp>
 #include <boost/mpl/empty.hpp>
 
-
+PXR_NAMESPACE_OPEN_SCOPE
 
 // Recursive template for declaring the types in TypeVector as
 // TfTypes and pushing them onto the result vector.
@@ -93,8 +92,6 @@ struct Tf_AddBases<DERIVED, TypeVector, true /* empty vector */>
         // Base case; nothing left to do.
     }
 };
-
-
 
 template <typename T, typename B>
 TfType const&
@@ -167,5 +164,6 @@ TfType::_TypeDefiner<DERIVED>::_AddBaseCppType()
     return *this;
 }
 
-#endif // TF_TYPE_IMPL_H
+PXR_NAMESPACE_CLOSE_SCOPE
 
+#endif // TF_TYPE_IMPL_H

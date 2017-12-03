@@ -115,6 +115,7 @@
 // the unload code is safe to call at this time.
 //
 
+#include "pxr/pxr.h"
 
 #include "pxr/base/tf/registryManager.h"
 #include "pxr/base/tf/debugCodes.h"
@@ -128,7 +129,6 @@
 #include "pxr/base/arch/demangle.h"
 #include "pxr/base/arch/symbols.h"
 
-#include <boost/foreach.hpp>
 #include <boost/function.hpp>
 
 #include <tbb/enumerable_thread_specific.h>
@@ -146,6 +146,8 @@ using std::set;
 using std::string;
 using std::type_info;
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 namespace {
 
@@ -312,7 +314,7 @@ Tf_RegistryManagerImpl::~Tf_RegistryManagerImpl()
 void
 Tf_RegistryManagerImpl::ClearActiveLibrary(const char* libraryName)
 {
-    TF_AXIOM(libraryName and libraryName[0]);
+    TF_AXIOM(libraryName && libraryName[0]);
 
     // If the name doesn't match then libraryName has already been processed.
     if (_active.local().name == libraryName) {
@@ -327,12 +329,12 @@ Tf_RegistryManagerImpl::AddRegistrationFunction(
     RegistrationFunction func,
     const char* typeName)
 {
-    if (not TF_VERIFY(libraryName and libraryName[0],
+    if (!TF_VERIFY(libraryName && libraryName[0],
                       "TfRegistryManager: "
                       "Ignoring library with no name")) {
         return;
     }
-    else if (not TF_VERIFY(typeName and typeName[0],
+    else if (!TF_VERIFY(typeName && typeName[0],
                       "TfRegistryManager: "
                       "Ignoring registration with no type in %s",
                       libraryName)) {
@@ -349,7 +351,7 @@ Tf_RegistryManagerImpl::AddRegistrationFunction(
         _ProcessLibraryNoLock();
     }
 
-    if (not active.identifier) {
+    if (!active.identifier) {
         TF_DEBUG(TF_DISCOVERY_TERSE).
             Msg("TfRegistryManager: "
                 "Library %s\n",
@@ -385,7 +387,7 @@ Tf_RegistryManagerImpl::AddFunctionForUnload(const UnloadFunction& func)
 void
 Tf_RegistryManagerImpl::UnloadLibrary(const char* libraryName)
 {
-    if (Tf_DlCloseIsActive() or runUnloadersAtExit) {
+    if (Tf_DlCloseIsActive() || runUnloadersAtExit) {
         std::lock_guard<std::recursive_mutex> lock(_mutex);
         _UnloadNoLock(libraryName);
     }
@@ -444,7 +446,7 @@ Tf_RegistryManagerImpl::_ProcessLibraryNoLock()
 void
 Tf_RegistryManagerImpl::_UpdateSubscribersNoLock()
 {
-    BOOST_FOREACH(const TypeName& typeName, _orderedSubscriptions) {
+    for (const auto& typeName : _orderedSubscriptions) {
         _RunRegistrationFunctionsNoLock(typeName);
     }
 }
@@ -456,9 +458,8 @@ Tf_RegistryManagerImpl::_TransferActiveLibraryNoLock()
 
     // Move active library functions to non-thread local storage type by type.
     _ActiveLibraryState& active = _active.local();
-    BOOST_FOREACH(_RegistrationFunctionMap::value_type& v,
-                  active.registrationFunctions) {
-        if (not movedAny and not v.second.empty()) {
+    for(auto& v : active.registrationFunctions) {
+        if (!movedAny && !v.second.empty()) {
             movedAny = (_subscriptions.count(v.first) != 0);
         }
         MoveToBack(_registrationFunctions[v.first], v.second);
@@ -521,7 +522,7 @@ Tf_RegistryManagerImpl::_UnloadNoLock(const char* libraryName)
                                      "unloading '%s'\n", 
                                      libraryName);
 
-    TF_AXIOM(libraryName and libraryName[0]);
+    TF_AXIOM(libraryName && libraryName[0]);
 
     LibraryIdentifier identifier   = _RegisterLibraryNoLock(libraryName);
     _UnloadFunctionMap::iterator i = _unloadFunctions.find(identifier);
@@ -533,7 +534,7 @@ Tf_RegistryManagerImpl::_UnloadNoLock(const char* libraryName)
         TF_AXIOM(i->second.empty());
 
         // Run the unload functions
-        BOOST_FOREACH(const UnloadFunction& func, unloadFunctions) {
+        for (const auto& func : unloadFunctions) {
             func();
         }
     }
@@ -543,8 +544,7 @@ Tf_RegistryManagerImpl::_UnloadNoLock(const char* libraryName)
      * crashes where the registry manager could attempt to execute a
      * registry function from the unloaded library.
      */
-    BOOST_FOREACH(_RegistrationFunctionMap::value_type& k,
-                  _registrationFunctions) {
+    for (auto& k : _registrationFunctions) {
         _RegistrationValueList& regValues = k.second;
         _RegistrationValueList::iterator regValueIt = regValues.begin();
         while (regValueIt != regValues.end()) {
@@ -608,18 +608,20 @@ TfRegistryManager::_UnsubscribeFrom(const type_info& ti)
     Tf_RegistryManagerImpl::GetInstance().UnsubscribeFrom(ArchGetDemangled(ti));
 }
 
-Tf_RegistryInit::Tf_RegistryInit(const char* name) : _name(name)
+void
+Tf_RegistryInitCtor(char const *name)
 {
     // Finished registering functions.
     if (TfSingleton<Tf_RegistryManagerImpl>::CurrentlyExists()) {
-        Tf_RegistryManagerImpl::GetInstance().ClearActiveLibrary(_name);
+        Tf_RegistryManagerImpl::GetInstance().ClearActiveLibrary(name);
     }
 }
 
-Tf_RegistryInit::~Tf_RegistryInit()
+void
+Tf_RegistryInitDtor(char const *name)
 {
     if (TfSingleton<Tf_RegistryManagerImpl>::CurrentlyExists()) {
-        Tf_RegistryManagerImpl::GetInstance().UnloadLibrary(_name);
+        Tf_RegistryManagerImpl::GetInstance().UnloadLibrary(name);
     }
 }
 
@@ -634,3 +636,5 @@ Tf_RegistryInit::Add(
     Tf_RegistryManagerImpl::GetInstance().
             AddRegistrationFunction(libName, func, typeName);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

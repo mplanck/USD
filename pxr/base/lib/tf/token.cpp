@@ -21,6 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
+
+#include "pxr/base/tf/api.h"
 #include "pxr/base/tf/token.h"
 
 #include "pxr/base/tf/hashset.h"
@@ -47,7 +51,7 @@ using std::vector;
 using std::string;
 using std::pair;
 
-char const *TfToken::_emptyStr = "";
+PXR_NAMESPACE_OPEN_SCOPE
 
 struct Tf_TokenRegistry
 {
@@ -104,8 +108,6 @@ struct Tf_TokenRegistry
     _RepSet _sets[_NumSets];
     mutable _CacheLinePadded<tbb::spin_mutex> _locks[_NumSets];
 
-    string _emptyString;
-
     static Tf_TokenRegistry& _GetInstance() {
         return TfSingleton<Tf_TokenRegistry>::GetInstance();
     }
@@ -155,7 +157,7 @@ struct Tf_TokenRegistry
             if (--rep->_refCount != 0)
                 return;
             
-            if (not _sets[setNum].erase(*rep)) {
+            if (!_sets[setNum].erase(*rep)) {
                 repFoundInSet = false;
                 repString = rep->_str;
             }            
@@ -220,11 +222,11 @@ private:
             // No entry present, add a new entry.
             TfAutoMallocTag noname("TfToken");
             _RepPtr rep = &(*_sets[setNum].insert(TfToken::_Rep(s)).first);
-            rep->_isCounted = not makeImmortal;
+            rep->_isCounted = !makeImmortal;
             rep->_setNum = setNum;
-            if (not makeImmortal)
+            if (!makeImmortal)
                 rep->_refCount = 1;
-            return _RepPtrAndBits(rep, not makeImmortal);
+            return _RepPtrAndBits(rep, !makeImmortal);
         }
     }
 
@@ -265,7 +267,8 @@ TfToken::_PossiblyDestroyRep() const
 string const&
 TfToken::_GetEmptyString()
 {
-    return Tf_TokenRegistry::_GetInstance()._emptyString;
+    static std::string empty;
+    return empty;
 }
 
 TfToken::TfToken(const string &s)
@@ -335,7 +338,9 @@ operator <<(std::ostream &stream, const TfToken& token)
     return stream << token.GetText();
 }
 
-void TfDumpTokenStats()
+TF_API void TfDumpTokenStats()
 {
     Tf_TokenRegistry::_GetInstance()._DumpStats();
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

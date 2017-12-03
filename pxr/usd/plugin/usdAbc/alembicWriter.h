@@ -21,10 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file alembicWriter.h
 #ifndef USDABC_ALEMBICWRITER_H
 #define USDABC_ALEMBICWRITER_H
 
+/// \file usdAbc/alembicWriter.h
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/staticTokens.h"
 #include "pxr/base/tf/declarePtrs.h"
 #include <boost/noncopyable.hpp>
@@ -32,13 +34,18 @@
 #include <set>
 #include <string>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 // Note -- Even though this header is private we try to keep Alembic headers
 //         out of it anyway for simplicity's sake.
 
 TF_DECLARE_WEAK_AND_REF_PTRS(SdfAbstractData);
 
 /// \class UsdAbc_AlembicDataWriter
-/// \brief An alembic writer suitable for an SdfAbstractData.
+///
+/// An alembic writer suitable for an SdfAbstractData.
+///
 class UsdAbc_AlembicDataWriter : boost::noncopyable {
 public:
     UsdAbc_AlembicDataWriter();
@@ -57,5 +64,8 @@ private:
     boost::scoped_ptr<class UsdAbc_AlembicDataWriterImpl> _impl;
     std::string _errorLog;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -1,12 +1,18 @@
 set(PXR_PREFIX pxr/usdImaging)
 set(PXR_PACKAGE usdviewq)
 
-if (NOT QT4_FOUND)
-    message(WARNING "Not building ${PXR_PACKAGE} because of missing dependency: Qt4")
+if (NOT PXR_ENABLE_PYTHON_SUPPORT)    
+    message(STATUS "Not building ${PXR_PACKAGE} because PXR_ENABLE_PYTHON_SUPPORT=OFF")   
+    return()
+elseif (NOT PYSIDE_FOUND)
+    message(WARNING "Not building ${PXR_PACKAGE} because of missing dependency: PySide")
+    return()
+elseif(NOT PYOPENGL_FOUND)
+    message(WARNING "Not building ${PXR_PACKAGE} because of missing dependency: PyOpenGL")
     return()
 endif()
 
-pxr_shared_library(usdviewq
+pxr_library(usdviewq
     LIBRARIES
         tf
         usd
@@ -19,54 +25,78 @@ pxr_shared_library(usdviewq
     PUBLIC_CLASSES
         utils
 
-    CPPFILES
+    PYTHON_CPPFILES
         moduleDeps.cpp
+        
+    PUBLIC_HEADERS
+        api.h
 
     PYMODULE_CPPFILES
         module.cpp
         wrapUtils.cpp
 
-    PYTHON_FILES
+    PYMODULE_FILES
         __init__.py
+        appEventFilter.py
         arrayAttributeView.py
         customAttributes.py
-        mainWindow.py
+        appController.py
+        plugContext.py
         scalarTypes.py
         stageView.py
         usdviewContextMenuItem.py
-        nodeContextMenu.py
-        nodeContextMenuItems.py
+        primContextMenu.py
+        primContextMenuItems.py
         headerContextMenu.py
         attributeViewContextMenu.py
         layerStackContextMenu.py
         prettyPrint.py
         pythonInterpreter.py
         settings.py
-        watchWindow.py
+        settings2.py
         adjustClipping.py
-        nodeViewItem.py
+        adjustDefaultMaterial.py
+        primViewItem.py
         common.py
+        legendUtil.py
+        primLegend.py
+        propertyLegend.py
         attributeValueEditor.py
         pythonExpressionPrompt.py
-        referenceEditor.py
         overridableLineEdit.py
-        icons/branch-closed.png
-        icons/branch-closed-selected.png
-        icons/branch-open.png
-        icons/branch-open-selected.png
+        variantComboBox.py
+        qt.py
+        constantGroup.py
         usdviewstyle.qss
-)
 
-PYSIDE_WRAP_UI(Usdviewq
-    mainWindowUI.ui
-    watchWindowUI.ui
-    adjustClippingUI.ui
-    attributeValueEditorUI.ui
-    pythonExpressionPromptUI.ui
-    referenceEditorUI.ui
+    PYSIDE_UI_FILES
+        mainWindowUI.ui
+        adjustClippingUI.ui
+        adjustDefaultMaterialUI.ui
+        attributeValueEditorUI.ui
+        primLegendUI.ui
+        propertyLegendUI.ui
+        pythonExpressionPromptUI.ui
 )
 
 install(DIRECTORY
     icons
     DESTINATION lib/python/pxr/Usdviewq
+)
+
+pxr_test_scripts(
+    testenv/testUsdviewqConstantGroup.py
+    testenv/testUsdviewqSettings2.py
+)
+
+pxr_register_test(testUsdviewqConstantGroup
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdviewqConstantGroup"
+    EXPECTED_RETURN_CODE 0
+)
+
+pxr_register_test(testUsdviewqSettings2
+    PYTHON
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testUsdviewqSettings2"
+    EXPECTED_RETURN_CODE 0
 )

@@ -24,9 +24,13 @@
 ///
 /// \file tf/wrapOptional.cpp
 
+#include "pxr/pxr.h"
 #include "pxr/base/tf/pyOptional.h"
+
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 void wrapPyOptional() {
     TfPyOptional::python_optional<std::string>();
@@ -41,5 +45,5 @@ void wrapPyOptional() {
     TfPyOptional::python_optional<unsigned short>();
     TfPyOptional::python_optional<char>();
     TfPyOptional::python_optional<unsigned char>();
+    TfPyOptional::python_optional<bool>();
 }
-

@@ -24,6 +24,7 @@
 #ifndef SDF_SCHEMA_TYPE_REGISTRATION_H
 #define SDF_SCHEMA_TYPE_REGISTRATION_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/layerOffset.h"
 #include "pxr/usd/sdf/listOp.h"
 #include "pxr/usd/sdf/path.h"
@@ -38,6 +39,8 @@
 #include <string>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Defines the built-in scene description fields supplied by Sdf as
 // well as their C++ value types. SdfSchema supplies additional information
 // about these fields, such as their default value and validation functions.
@@ -49,6 +52,9 @@
 ((SdfFieldKeys->Active,                  bool))                          \
 ((SdfFieldKeys->AllowedTokens,           VtTokenArray))                  \
 ((SdfFieldKeys->AssetInfo,               VtDictionary))                  \
+((SdfFieldKeys->ColorConfiguration,      SdfAssetPath))                  \
+((SdfFieldKeys->ColorManagementSystem,   TfToken))                       \
+((SdfFieldKeys->ColorSpace,              TfToken))                       \
 ((SdfFieldKeys->Comment,                 std::string))                   \
 ((SdfFieldKeys->ConnectionPaths,         SdfPathListOp))                 \
 ((SdfFieldKeys->Custom,                  bool))                          \
@@ -91,6 +97,8 @@
 ((SdfFieldKeys->StartTimeCode,           double))                        \
 ((SdfFieldKeys->SubLayers,               std::vector<std::string>))      \
 ((SdfFieldKeys->SubLayerOffsets,         std::vector<SdfLayerOffset>))   \
+((SdfFieldKeys->Suffix,                  std::string))                   \
+((SdfFieldKeys->SuffixSubstitutions,     VtDictionary))                  \
 ((SdfFieldKeys->SymmetricPeer,           std::string))                   \
 ((SdfFieldKeys->SymmetryArgs,            VtDictionary))                  \
 ((SdfFieldKeys->SymmetryArguments,       VtDictionary))                  \
@@ -171,5 +179,7 @@ SdfRegisterTypes(Registrar* reg)
     reg->template RegisterType<SdfTokenListOp>();
     reg->template RegisterType<SdfValueBlock>();
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_SCHEMA_TYPE_REGISTRATION_H

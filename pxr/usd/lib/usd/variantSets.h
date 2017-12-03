@@ -24,6 +24,8 @@
 #ifndef USD_VARIANTSETS_H
 #define USD_VARIANTSETS_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/editTarget.h"
 #include "pxr/usd/usd/prim.h"
@@ -33,33 +35,36 @@
 #include <string>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 SDF_DECLARE_HANDLES(SdfLayer);
 SDF_DECLARE_HANDLES(SdfPrimSpec);
 SDF_DECLARE_HANDLES(SdfVariantSetSpec);
 
 class SdfPath;
 
+/// \class UsdVariantSet
+///
 /// A UsdVariantSet represents a single VariantSet in USD
 /// (e.g. modelingVariant or shadingVariant), which can have multiple
 /// variations that express different sets of opinions about the scene
 /// description rooted at the prim that defines the VariantSet.
 ///
 /// (More detailed description of variants to follow)
+///
 class UsdVariantSet {
 public:
-#ifndef doxygen
-    typedef const std::string UsdVariantSet::*_UnspecifiedBoolType;
-#endif
-
     /// Author a variant spec for \a variantName in this VariantSet at the
-    /// stage's current EditTarget.  Return true if the spec was successfully
-    /// authored, false otherwise.
+    /// stage's current EditTarget, in the position specified by
+    /// \p position.  Return true if the spec was successfully authored,
+    /// false otherwise.
     ///
     /// This will create the VariantSet itself, if necessary, so as long as
     /// UsdPrim "prim" is valid, the following should always work:
     /// \code
     /// UsdVariantSet vs = prim.GetVariantSet("myVariantSet");
-    /// vs.FindOrCreateVariant("myFirstVariation");
+    /// vs.AddVariant("myFirstVariation");
     /// vs.SetVariantSelection("myFirstVariation");
     /// {
     ///     UsdEditContext ctx(vs.GetVariantEditContext());
@@ -67,18 +72,23 @@ public:
     ///     // 'myFirstVariation' variant of 'myVariantSet'
     /// }
     /// \endcode
-    bool FindOrCreateVariant(const std::string& variantName);
+    USD_API
+    bool AddVariant(const std::string& variantName,
+                    UsdListPosition position=UsdListPositionTempDefault);
 
     /// Return the composed variant names for this VariantSet, ordered
     /// lexicographically.
+    USD_API
     std::vector<std::string> GetVariantNames() const;
 
     /// Returns true if this VariantSet already possesses a variant 
     // named \p variantName in any layer.
+    USD_API
     bool HasAuthoredVariant(const std::string& variantName) const;
 
     /// Return the the variant selection for this VariantSet.  If there is
     /// no selection, return the empty string.
+    USD_API
     std::string GetVariantSelection() const;
 
     /// Returns true if there is a selection authored for this VariantSet
@@ -86,15 +96,18 @@ public:
     ///
     /// If requested, the variant selection (if any) will be returned in
     /// \p value .
+    USD_API
     bool HasAuthoredVariantSelection(std::string *value = NULL) const;
 
     /// Author a variant selection for this VariantSet, setting it to
     /// \a variantName in the stage's current EditTarget.  Return true if the
     /// selection was successfully authored, false otherwise.
+    USD_API
     bool SetVariantSelection(const std::string &variantName);
 
     /// Clear any selection for this VariantSet from the current EditTarget.
     /// Return true on success, false otherwise.
+    USD_API
     bool ClearVariantSelection();
 
     /// Return a \a UsdEditTarget that edits the currently selected variant in
@@ -109,6 +122,7 @@ public:
     /// an invalid EditTarget if \a layer is not.  We may relax this
     /// restriction in the future, if need arises, but it introduces several
     /// complications in specification and behavior.
+    USD_API
     UsdEditTarget
     GetVariantEditTarget(const SdfLayerHandle &layer = SdfLayerHandle()) const;
 
@@ -136,6 +150,7 @@ public:
     /// \endcode
     ///
     /// See GetVariantEditTarget() for discussion of \p layer parameter
+    USD_API
     std::pair<UsdStagePtr, UsdEditTarget>
     GetVariantEditContext(const SdfLayerHandle &layer = SdfLayerHandle()) const;
 
@@ -154,14 +169,10 @@ public:
         return _prim;
     }
 
-#ifdef doxygen
-    /// Safe bool-conversion operator.  Equivalent to IsValid().
-    operator unspecified-bool-type() const();
-#else
-    operator _UnspecifiedBoolType() const {
-        return IsValid() ? &UsdVariantSet::_variantSetName : NULL;
+    /// Equivalent to IsValid().
+    explicit operator bool() const {
+        return IsValid();
     }
-#endif // doxygen
 
 private:
     UsdVariantSet(const UsdPrim &prim,
@@ -171,8 +182,8 @@ private:
     {
     }
 
-    SdfPrimSpecHandle _CreatePrimSpecForEditing(const SdfPath &path);
-    SdfVariantSetSpecHandle _FindOrCreateVariantSet();
+    SdfPrimSpecHandle _CreatePrimSpecForEditing();
+    SdfVariantSetSpecHandle _AddVariantSet(UsdListPosition position);
 
     UsdPrim _prim;
     std::string _variantSetName;
@@ -186,6 +197,8 @@ private:
 // VariantSet Names are stored as SdListOps, but a VariantSet is an actual spec
 // (like a Prim). Is it important to make that distinction here?
 
+/// \class UsdVariantSets
+///
 /// UsdVariantSets represents the collection of
 /// \ref UsdVariantSet "VariantSets" that are present on a UsdPrim.
 ///
@@ -194,6 +207,7 @@ private:
 /// the composed list of VariantSets active defined on the prim, and also
 /// the facility for authoring a VariantSet \em selection for any of those
 /// VariantSets.
+///
 class UsdVariantSets {
 public:
 
@@ -203,20 +217,24 @@ public:
     /// This step is not always necessary, because if this UsdVariantSets
     /// object is valid, then 
     /// \code
-    /// varSetsObj.GetVariantSet(variantSetName).FindOrCreateVariant(variantName);
+    /// varSetsObj.GetVariantSet(variantSetName).AddVariant(variantName);
     /// \endcode
     /// will always succeed, creating the VariantSet first, if necessary.  This
     /// method exists for situations in which you want to create a VariantSet
     /// without necessarily populating it with variants.
-    UsdVariantSet FindOrCreate(const std::string& variantSetName);
+    USD_API
+    UsdVariantSet AddVariantSet(const std::string& variantSetName,
+                                UsdListPosition position=UsdListPositionTempDefault);
 
     // TODO: don't we want remove and reorder, clear, etc. also?
 
     /// Compute a list of all VariantSets authored on the originiating UsdPrim.
     /// Always return true.
+    USD_API
     bool GetNames(std::vector<std::string>* names) const;
 
     /// Return a list of all VariantSets authored on the originiating UsdPrim.
+    USD_API
     std::vector<std::string> GetNames() const;
 
     UsdVariantSet operator[](const std::string& variantSetName) const {
@@ -226,23 +244,21 @@ public:
     /// Return a UsdVariantSet object for \p variantSetName.  This always
     /// succeeds, although the returned VariantSet will be invalid if
     /// the originating prim is invalid
+    USD_API
     UsdVariantSet GetVariantSet(const std::string& variantSetName) const;
 
-    /// Does a VariantSet named \p variantSetName exist on the originating
-    /// prim?
-    ///
-    /// Note that VariantSet membership can be list-edited across composition
-    /// arcs, so a return value of \c false indicates only that 
-    /// \p variantSetName is not present in the stage's composed view - it
-    /// may have been defined in referenced/inherited scene description, but
-    /// pruned from consideration in stronger layers/arcs.
+    /// Returns true if a VariantSet named \p variantSetName exists on
+    /// the originating prim.
+    USD_API
     bool HasVariantSet(const std::string& variantSetName) const;
 
     /// Return the composed variant selection for the VariantSet named
     /// \a variantSetName.  If there is no selection, (or \p variantSetName
     /// does not exist) return the empty string.
+    USD_API
     std::string GetVariantSelection(const std::string& variantSetName) const;
 
+    USD_API
     bool SetSelection(const std::string& variantSetName,
                       const std::string& variantName);
 
@@ -258,5 +274,7 @@ private:
     friend class UsdPrim;
 };
 
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //USD_VARIANTSETS_H

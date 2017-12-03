@@ -21,8 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/usd/pcp/propertyIndex.h"
 
+#include "pxr/pxr.h"
+
+#include "pxr/usd/pcp/propertyIndex.h"
 #include "pxr/usd/pcp/cache.h"
 #include "pxr/usd/pcp/layerStack.h"
 #include "pxr/usd/pcp/node.h"
@@ -41,7 +43,7 @@
 #include "pxr/base/tracelite/trace.h"
 #include "pxr/base/tf/token.h"
 
-#include <boost/optional.hpp>
+PXR_NAMESPACE_OPEN_SCOPE
 
 ////////////////////////////////////////////////////////////
 
@@ -83,7 +85,7 @@ PcpPropertyIndex::GetPropertyRange(bool localOnly) const
 
         size_t endIdx = startIdx;
         for (; endIdx < _propertyStack.size(); ++endIdx) {
-            if (not _propertyStack[endIdx].originatingNode.IsDirect())
+            if (!_propertyStack[endIdx].originatingNode.IsDirect())
                 break;
         }
 
@@ -152,9 +154,15 @@ private:
         const SdfPath &owningPrimPath,
         const TfToken &name)
     {
+        if (!layer->HasSpec(SdfAbstractDataSpecId(&owningPrimPath)))
+            return TfNullPtr;
+
         const SdfPath propPath = owningPrimPath.AppendProperty(name);
+        if (!layer->HasSpec(SdfAbstractDataSpecId(&propPath)))
+            return TfNullPtr;
+
         SdfPropertySpecHandle propSpec = layer->GetPropertyAtPath(propPath);
-        if (not propSpec)
+        if (!propSpec)
             return TfNullPtr;
 
         // See if it's an attribute.
@@ -183,8 +191,8 @@ private:
         }
 
         // For an attribute, check that its type and variability are consistent.
-        if (propType == SdfSpecTypeAttribute and
-            not _IsConsistentAttribute(propSpec)) {
+        if (propType == SdfSpecTypeAttribute &&
+            !_IsConsistentAttribute(propSpec)) {
             return TfNullPtr;
         }
         return propSpec;
@@ -199,15 +207,15 @@ private:
     {
         SdfPropertySpecHandle attr = layer->GetAttributeAtPath(relAttrPath);
 
-        if (not attr)
+        if (!attr)
             return TfNullPtr;
 
-        if (not _firstSpec) {
+        if (!_firstSpec) {
             _firstSpec = attr;
         }
 
         // Check that the type and variability are consistent.
-        if (not _IsConsistentAttribute(attr)) {
+        if (!_IsConsistentAttribute(attr)) {
             return TfNullPtr;
         }
         return attr;
@@ -221,8 +229,8 @@ private:
         // This function is performance sensitive, so as an optimization, get
         // the underlying spec pointer to avoid excessive dormancy checks (one
         // per dereference).
-        if (SdfSpec *specPtr = boost::get_pointer(attr)) {
-            SdfLayer *layer = boost::get_pointer(specPtr->GetLayer());
+        if (SdfSpec *specPtr = get_pointer(attr)) {
+            SdfLayer *layer = get_pointer(specPtr->GetLayer());
             SdfPath const &path = specPtr->GetPath();
             valueType = layer->GetFieldAs<TfToken>(path,
                                                    SdfFieldKeys->TypeName);
@@ -274,7 +282,7 @@ private:
     // index's local errors vector and the allErrors vector.
     void _RecordError(const PcpErrorBasePtr &err) {
         _allErrors->push_back(err);
-        if (not _propIndex->_localErrors) {
+        if (!_propIndex->_localErrors) {
             _propIndex->_localErrors.reset(new PcpErrorVector);
         }
         _propIndex->_localErrors->push_back(err);
@@ -332,7 +340,7 @@ Pcp_PropertyIndexer::GatherPropertySpecs(const PcpPrimIndex& primIndex,
     // Add properties in reverse strength order (weak-to-strong).
     std::vector<Pcp_PropertyInfo> propertyInfo;
 
-    if (not usd) {
+    if (!usd) {
         // We start with the permission from the last node we visited (or 
         // SdfPermissionPublic, if this is the first node). If the strongest
         // opinion about the property's permission from this node is private,
@@ -360,10 +368,10 @@ Pcp_PropertyIndexer::GatherPropertySpecs(const PcpPrimIndex& primIndex,
         // populate the property index.
         TF_REVERSE_FOR_ALL(i, primIndex.GetNodeRange()) {
             PcpNodeRef curNode = *i;
-            if (not curNode.CanContributeSpecs()) {
+            if (!curNode.CanContributeSpecs()) {
                 continue;
             }
-            const PcpLayerStackPtr& nodeLayerStack = curNode.GetLayerStack();
+            const PcpLayerStackRefPtr& nodeLayerStack = curNode.GetLayerStack();
             const SdfPath& nodePath = curNode.GetPath();
             TF_REVERSE_FOR_ALL(j, nodeLayerStack->GetLayers()) {
                 if (SdfPropertySpecHandle propSpec = 
@@ -409,7 +417,7 @@ Pcp_PropertyIndexer::GatherRelationalAttributeSpecs(
         const SdfPath relAttrPathInNodeNS = 
             PcpTranslatePathFromRootToNode(curNode, relAttrPath);
 
-        for (; relIt != relItEnd and relIt.GetNode() == curNode; ++relIt) {
+        for (; relIt != relItEnd && relIt.GetNode() == curNode; ++relIt) {
             if (relAttrPathInNodeNS.IsEmpty())
                 continue;
 
@@ -417,7 +425,7 @@ Pcp_PropertyIndexer::GatherRelationalAttributeSpecs(
             const SdfPropertySpecHandle relAttrSpec = 
                 _GetRelationalAttribute(relSpec->GetLayer(),
                                        relAttrPathInNodeNS);
-            if (not relAttrSpec)
+            if (!relAttrSpec)
                 continue;
 
             if (usd) {
@@ -447,10 +455,10 @@ void PcpBuildPropertyIndex( const SdfPath &propertyPath,
                             PcpErrorVector *allErrors )
 {
     // Verify that the given path is for a property.
-    if (not TF_VERIFY(propertyPath.IsPropertyPath())) {
+    if (!TF_VERIFY(propertyPath.IsPropertyPath())) {
         return;
     }
-    if (not propertyIndex->IsEmpty()) {
+    if (!propertyIndex->IsEmpty()) {
         TF_CODING_ERROR("Cannot build property index for %s with a non-empty "
                         "property stack.", propertyPath.GetText());
         return;
@@ -514,3 +522,5 @@ PcpBuildPrimPropertyIndex( const SdfPath& propertyPath,
     Pcp_PropertyIndexer indexer(propertyIndex, propSite, allErrors);
     indexer.GatherPropertySpecs(primIndex, cache.IsUsd());
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

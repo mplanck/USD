@@ -24,11 +24,10 @@
 #ifndef SDF_PARSER_HELPERS_H
 #define SDF_PARSER_HELPERS_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/types.h"
-
 #include "pxr/base/arch/inttypes.h"
 
-#include <boost/function.hpp>
 #include <boost/numeric/conversion/cast.hpp>
 #include <boost/type_traits/is_floating_point.hpp>
 #include <boost/type_traits/is_integral.hpp>
@@ -37,10 +36,13 @@
 #include <boost/variant.hpp>
 
 #include <climits>
+#include <functional>
 #include <limits>
 #include <map>
 #include <string>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 namespace Sdf_ParserHelpers {
 
@@ -93,10 +95,10 @@ struct _GetImpl<
     T operator()(uint64_t in) { return _Cast(in); }
     T operator()(int64_t in) { return _Cast(in); }
 
-    // Static cast finite doubles, throw otherwise.
+    // Attempt to cast finite doubles, throw otherwise.
     T operator()(double in) {
         if (std::isfinite(in))
-            return static_cast<T>(in);
+            return _Cast(in);
         throw boost::bad_get();
     }
 
@@ -194,7 +196,7 @@ struct _GetImpl<bool> : public boost::static_visitor<bool>
     bool operator()(const std::string &str) {
         bool parseOK = false;
         bool result = SdfBoolFromString(str, &parseOK);
-        if (not parseOK)
+        if (!parseOK)
             throw boost::bad_get();
         return result;
     }
@@ -310,9 +312,9 @@ private:
     _Variant _variant;
 };
 
-typedef boost::function<VtValue (vector<unsigned int> const &,
-                                 vector<Value> const &,
-                                 size_t &, string *)> ValueFactoryFunc;
+typedef std::function<VtValue (vector<unsigned int> const &,
+                               vector<Value> const &,
+                               size_t &, string *)> ValueFactoryFunc;
 
 struct ValueFactory {
     ValueFactory() {}
@@ -341,5 +343,11 @@ ValueFactory const &GetValueFactoryForMenvaName(std::string const &name,
 std::string Sdf_EvalQuotedString(const char* x, size_t n, size_t trimBothSides,
                                  unsigned int* numLines = NULL);
 
+// Read the string representing an asset path at [x..x+n]. If tripleDelimited
+// is true, the string is assumed to have 3 delimiters on both sides of the
+// asset path, otherwise the string is assumed to have just 1.
+std::string Sdf_EvalAssetPath(const char* x, size_t n, bool tripleDelimited);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_PARSER_HELPERS_H

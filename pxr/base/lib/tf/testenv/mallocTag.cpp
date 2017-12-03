@@ -21,24 +21,21 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/tf/regTest.h"
 #include "pxr/base/tf/mallocTag.h"
 #include "pxr/base/arch/defines.h"
 #include "pxr/base/arch/mallocHook.h"
 
-#include <boost/bind.hpp>
-#include <boost/function.hpp>
-
 #include <mutex>
 #include <thread>
 #include <vector>
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
 // The TfMallocTag code depends upon the Linux memory allocator, ptmalloc3.
 // Turning this test off for any other platforms for now.
 #if defined(ARCH_OS_LINUX)
-
-using boost::bind;
-using boost::function;
 
 using std::vector;
 using std::string;
@@ -52,8 +49,8 @@ static void
 MyMalloc(size_t n) {
     void* ptr = malloc(n);
     std::lock_guard<std::mutex> lock(_mutex);
-    ::_requests.push_back(ptr);
-    ::_total += n;
+    _requests.push_back(ptr);
+    _total += n;
     if (_total > _maxTotal) {
         _maxTotal = _total;
     }
@@ -61,24 +58,22 @@ MyMalloc(size_t n) {
 
 static void
 FreeAll() {
-    for (size_t i = 0; i < ::_requests.size(); i++)
+    for (size_t i = 0; i < _requests.size(); i++)
         free(::_requests[i]);
-    ::_requests.clear();
-    ::_total = 0;
+    _requests.clear();
+    _total = 0;
 }
 
 
-static void*
-FreeTaskNoTag(void*) {
+static void
+FreeTaskNoTag() {
     MyMalloc(100000);
-    return 0;
 }
     
-static void*
-FreeTaskWithTag(void*) {
+static void
+FreeTaskWithTag() {
     TfAutoMallocTag noname("freeTaskWithTag");
     MyMalloc(100000);
-    return 0;
 }
 
 static void
@@ -120,7 +115,7 @@ static bool CloseEnough(int64_t a1, int64_t a2) {
 static bool
 MemCheck()
 {
-    int64_t m = ::_total,
+    int64_t m = _total,
             current = TfMallocTag::GetTotalBytes();
     bool ok = CloseEnough(m, current);
 
@@ -131,34 +126,16 @@ MemCheck()
     printf("Expected max of about %zd, actual is %zd: %s\n",
            m, current, maxOk ? "[close enough]" : "[not good]");
 
-    return ok and maxOk;
+    return ok && maxOk;
 }
 
 static void
 TestFreeThread()
 {
-    pthread_attr_t  _detatchedAttr, _joinableAttr;    
-
-    if (pthread_attr_init(&_detatchedAttr) != 0 ||
-        pthread_attr_init(&_joinableAttr) != 0) {
-        TF_RUNTIME_ERROR("error initializing attributes");
-    }
-        
-    if (pthread_attr_setdetachstate(&_detatchedAttr, PTHREAD_CREATE_DETACHED) != 0 ||
-        pthread_attr_setdetachstate(&_joinableAttr,PTHREAD_CREATE_JOINABLE) != 0) {
-        TF_RUNTIME_ERROR("error setting detatch state");
-    }
-
-    pthread_t id;
     TfAutoMallocTag noname("site3");
 
-    if (pthread_create(&id, &_joinableAttr, FreeTaskNoTag, 0) < 0) {
-        TF_RUNTIME_ERROR("pthread create failed");
-    }
-
-    void* ignored;
-    if (pthread_join(id, &ignored) < 0)
-        TF_RUNTIME_ERROR("join failed");
+    std::thread t(FreeTaskNoTag);
+    t.join();
 
     printf("bytesForSite[site3] = %d\n", GetBytesForCallSite("site3"));
     TF_AXIOM(CloseEnough(GetBytesForCallSite("site3"), 0));
@@ -168,28 +145,10 @@ TestFreeThread()
 static void
 TestFreeThreadWithTag()
 {
-    pthread_attr_t  _detatchedAttr, _joinableAttr;    
-
-    if (pthread_attr_init(&_detatchedAttr) != 0 ||
-        pthread_attr_init(&_joinableAttr) != 0) {
-        TF_RUNTIME_ERROR("error initializing attributes");
-    }
-        
-    if (pthread_attr_setdetachstate(&_detatchedAttr, PTHREAD_CREATE_DETACHED) != 0 ||
-        pthread_attr_setdetachstate(&_joinableAttr,PTHREAD_CREATE_JOINABLE) != 0) {
-        TF_RUNTIME_ERROR("error setting detatch state");
-    }
-
-    pthread_t id;
     TfAutoMallocTag noname("site4");
 
-    if (pthread_create(&id, &_joinableAttr, FreeTaskWithTag, 0) < 0) {
-        TF_RUNTIME_ERROR("pthread create failed");
-    }
-
-    void* ignored;
-    if (pthread_join(id, &ignored) < 0)
-        TF_RUNTIME_ERROR("join failed");
+    std::thread t(FreeTaskWithTag);
+    t.join();
 
     printf("bytesForSite[freeTaskWithTag] = %d\n",
            GetBytesForCallSite("freeTaskWithTag"));
@@ -269,7 +228,7 @@ Test_TfMallocTag()
     runme = true;
 #endif
 
-    if (not ArchIsPtmallocActive()) {
+    if (!ArchIsPtmallocActive()) {
         printf("ptmalloc is not the active allocator. Skipping tests for "
                 "TfMallocTag.\n");
         runme = false; 
@@ -278,7 +237,7 @@ Test_TfMallocTag()
     if (!runme)
         return true;
 
-    ::_requests.reserve(1024);
+    _requests.reserve(1024);
     TF_AXIOM(TfMallocTag::GetTotalBytes() == 0);
     TF_AXIOM(MemCheck());
 

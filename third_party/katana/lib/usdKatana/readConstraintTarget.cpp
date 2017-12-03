@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readConstraintTarget.h"
 #include "usdKatana/usdInPrivateData.h"
@@ -35,6 +36,9 @@
 #include <FnLogging/FnLogging.h>
 
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 FnLogSetup("PxrUsdKatanaReadConstraintTarget");
 
@@ -92,12 +96,14 @@ _BuildMatrixAttr(
 {
     // Eval transform.
     UsdAttribute constraintAttr = constraintTarget.GetAttr();
-    if (not constraintAttr)
+    if (!constraintAttr)
         return FnKat::Attribute();
 
-    double currentTime = data.GetUsdInArgs()->GetCurrentTime();
+    double currentTime = data.GetCurrentTime();
     const std::vector<double>& motionSampleTimes = 
         data.GetMotionSampleTimes(constraintAttr);
+
+    const bool isMotionBackward = data.IsMotionBackward();
 
     FnKat::DoubleBuilder matBuilder(16);
     TF_FOR_ALL(iter, motionSampleTimes) {
@@ -105,12 +111,15 @@ _BuildMatrixAttr(
         double time = currentTime + relSampleTime;
 
         GfMatrix4d mat;
-        if (not constraintAttr.Get(&mat, time))
+        if (!constraintAttr.Get(&mat, time))
             return FnKat::Attribute();
 
         // Convert to vector.
         const double *matArray = mat.GetArray();
-        std::vector<double> &matVec = matBuilder.get(fabs(relSampleTime));
+
+        std::vector<double> &matVec = matBuilder.get(isMotionBackward ?
+            PxrUsdKatanaUtils::ReverseTimeSample(relSampleTime) : relSampleTime);
+
         matVec.resize(16);
         for (int i = 0; i < 16; ++i) {
             matVec[i] = matArray[i];
@@ -169,3 +178,6 @@ PxrUsdKatanaReadConstraintTarget(
     viewerBuilder.set("default.drawOptions.fill", FnKat::StringAttribute("wireframe"));
     attrs.set("viewer", viewerBuilder.build());
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

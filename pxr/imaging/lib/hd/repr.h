@@ -24,21 +24,31 @@
 #ifndef HD_REPR_H
 #define HD_REPR_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hd/api.h"
 #include "pxr/imaging/hd/version.h"
 #include "pxr/base/tf/iterator.h"
 #include "pxr/imaging/hd/drawItem.h"
 #include <vector>
 
-class HdRprimSharedData;
+PXR_NAMESPACE_OPEN_SCOPE
 
+
+struct HdRprimSharedData;
+
+/// \class HdRepr
+///
 /// One or more draw items for a specific representation of an HdRprim.
 ///
 class HdRepr {
 public:
+    HD_API
     HdRepr();
+    HD_API
     virtual ~HdRepr();
 
     /// Returns the cached set of draw items for this representation.
+    HD_API
     std::vector<HdDrawItem>* GetDrawItems();
 
     /// Allocates a new draw item and returns a pointer to it. 
@@ -60,5 +70,8 @@ public:
 private:
     std::vector<HdDrawItem> _drawItems;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HD_REPR_H

@@ -28,15 +28,19 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
     TfType::Define<UsdGeomMesh,
         TfType::Bases< UsdGeomPointBased > >();
     
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("Mesh") to find
-    // TfType<UsdGeomMesh>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("Mesh")
+    // to find TfType<UsdGeomMesh>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, UsdGeomMesh>("Mesh");
 }
 
@@ -49,7 +53,7 @@ UsdGeomMesh::~UsdGeomMesh()
 UsdGeomMesh
 UsdGeomMesh::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomMesh();
     }
@@ -62,7 +66,7 @@ UsdGeomMesh::Define(
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("Mesh");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomMesh();
     }
@@ -171,6 +175,23 @@ UsdAttribute
 UsdGeomMesh::CreateFaceVaryingLinearInterpolationAttr(VtValue const &defaultValue, bool writeSparsely) const
 {
     return UsdSchemaBase::_CreateAttr(UsdGeomTokens->faceVaryingLinearInterpolation,
+                       SdfValueTypeNames->Token,
+                       /* custom = */ false,
+                       SdfVariabilityVarying,
+                       defaultValue,
+                       writeSparsely);
+}
+
+UsdAttribute
+UsdGeomMesh::GetTriangleSubdivisionRuleAttr() const
+{
+    return GetPrim().GetAttribute(UsdGeomTokens->triangleSubdivisionRule);
+}
+
+UsdAttribute
+UsdGeomMesh::CreateTriangleSubdivisionRuleAttr(VtValue const &defaultValue, bool writeSparsely) const
+{
+    return UsdSchemaBase::_CreateAttr(UsdGeomTokens->triangleSubdivisionRule,
                        SdfValueTypeNames->Token,
                        /* custom = */ false,
                        SdfVariabilityVarying,
@@ -302,6 +323,7 @@ UsdGeomMesh::GetSchemaAttributeNames(bool includeInherited)
         UsdGeomTokens->subdivisionScheme,
         UsdGeomTokens->interpolateBoundary,
         UsdGeomTokens->faceVaryingLinearInterpolation,
+        UsdGeomTokens->triangleSubdivisionRule,
         UsdGeomTokens->holeIndices,
         UsdGeomTokens->cornerIndices,
         UsdGeomTokens->cornerSharpnesses,
@@ -320,44 +342,19 @@ UsdGeomMesh::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 const float UsdGeomMesh::SHARPNESS_INFINITE = 1e38;
 
-#include "pxr/usd/usd/timeCode.h"
-
-TfToken UsdGeomMesh::GetFaceVaryingLinearInterpolation(UsdTimeCode time) const
-{
-    const auto prim = GetPrim();
-    const auto newFaceVaryingAttr = prim.GetAttribute(
-        UsdGeomTokens->faceVaryingLinearInterpolation);
-    if (newFaceVaryingAttr.HasAuthoredValueOpinion()) {
-        TfToken temp;
-        newFaceVaryingAttr.Get(&temp, time);
-        return temp;
-    }
-
-    const auto oldFaceVaryingAttr = prim.GetAttribute(
-        UsdGeomTokens->faceVaryingInterpolateBoundary);
-    if (oldFaceVaryingAttr.HasAuthoredValueOpinion()) {
-        TfToken temp;
-        oldFaceVaryingAttr.Get(&temp, time);
-
-        if (temp == UsdGeomTokens->bilinear) {
-            return UsdGeomTokens->all;
-        } else if (temp == UsdGeomTokens->edgeAndCorner) {
-            return UsdGeomTokens->cornersPlus1;
-        } else if (temp == UsdGeomTokens->alwaysSharp) {
-            return UsdGeomTokens->boundaries;
-        } else if (temp == UsdGeomTokens->edgeOnly) {
-            return UsdGeomTokens->none;
-        }
-    }
-
-    return UsdGeomTokens->cornersPlus1;
-}
-
+PXR_NAMESPACE_CLOSE_SCOPE

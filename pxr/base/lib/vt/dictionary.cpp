@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/vt/dictionary.h"
 
 #include "pxr/base/tf/atomicOfstreamWrapper.h"
@@ -29,12 +31,8 @@
 #include "pxr/base/tf/staticData.h"
 #include "pxr/base/tf/type.h"
 #include "pxr/base/tf/mallocTag.h"
-#include "pxr/base/tf/pyUtils.h"
 
 #include "pxr/base/tracelite/trace.h"
-
-#include <boost/python/object.hpp>
-#include <boost/python/dict.hpp>
 
 #include <fstream>
 #include <sstream>
@@ -47,6 +45,8 @@ using std::pair;
 using std::string;
 using std::vector;
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 TF_REGISTRY_FUNCTION(TfType) {
     TfType::Define<VtDictionary>();
 }
@@ -58,6 +58,11 @@ TF_MAKE_STATIC_DATA(VtDictionary, _emptyDictionary) {
 VtDictionary::VtDictionary(VtDictionary const& other) {
     if (other._dictMap)
         _dictMap.reset(new _Map(*other._dictMap));
+}
+
+VtDictionary::VtDictionary(std::initializer_list<value_type> init)
+    : _dictMap(new _Map(init.begin(), init.end()))
+{
 }
    
 VtDictionary& VtDictionary::operator=(VtDictionary const& other) {
@@ -169,7 +174,7 @@ VtDictionary::GetValueAtPath(vector<string> const &keyElems) const
     VtDictionary const *dict = this;
     for (vector<string>::const_iterator i = start; i != last; ++i) {
         const_iterator j = dict->find(*i);
-        if (j == dict->end() or not j->second.IsHolding<VtDictionary>())
+        if (j == dict->end() || !j->second.IsHolding<VtDictionary>())
             return NULL;
         dict = &j->second.UncheckedGet<VtDictionary>();
     }
@@ -248,7 +253,7 @@ VtDictionary::_EraseValueAtPathImpl(vector<string>::const_iterator curKeyElem,
     // Otherwise we'll descend into an existing subdictionary at key *curKeyElem
     // if one exists.
     iterator i = find(*curKeyElem);
-    if (i != end() and i->second.IsHolding<VtDictionary>()) {
+    if (i != end() && i->second.IsHolding<VtDictionary>()) {
         VtDictionary newDict;
         i->second.Swap(newDict);
         newDict._EraseValueAtPathImpl(nextKeyElem, keyElemEnd);
@@ -395,7 +400,7 @@ VtDictionaryOverRecursive(VtDictionary *strong, const VtDictionary &weak,
             // Insert will set strong with value from weak only if 
             // strong does not already have a value for that key.
             std::pair<VtDictionary::iterator, bool> result =strong->insert(*it);
-            if (not result.second and coerceToWeakerOpinionType) {
+            if (!result.second && coerceToWeakerOpinionType) {
                 result.first->second.CastToTypeOf(it->second);
             }
         }
@@ -470,7 +475,7 @@ bool operator==(VtDictionary const &lhs, VtDictionary const &rhs)
 
 bool operator!=(VtDictionary const &lhs, VtDictionary const &rhs)
 {
-    return not (lhs == rhs);
+    return !(lhs == rhs);
 }
 
 std::ostream &
@@ -489,209 +494,5 @@ operator<<(std::ostream &stream, VtDictionary const &dict)
     return stream;
 }
 
-static void
-_PrettyPrintVtValueToStream(const VtValue& vtval,
-                            std::ostream& ostr,
-                            size_t indentLevel);
-
-template<class T>
-static void
-_PrettyPrintPyObjectToStream(const T& val,
-                             std::ostream& ostr,
-                             size_t indentLevel)
-{
-    TfPyInitialize();
-
-    ostr << TfPyRepr(val);
-}
-
-static void
-_PrettyPrintVtDictionaryToStream(const VtDictionary& vtdict,
-                                 std::ostream& ostr,
-                                 size_t indentLevel)
-{
-    if (vtdict.empty()) {
-        ostr << "{}";
-        return;
-    }
-
-    const static size_t shiftWidth = 2;
-    const string outerShift(shiftWidth * indentLevel, ' ');
-
-    ostr << "{\n";
-
-    TF_FOR_ALL(i, vtdict) {
-
-        const string& key = i->first;
-        const VtValue& val = i->second;
-
-        ostr << outerShift << "  ";
-
-        _PrettyPrintPyObjectToStream(key, ostr, indentLevel + 1);
-
-        ostr << ": ";
-
-        _PrettyPrintVtValueToStream(val, ostr, indentLevel + 1);
-
-        if (i.GetNext()) {
-            ostr << ",";
-        }
-
-        ostr << "\n";
-    }
-
-    ostr << outerShift << "}";
-}
-
-static void
-_PrettyPrintStdVectorToStream(const std::vector<VtValue>& stdvec,
-                              std::ostream& ostr,
-                              size_t indentLevel)
-{
-    if (stdvec.empty()) {
-        ostr << "[]";
-        return;
-    }
-
-    const static size_t shiftWidth = 2;
-    const string outerShift(shiftWidth * indentLevel, ' ');
-
-    ostr << "[\n";
-
-    TF_FOR_ALL(i, stdvec) {
-
-        const VtValue& val = *i;
-
-        ostr << outerShift << "  ";
-
-        _PrettyPrintVtValueToStream(val, ostr, indentLevel + 1);
-
-        if (i.GetNext()) {
-            ostr << ",";
-        }
-
-        ostr << "\n";
-    }
-
-    ostr << outerShift << "]";
-}
-
-static void
-_PrettyPrintVtValueToStream(const VtValue& vtval,
-                            std::ostream& ostr,
-                            size_t indentLevel)
-{
-    if (vtval.IsHolding<VtDictionary>()) {
-        _PrettyPrintVtDictionaryToStream(vtval.UncheckedGet<VtDictionary>(),
-                                         ostr, indentLevel);
-        return;
-    }
-
-    if (vtval.IsHolding<std::vector<VtValue> >()) {
-        _PrettyPrintStdVectorToStream(
-            vtval.UncheckedGet< std::vector<VtValue> >(), ostr, indentLevel);
-        return;
-    }
-
-    _PrettyPrintPyObjectToStream(vtval, ostr, indentLevel);
-}
-
-VtDictionary
-VtDictionaryFromPythonString(
-    const string& content)
-{
-    if (content.empty()) {
-        TF_CODING_ERROR("Cannot create VtDictionary from empty string.");
-        return VtDictionary();
-    }
-
-    VtDictionary dict;
-    if (not VtDictionaryFromPythonString(content, &dict)) {
-        TF_RUNTIME_ERROR("Failed to extract VtDictionary from input: '%s'",
-                         content.c_str());
-        return VtDictionary();
-    }
-
-    return dict;
-}
-
-bool VtDictionaryFromPythonString(
-    const string& content, 
-    VtDictionary* dict)
-{
-    return TfPyEvaluateAndExtract(content, dict);
-}
-
-
-string
-VtDictionaryPrettyPrint(
-    const VtDictionary& vtdict)
-{
-    TRACE_FUNCTION();
-
-    std::stringstream ss;
-
-    _PrettyPrintVtDictionaryToStream(vtdict, ss, 0);
-
-    return ss.str();
-}
-
-std::ostream&
-VtDictionaryPrettyPrint(
-    const VtDictionary& vtdict,
-    std::ostream& ostream)
-{
-    TRACE_FUNCTION();
-
-    _PrettyPrintVtDictionaryToStream(vtdict, ostream, 0);
-
-    return ostream;
-}
-
-VtDictionary
-VtDictionaryFromFile(const string& fpath)
-{
-    if (not fpath.empty() and TfIsFile(fpath, /* resolveSymlinks */ true)) {
-        std::ifstream ifs(fpath.c_str());
-        if (ifs.good()) {
-            std::stringstream sstream;
-            sstream << ifs.rdbuf();
-            return VtDictionaryFromPythonString(sstream.str());
-        }
-    }
-
-    return VtDictionary();
-}
-
-bool
-VtDictionaryPrettyPrintToFile(const VtDictionary& vtdict,
-                              const string& fpath)
-{
-    TRACE_FUNCTION();
-
-    if (fpath.empty()) {
-        return false;
-    }
-
-    TfAtomicOfstreamWrapper wrapper(fpath);
-
-    string reason;
-    if (not wrapper.Open(&reason)) {
-        TF_RUNTIME_ERROR(reason);
-        return false;
-    }
-
-    _PrettyPrintVtDictionaryToStream(vtdict, wrapper.GetStream(), 0);
-
-    bool ok = wrapper.GetStream().good();
-
-    if (ok) {
-        if (not wrapper.Commit(&reason)) {
-            TF_RUNTIME_ERROR(reason);
-            ok = false;
-        }
-    }
-
-    return ok;
-}
+PXR_NAMESPACE_CLOSE_SCOPE
 

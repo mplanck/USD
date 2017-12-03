@@ -23,4 +23,26 @@
 //
 #include "./tokens.h"
 
-TF_DEFINE_PUBLIC_TOKENS(UsdSchemaExamplesTokens, USDSCHEMAEXAMPLES_TOKENS);
+PXR_NAMESPACE_OPEN_SCOPE
+
+UsdSchemaExamplesTokensType::UsdSchemaExamplesTokensType() :
+    complexString("complexString", TfToken::Immortal),
+    intAttr("intAttr", TfToken::Immortal),
+    paramsMass("params:mass", TfToken::Immortal),
+    paramsVelocity("params:velocity", TfToken::Immortal),
+    paramsVolume("params:volume", TfToken::Immortal),
+    target("target", TfToken::Immortal),
+    allTokens({
+        complexString,
+        intAttr,
+        paramsMass,
+        paramsVelocity,
+        paramsVolume,
+        target
+    })
+{
+}
+
+TfStaticData<UsdSchemaExamplesTokensType> UsdSchemaExamplesTokens;
+
+PXR_NAMESPACE_CLOSE_SCOPE

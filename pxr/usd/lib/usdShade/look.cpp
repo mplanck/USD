@@ -28,15 +28,19 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
     TfType::Define<UsdShadeLook,
-        TfType::Bases< UsdShadeSubgraph > >();
+        TfType::Bases< UsdShadeMaterial > >();
     
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("Look") to find
-    // TfType<UsdShadeLook>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("Look")
+    // to find TfType<UsdShadeLook>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, UsdShadeLook>("Look");
 }
 
@@ -49,7 +53,7 @@ UsdShadeLook::~UsdShadeLook()
 UsdShadeLook
 UsdShadeLook::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdShadeLook();
     }
@@ -62,7 +66,7 @@ UsdShadeLook::Define(
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("Look");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdShadeLook();
     }
@@ -99,7 +103,7 @@ UsdShadeLook::GetSchemaAttributeNames(bool includeInherited)
 {
     static TfTokenVector localNames;
     static TfTokenVector allNames =
-        UsdShadeSubgraph::GetSchemaAttributeNames(true);
+        UsdShadeMaterial::GetSchemaAttributeNames(true);
 
     if (includeInherited)
         return allNames;
@@ -107,45 +111,40 @@ UsdShadeLook::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
 #include "pxr/usd/usd/variantSets.h"
 #include "pxr/usd/usd/editContext.h"
+#include "pxr/usd/usdShade/tokens.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
     (look)
-    ((bindingRelationshipName, "look:binding"))
     ((lookVariantName, "lookVariant"))
-    ((derivesFromName, "derivesFrom"))
-    ((surfaceTerminal, "surface"))
-    ((displacementTerminal, "displacement"))
 );
 
 static 
 UsdRelationship
 _CreateBindingRel(UsdPrim& prim)
 {
-    return prim.CreateRelationship(_tokens->bindingRelationshipName,
+    return prim.CreateRelationship(UsdShadeTokens->lookBinding,
                                    /* custom = */ false);
 }
 
 bool 
 UsdShadeLook::Bind(UsdPrim& prim) const
 {
-    // We cannot enforce this test because we do not always know at authoring
-    // time what we are binding to.
-    
-    // if (!prim.IsA<UsdGeomImageable>()) {
-    //     TF_CODING_ERROR("Trying to bind a prim that is not Imageable: %s",
-    //         prim.GetPath().GetString().c_str());
-    //     return;
-    // }
-    ;
     if (UsdRelationship rel = _CreateBindingRel(prim)){
         SdfPathVector  targets(1, GetPath());
         return rel.SetTargets(targets);
@@ -163,7 +162,7 @@ UsdShadeLook::Unbind(UsdPrim& prim)
 UsdRelationship
 UsdShadeLook::GetBindingRel(const UsdPrim& prim)
 {
-    return prim.GetRelationship(_tokens->bindingRelationshipName);
+    return prim.GetRelationship(UsdShadeTokens->lookBinding);
 }
 
 UsdShadeLook
@@ -172,7 +171,7 @@ UsdShadeLook::GetBoundLook(const UsdPrim &prim)
     if (UsdRelationship rel = UsdShadeLook::GetBindingRel(prim)) {
         SdfPathVector targetPaths;
         rel.GetForwardedTargets(&targetPaths);
-        if ((targetPaths.size() == 1) and targetPaths.front().IsPrimPath()) {
+        if ((targetPaths.size() == 1) && targetPaths.front().IsPrimPath()) {
             return UsdShadeLook(
                 prim.GetStage()->GetPrimAtPath(targetPaths.front()));
         }
@@ -190,7 +189,7 @@ UsdShadeLook::GetEditContextForVariant(const TfToken &lookVariation,
     
     UsdVariantSet lookVariant = prim.GetVariantSet(_tokens->lookVariantName);
     UsdEditTarget target = stage->GetEditTarget();
-    if (lookVariant.FindOrCreateVariant(lookVariation) and
+    if (lookVariant.AddVariant(lookVariation) && 
         lookVariant.SetVariantSelection(lookVariation)) {
         target = lookVariant.GetVariantEditTarget(layer);
     }
@@ -209,7 +208,7 @@ _GetRootPath(const UsdPrim & prim)
     if (path == SdfPath::AbsoluteRootPath())
         return path;
 
-    while (not path.IsRootPrimPath())
+    while (!path.IsRootPrimPath())
         path = path.GetParentPath();
 
     return path;
@@ -227,7 +226,7 @@ UsdShadeLook::CreateMasterLookVariant(const UsdPrim &masterPrim,
                                       const std::vector<UsdPrim> &looks,
                                       const TfToken &masterVariantSetName)
 {
-    if (not masterPrim){
+    if (!masterPrim){
         TF_CODING_ERROR("MasterPrim is not a valid UsdPrim.");
         return false;
     }
@@ -242,7 +241,7 @@ UsdShadeLook::CreateMasterLookVariant(const UsdPrim &masterPrim,
         return false;
     }
     TF_FOR_ALL(look, looks){
-        if (not *look){
+        if (!*look){
             TF_CODING_ERROR("Unable to process invalid look: %s",
                             look->GetDescription().c_str());
             return false;
@@ -280,7 +279,7 @@ UsdShadeLook::CreateMasterLookVariant(const UsdPrim &masterPrim,
 
     UsdVariantSet masterSet = masterPrim.GetVariantSet(masterSetName);
     TF_FOR_ALL(varName, allLookVariants){
-        if (not masterSet.FindOrCreateVariant(*varName)){
+        if (!masterSet.AddVariant(*varName)){
             TF_RUNTIME_ERROR("Unable to create Look variant %s on prim %s. "
                              "Aborting master lookVariant creation.",
                              varName->c_str(),
@@ -293,7 +292,7 @@ UsdShadeLook::CreateMasterLookVariant(const UsdPrim &masterPrim,
             UsdEditContext  ctxt(masterSet.GetVariantEditContext());
             
             TF_FOR_ALL(look, looks){
-                if (not *look){
+                if (!*look){
                     // Somehow, switching the variant caused this prim
                     // to expire.
                     TF_RUNTIME_ERROR("Switching master variant %s to %s "
@@ -345,7 +344,7 @@ SdfPath
 UsdShadeLook::GetBaseLookPath() const 
 {
     UsdRelationship baseRel = GetPrim().GetRelationship(
-            _tokens->derivesFromName);
+            UsdShadeTokens->derivesFrom);
     if (baseRel.IsValid()) {
         SdfPathVector targets;
         baseRel.GetTargets(&targets);
@@ -360,7 +359,7 @@ void
 UsdShadeLook::SetBaseLookPath(const SdfPath& baseLookPath) const 
 {
     UsdRelationship baseRel = GetPrim().CreateRelationship(
-        _tokens->derivesFromName, /* custom = */ false);
+        UsdShadeTokens->derivesFrom, /* custom = */ false);
 
     if (!baseLookPath.IsEmpty()) {
         SdfPathVector targets(1, baseLookPath);
@@ -425,29 +424,7 @@ UsdShadeLook::HasLookFaceSet(const UsdPrim &prim)
 {
     UsdGeomFaceSetAPI faceSet(prim, _tokens->look);
     bool isPartition=false;
-    return faceSet.GetIsPartitionAttr().Get(&isPartition) and isPartition;
+    return faceSet.GetIsPartitionAttr().Get(&isPartition) && isPartition;
 }
 
-UsdRelationship
-UsdShadeLook::GetSurfaceTerminal() const
-{
-    return GetTerminal(_tokens->surfaceTerminal);
-}
-
-UsdRelationship
-UsdShadeLook::CreateSurfaceTerminal(const SdfPath& targetPath) const
-{
-    return CreateTerminal(_tokens->surfaceTerminal, targetPath);
-}
-
-UsdRelationship
-UsdShadeLook::GetDisplacementTerminal() const
-{
-    return GetTerminal(_tokens->displacementTerminal);
-}
-
-UsdRelationship
-UsdShadeLook::CreateDisplacementTerminal(const SdfPath& targetPath) const
-{
-    return CreateTerminal(_tokens->displacementTerminal, targetPath);
-}
+PXR_NAMESPACE_CLOSE_SCOPE

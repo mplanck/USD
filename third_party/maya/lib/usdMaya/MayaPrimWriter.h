@@ -23,13 +23,14 @@
 //
 #ifndef PXRUSDMAYA_MAYAPRIMWRITER_H
 #define PXRUSDMAYA_MAYAPRIMWRITER_H
-#include "usdMaya/JobArgs.h"
+
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
+#include "usdMaya/usdWriteJobCtx.h"
 
 #include "pxr/usd/usd/stage.h"
 
-#include <boost/smart_ptr.hpp>
-
-using boost::shared_ptr;
+PXR_NAMESPACE_OPEN_SCOPE
 
 class UsdGeomImageable;
 class UsdTimeCode;
@@ -38,49 +39,64 @@ class UsdTimeCode;
 class MayaPrimWriter
 {
   public:
+    PXRUSDMAYA_API
     MayaPrimWriter(
-            MDagPath & iDag, 
-            UsdStageRefPtr stage, 
-            const JobExportArgs & iArgs);
+            const MDagPath& iDag,
+            const SdfPath& uPath,
+            usdWriteJobCtx& jobCtx);
     virtual ~MayaPrimWriter() {};
 
-    virtual UsdPrim write(const UsdTimeCode &usdTime) = 0;
-    virtual bool isShapeAnimated()     const = 0;
+    virtual void write(const UsdTimeCode &usdTime) = 0;
+    virtual bool isShapeAnimated() const = 0;
 
     /// Does this PrimWriter directly create one or more gprims on the UsdStage?
     ///
     /// Base implementation returns \c false, so gprim/shape-derived classes
     /// should override.
+    PXRUSDMAYA_API
     virtual bool exportsGprims() const;
     
     /// Does this PrimWriter add references on the UsdStage?
     ///
     /// Base implementation returns \c false.
+    PXRUSDMAYA_API
     virtual bool exportsReferences() const;
 
+    /// Does this PrimWriter request that the traversal code skip its child
+    /// nodes because this PrimWriter will handle its child nodes by itself?
+    ///
+    /// Base implementation returns \c false.
+    PXRUSDMAYA_API
+    virtual bool shouldPruneChildren() const;
+
 public:
-    const MDagPath&        getDagPath()    const { return mDagPath;};
-    const SdfPath &        getUsdPath()    const { return mUsdPath; };
-    const UsdStageRefPtr&  getUsdStage()   const { return mStage;};
-    bool isValid()                         const { return mIsValid;};
-    const JobExportArgs&   getArgs()       const { return mArgs;};
+    const MDagPath&        getDagPath()    const { return mDagPath; }
+    const SdfPath&         getUsdPath()    const { return mUsdPath; }
+    const UsdStageRefPtr&  getUsdStage()   const { return mWriteJobCtx.getUsdStage(); }
+    bool isValid()                         const { return mIsValid; }
+    const JobExportArgs&   getArgs()       const { return mWriteJobCtx.getArgs(); }
+    const UsdPrim&         getPrim()       const { return mUsdPrim; }
+
+    bool getExportsVisibility() const { return mExportsVisibility; }
+    void setExportsVisibility(bool exports);
 
 protected:
     void setValid(bool isValid) { mIsValid = isValid;};
     void setUsdPath(const SdfPath &newPath) { mUsdPath = newPath;};
+    PXRUSDMAYA_API
     bool writePrimAttrs(const MDagPath & iDag2, const UsdTimeCode &usdTime, UsdGeomImageable &primSchema);
 
-  private:
-    MDagPath mDagPath;
-    UsdStageRefPtr mStage;
-    SdfPath mUsdPath;
-    bool mIsValid;
+    UsdPrim mUsdPrim;
+    usdWriteJobCtx& mWriteJobCtx;
 
-    // This is just a reference to the JobExportArgs object of the UsdWriteJob
-    // that creates this prim writer. This prevents copying when the set of
-    // dagPaths can potentially be large.
-    const JobExportArgs& mArgs;
+private:
+    MDagPath mDagPath;
+    SdfPath mUsdPath;
+
+    bool mIsValid;
+    bool mExportsVisibility;
 };
 
-typedef shared_ptr < MayaPrimWriter > MayaPrimWriterPtr;
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // PXRUSDMAYA_MAYAPRIMWRITER_H

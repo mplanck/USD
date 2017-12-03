@@ -24,8 +24,9 @@
 #ifndef SDF_PATHTABLE_H
 #define SDF_PATHTABLE_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/usd/sdf/path.h"
-
 #include "pxr/base/tf/pointerAndBits.h"
 
 #include <boost/iterator/iterator_facade.hpp>
@@ -35,7 +36,12 @@
 #include <utility>
 #include <vector>
 
-///
+PXR_NAMESPACE_OPEN_SCOPE
+
+// Helper function for clearing path tables.
+SDF_API
+void Sdf_ClearPathTableInParallel(void **, size_t, void (*)(void *));
+
 /// \class SdfPathTable
 ///
 /// A mapping from SdfPath to \a MappedType, somewhat similar to map<SdfPath,
@@ -65,8 +71,8 @@
 /// a pair of iterators [\a b, \a e) defining a range such that for every
 /// iterator \a i in [\a b, \a e), i->first is either equal to \a p or is
 /// prefixed by \a p.
-
-/// Iterator Invalidation.
+///
+/// Iterator Invalidation
 ///
 /// Like most other node-based containers, iterators are only invalidated when
 /// the element they refer to is removed from the table.  Note however, that
@@ -265,13 +271,13 @@ public:
     typedef Iterator<value_type, _Entry *> iterator;
     typedef Iterator<const value_type, const _Entry *> const_iterator;
 
-    /// \brief Result type for insert().
+    /// Result type for insert().
     typedef std::pair<iterator, bool> _IterBoolPair;
 
-    /// \brief Default constructor.
+    /// Default constructor.
     SdfPathTable() : _size(0), _mask(0) {}
 
-    /// \brief Copy constructor.
+    /// Copy constructor.
     SdfPathTable(SdfPathTable const &other)
         : _buckets(other._buckets.size())
         , _size(0) // size starts at 0, since we insert elements.
@@ -283,13 +289,13 @@ public:
              i != end; ++i) {
             iterator j = _InsertInTable(*i).first;
             // Ensure first child and next sibling links are created.
-            if (i._entry->firstChild and not j._entry->firstChild) {
+            if (i._entry->firstChild && !j._entry->firstChild) {
                 j._entry->firstChild =
                     _InsertInTable(i._entry->firstChild->value).first._entry;
             }
             // Ensure the nextSibling/parentLink is created.
-            if (i._entry->nextSiblingOrParent.Get() and not
-                j._entry->nextSiblingOrParent.Get()) {
+            if (i._entry->nextSiblingOrParent.Get() &&  
+                !j._entry->nextSiblingOrParent.Get()) {
                 j._entry->nextSiblingOrParent.Set(
                     _InsertInTable(i._entry->nextSiblingOrParent.
                                    Get()->value).first._entry,
@@ -298,20 +304,37 @@ public:
         }
     }
 
-    /// \brief Destructor.
+    /// Move constructor.
+    SdfPathTable(SdfPathTable &&other)
+        : _buckets(std::move(other._buckets))
+        , _size(other._size)
+        , _mask(other._mask)
+    {
+        other._size = 0;
+        other._mask = 0;
+    }
+
+    /// Destructor.
     ~SdfPathTable() {
         // Call clear to free all nodes.
         clear();
     }
 
-    /// \brief Assignment.
+    /// Copy assignment.
     SdfPathTable &operator=(SdfPathTable const &other) {
         if (this != &other)
             SdfPathTable(other).swap(*this);
         return *this;
     }
 
-    /// \brief Return an iterator to the start of the table.
+    /// Move assignment.
+    SdfPathTable &operator=(SdfPathTable &&other) {
+        if (this != &other)
+            SdfPathTable(std::move(other)).swap(*this);
+        return *this;
+    }
+
+    /// Return an iterator to the start of the table.
     iterator begin() {
         // Return an iterator pointing to the root if this table isn't empty.
         if (empty())
@@ -369,7 +392,7 @@ public:
     /// Return an iterator to the element corresponding to \a path, or \a end()
     /// if there is none.
     iterator find(SdfPath const &path) {
-        if (not empty()) {
+        if (!empty()) {
             // Find the item in the list.
             for (_Entry *e = _buckets[_Hash(path)]; e; e = e->next) {
                 if (e->value.first == path)
@@ -382,7 +405,7 @@ public:
     /// Return a const_iterator to the element corresponding to \a path, or
     /// \a end() if there is none.
     const_iterator find(SdfPath const &path) const {
-        if (not empty()) {
+        if (!empty()) {
             // Find the item in the list.
             for (_Entry const *e = _buckets[_Hash(path)]; e; e = e->next) {
                 if (e->value.first == path)
@@ -423,7 +446,7 @@ public:
     inline size_t size() const { return _size; }
 
     /// Return true if this table is empty.
-    inline bool empty() const { return not size(); }
+    inline bool empty() const { return !size(); }
 
     /// Insert \a value into the table, and additionally insert default entries
     /// for all ancestral paths of \a value.first that do not already exist in
@@ -443,7 +466,7 @@ public:
             // New element -- make sure the parent is inserted.
             _Entry * const newEntry = result.first._entry;
             SdfPath const &parentPath = _GetParentPath(value.first);
-            if (not parentPath.IsEmpty()) {
+            if (!parentPath.IsEmpty()) {
                 iterator parIter =
                     insert(value_type(parentPath, mapped_type())).first;
                 // Add the new entry to the parent's children.
@@ -482,8 +505,6 @@ public:
     /// Equivalent to clear(), but destroy contained objects in parallel.  This
     /// requires that running the contained objects' destructors is thread-safe.
     void ClearInParallel() {
-        // Helper function for clearing path tables.
-        void Sdf_ClearPathTableInParallel(void **, size_t, void (*)(void *));
         Sdf_ClearPathTableInParallel(reinterpret_cast<void **>(_buckets.data()),
                                      _buckets.size(), _DeleteEntryChain);
     }        
@@ -493,6 +514,38 @@ public:
         _buckets.swap(other._buckets);
         std::swap(_size, other._size);
         std::swap(_mask, other._mask);
+    }
+
+    /// Return a vector of the count of elements in each bucket.
+    std::vector<size_t> GetBucketSizes() const {
+        std::vector<size_t> sizes(_buckets.size(), 0u);;
+        for (size_t i = 0, n = _buckets.size(); i != n; ++i) {
+            for (_Entry *entry = _buckets[i]; entry; entry = entry->next) {
+                sizes[i]++;
+            }
+        }
+        return sizes;
+    }
+
+    /// Replaces all prefixes from \p oldName to \p newName.
+    /// Note that \p oldName and \p newName need to be silbing paths (ie. 
+    /// their parent paths must be the same).
+    void UpdateForRename(const SdfPath &oldName, const SdfPath &newName) {
+
+        if (oldName.GetParentPath() != newName.GetParentPath()) {
+            TF_CODING_ERROR("Unexpected arguments.");
+            return;
+        }
+    
+        std::pair<iterator, iterator> range = FindSubtreeRange(oldName);
+        for (iterator i=range.first; i!=range.second; ++i) {
+            insert(value_type(
+                i->first.ReplacePrefix(oldName, newName),
+                i->second));
+        }
+        
+        if (range.first != range.second)
+            erase(oldName);
     }
 
     /// @}
@@ -605,7 +658,7 @@ private:
 
         // Allocate a new bucket list of twice the size.  Minimum nonzero number
         // of buckets is 8.
-        _mask = std::max(7UL, (_mask << 1) + 1);
+        _mask = std::max(size_t(7), (_mask << 1) + 1);
         _BucketVec newBuckets(_mask + 1);
 
         // Move items to a new bucket list
@@ -648,5 +701,6 @@ private:
 
 };
 
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SDF_PATHTABLE_H

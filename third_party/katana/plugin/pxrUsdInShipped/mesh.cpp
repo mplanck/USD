@@ -23,21 +23,29 @@
 //
 #include "pxrUsdInShipped/declareCoreOps.h"
 
+#include "pxr/pxr.h"
 #include "usdKatana/attrMap.h"
 #include "usdKatana/readMesh.h"
 #include "usdKatana/utils.h"
 
-#include "pxr/usd/usdShade/look.h"
+#include "pxr/base/tf/envSetting.h"
+#include "pxr/usd/usdShade/material.h"
 #include "pxr/usd/usdGeom/faceSetAPI.h"
 #include "pxr/usd/usdGeom/mesh.h"
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
+TF_DEFINE_ENV_SETTING(USD_KATANA_IMPORT_FACESET_API, true, 
+                      "Whether face-sets encoded using the deprecated "
+                      "UsdGeomFaceSetAPI schema must be imported by PxrUsdIn.")
+
 static void 
-_CreateFaceSets(
+_CreateFaceSetsFromFaceSetAPI(
         const UsdPrim& prim,
-        const PxrUsdKatanaUsdInPrivateData& data,
+        const PxrUsdKatanaUsdInPrivateData &data,
         FnKat::GeolibCookInterface& interface);
 
-PXRUSDKATANA_USDIN_PLUGIN_DEFINE(PxrUsdInCore_MeshOp, privateData, interface)
+PXRUSDKATANA_USDIN_PLUGIN_DEFINE(PxrUsdInCore_MeshOp, privateData, opArgs, interface)
 {
     PxrUsdKatanaAttrMap attrs;
 
@@ -48,29 +56,30 @@ PXRUSDKATANA_USDIN_PLUGIN_DEFINE(PxrUsdInCore_MeshOp, privateData, interface)
 
     attrs.toInterface(interface);
 
-    if (UsdShadeLook::HasLookFaceSet(prim))
+    if (TfGetEnvSetting(USD_KATANA_IMPORT_FACESET_API) and 
+        UsdShadeMaterial::HasMaterialFaceSet(prim)) 
     {
-        _CreateFaceSets(prim, privateData, interface);
+        _CreateFaceSetsFromFaceSetAPI(prim, privateData, interface);
     }
 }
 
 // For now, this is only used by the mesh op.  If this logic needs to be
 // accessed elsewhere, it should move down into usdKatana.
 static void 
-_CreateFaceSets(
+_CreateFaceSetsFromFaceSetAPI(
         const UsdPrim& prim,
-        const PxrUsdKatanaUsdInPrivateData& data,
+        const PxrUsdKatanaUsdInPrivateData &data,
         FnKat::GeolibCookInterface& interface)
 {
-    UsdGeomFaceSetAPI faceSet = UsdShadeLook::GetLookFaceSet(prim);
+    UsdGeomFaceSetAPI faceSet = UsdShadeMaterial::GetMaterialFaceSet(prim);
     bool isPartition = faceSet.GetIsPartition();;
-    if (not isPartition) {
+    if (!isPartition) {
         TF_WARN("Found face set on prim <%s> that is not a partition.", 
                 prim.GetPath().GetText());
         // continue here?
     }
 
-    const double currentTime = data.GetUsdInArgs()->GetCurrentTime();
+    const double currentTime = data.GetCurrentTime();
 
     VtIntArray faceCounts, faceIndices;
     faceSet.GetFaceCounts(&faceCounts, currentTime);
@@ -87,7 +96,7 @@ _CreateFaceSets(
 
         faceSetAttrs.set("type", FnKat::StringAttribute("faceset"));
         faceSetAttrs.set("materialAssign", FnKat::StringAttribute(
-            PxrUsdKatanaUtils::ConvertUsdLookPathToKatLocation(
+            PxrUsdKatanaUtils::ConvertUsdMaterialPathToKatLocation(
                 bindingTargets[faceSetIdx], data)));
 
         FnKat::IntBuilder facesBuilder;

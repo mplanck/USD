@@ -21,13 +21,15 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/usd/pcp/types.h"
 
+#include "pxr/pxr.h"
+#include "pxr/usd/pcp/types.h"
 #include "pxr/base/tf/pyEnum.h"
+
+PXR_NAMESPACE_USING_DIRECTIVE
 
 void
 wrapTypes()
 {
     TfPyWrapEnum<PcpArcType>();
-    TfPyWrapEnum<PcpDependencyType>();
 }

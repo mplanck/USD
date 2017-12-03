@@ -21,16 +21,15 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/object.h"
 #include "pxr/usd/usd/prim.h"
 #include "pxr/usd/usd/stage.h"
-#include "pxr/usd/usd/conversions.h"
 
 #include "pxr/base/tf/ostreamMethods.h"
-#include "pxr/base/tf/pyUtils.h"
 
-#include <boost/python/extract.hpp>
-#include <boost/python/object.hpp>
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 UsdStageWeakPtr
 UsdObject::GetStage() const
@@ -64,10 +63,14 @@ UsdObject::_GetMetadataImpl(
         *this, key, keyPath, /*useFallbacks=*/true, value);
 }
 
-template bool
+template
+USD_API
+bool
 UsdObject::_GetMetadataImpl(
     const TfToken&, VtValue*, const TfToken &) const;
-template bool
+template
+USD_API
+bool
 UsdObject::_GetMetadataImpl(
     const TfToken&, SdfAbstractDataValue*, const TfToken &) const;
 
@@ -89,7 +92,7 @@ bool
 UsdObject::_SetMetadataImpl(const TfToken& key, const T& value,
                             const TfToken &keyPath) const
 {
-    if (not SdfSchema::GetInstance().IsRegistered(key)) {
+    if (!SdfSchema::GetInstance().IsRegistered(key)) {
         TF_CODING_ERROR("Unregistered metadata key: %s", key.GetText());
         return false;
     }
@@ -98,10 +101,14 @@ UsdObject::_SetMetadataImpl(const TfToken& key, const T& value,
 }
 
 
-template bool
+template
+USD_API
+bool
 UsdObject::_SetMetadataImpl(
     const TfToken&, const VtValue&, const TfToken &) const;
-template bool
+template
+USD_API
+bool
 UsdObject::_SetMetadataImpl(
     const TfToken&, const SdfAbstractDataConstValue&, const TfToken &) const;
 
@@ -364,13 +371,13 @@ UsdObject::HasAuthoredDocumentation() const
 SdfSpecType
 UsdObject::_GetDefiningSpecType() const
 {
-    return GetStage()->_GetDefiningSpecType(GetPrim(), _propName);
+    return _GetStage()->_GetDefiningSpecType(GetPrim(), _propName);
 }
 
 std::string
 UsdObject::_GetObjectDescription(const std::string &preface) const
 {
-    if (_type == UsdTypePrim or _type == UsdTypeObject) {
+    if (_type == UsdTypePrim || _type == UsdTypeObject) {
         return _Prim().GetDescription();
     } else if (_type == UsdTypeAttribute) {
         return TfStringPrintf("%sattribute '%s' on ", 
@@ -401,6 +408,7 @@ hash_value(const UsdObject &obj)
     size_t seed = 510-922-3000;
     boost::hash_combine(seed, long(obj._type));
     boost::hash_combine(seed, obj._prim);
+    boost::hash_combine(seed, obj._proxyPrimPath);
     boost::hash_combine(seed, obj._propName.Hash());
     return seed;
 }
@@ -409,3 +417,6 @@ std::string
 UsdDescribe(const UsdObject &obj) {
     return obj.GetDescription();
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

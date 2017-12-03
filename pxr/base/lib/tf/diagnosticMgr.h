@@ -24,7 +24,9 @@
 #ifndef TF_DIAGNOSTIC_MGR_H
 #define TF_DIAGNOSTIC_MGR_H
 
+/// \file tf/diagnosticMgr.h
 
+#include "pxr/pxr.h"
 #include "pxr/base/tf/callContext.h"
 #include "pxr/base/tf/copyOnWritePtr.h"
 #include "pxr/base/tf/debug.h"
@@ -36,12 +38,14 @@
 #include "pxr/base/tf/warning.h"
 #include "pxr/base/tf/weakPtr.h"
 #include "pxr/base/tf/enum.h"
+#include "pxr/base/tf/api.h"
 
 #include "pxr/base/arch/inttypes.h"
 #include "pxr/base/arch/attributes.h"
 #include "pxr/base/arch/functionLite.h"
 
 #include <tbb/enumerable_thread_specific.h>
+#include <tbb/spin_rw_mutex.h>
 #include <tbb/atomic.h>
 
 #include <boost/scoped_ptr.hpp>
@@ -49,189 +53,208 @@
 #include <cstdarg>
 #include <list>
 #include <string>
+#include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 TF_DEBUG_CODES(
     TF_LOG_STACK_TRACE_ON_ERROR,
-    TF_ERROR_MARK_TRACKING
+    TF_ERROR_MARK_TRACKING,
+    TF_PRINT_ALL_POSTED_ERRORS_TO_STDERR
     );
 
 class TfError;
 class TfErrorMark;
-template <typename T> class TfSingleton;
 
-/*!
- * \class TfDiagnosticMgr
- * \brief Singleton class through which all errors and diagnostics pass.
- * \ingroup group_tf_Diagnostic
- */
-class TfDiagnosticMgr: public TfWeakBase {
+/// \class TfDiagnosticMgr
+/// \ingroup group_tf_Diagnostic
+///
+/// Singleton class through which all errors and diagnostics pass.
+class TfDiagnosticMgr : public TfWeakBase {
 public:
 
     typedef TfDiagnosticMgr This;
 
     typedef std::list<TfError> ErrorList;
-    
-    /*!
-     * \brief Synonym for standard STL iterator to traverse the error list.
-     *
-     * The error list for a thread is an STL list.  The \c ErrorIterator type is
-     * an STL iterator and can be used without restriction in any way that it is
-     * legal to use an STL iterator.
-     *
-     * Given an iterator, one accesses the error in the standard
-     * STL fashion:
-     * \code
-     *     TfErrorMark m;
-     *
-     *     ... ;
-     *     if (!m.IsClean()) {
-     *         TfErrorMark::Iterator i;
-     *         for (i = m.GetBegin(); i != m.GetEnd(); ++i) {
-     *            cout << "file = " << i->GetSourceFileName()
-     *                 << "line = " << i->GetSourceLineNumber() << "\n";
-     *         }
-     * \endcode
-     */
+
+    /// Synonym for standard STL iterator to traverse the error list.
+    ///
+    /// The error list for a thread is an STL list.  The \c ErrorIterator type
+    /// is an STL iterator and can be used without restriction in any way that
+    /// it is legal to use an STL iterator.
+    ///
+    /// Given an iterator, one accesses the error in the standard STL fashion:
+    /// \code
+    ///     TfErrorMark m;
+    ///
+    ///     ... ;
+    ///     if (!m.IsClean()) {
+    ///         TfErrorMark::Iterator i;
+    ///         for (i = m.GetBegin(); i != m.GetEnd(); ++i) {
+    ///            cout << "file = " << i->GetSourceFileName()
+    ///                 << "line = " << i->GetSourceLineNumber() << "\n";
+    ///         }
+    /// \endcode
     typedef ErrorList::iterator ErrorIterator;
 
-    /*! 
-     * \brief Returns the name of the given diagnostic code.
-     */
+    /// Returns the name of the given diagnostic code.
+    TF_API
     static std::string GetCodeName(const TfEnum &code);
 
-    /*! \class Delegate
-     * \brief One may set a delegate with the \c TfDiagnosticMgr which will be
-     * called to respond to errors and diagnostics.
-     */
-    class Delegate : public TfWeakBase {
+    /// \class Delegate
+    /// One may set a delegate with the \c TfDiagnosticMgr which will be
+    /// called to respond to errors and diagnostics.
+    ///
+    /// \note None of the methods in \c TfDiagnosticMgr::Delegate can be
+    /// reentrant.
+    ///
+    /// Practically speaking, this means they cannot invoke:
+    ///
+    /// - TF_ERROR
+    /// - TF_RUNTIME_ERROR
+    /// - TF_CODING_ERROR
+    /// - TF_WARN
+    /// - TF_STATUS
+    ///
+    /// For a more complete list, see diagnostic.h 
+    ///
+    class Delegate {
       public:
+        TF_API 
         virtual ~Delegate() = 0;
-        //! \brief Called when a \c TfError is posted.
 
+        /// Called when a \c TfError is posted.
         virtual void IssueError(TfError const &err) = 0;
-        //! \brief Called when a \c TF_FATAL_ERROR is issued (or a failed
 
-        // \c TF_AXIOM).
+        /// Called when a \c TF_FATAL_ERROR is issued (or a failed
+        /// \c TF_AXIOM).
         virtual void IssueFatalError(TfCallContext const &context,
                                      std::string const &msg) = 0;
-        //! \brief Called when a \c TF_STATUS() is issued.
+
+        /// Called when a \c TF_STATUS() is issued.
         virtual void IssueStatus(TfStatus const &status) = 0;
 
-        //! \brief Called when a \c TF_WARNING() is issued.
-
+        /// Called when a \c TF_WARNING() is issued.
         virtual void IssueWarning(TfWarning const &warning) = 0;
 
     protected:
-        //! \brief Abort the program, but avoid the session logging mechanism.
-        // This is intended to be used for fatal error cases where any
-        // information has already been logged.
+        /// Abort the program, but avoid the session logging mechanism. This
+        /// is intended to be used for fatal error cases where any information
+        /// has already been logged.
         void _UnhandledAbort() const;
     };
-    typedef TfWeakPtr<Delegate> DelegateWeakPtr;
 
-
-    //! \brief Return the singleton instance.
-    static This &GetInstance() {
+    /// Return the singleton instance.
+    TF_API static This &GetInstance() {
         return TfSingleton<This>::GetInstance();
     }
 
-    /*! \brief Set the delegate to \a delegate.
-     *
-     * \a delegate will be called when diagnostics and errors are invoked.
-     * Note that only one delegate may be registered in an application.  Any
-     * subsequent registrations will be ignored.
-     *
-     * XXX: For now, we overwrite the delegate, since some tests need their
-     * own delegates, yet are dependant on libDid, which creates a global delegate.
-     * This is bug 3237.
-     * SetDelegate will still print a warning when overwriting the delegate.
-     */
-    void SetDelegate(DelegateWeakPtr const &delegate);
+    /// Add the delegate \p delegate to the list of current delegates.
+    ///
+    /// This will add the delegate even if it already exists in the list.
+    ///
+    /// Each delegate will be called when diagnostics and errors are invoked
+    ///
+    /// This function is thread safe.
+    TF_API
+    void AddDelegate(Delegate* delegate);
 
-    /*! \brief Set whether errors, warnings and status messages should be
-     *        printed out to the terminal.
-     */
+    /// Removes all delegates equal to \p delegate from the current delegates.
+    ///
+    /// This function is thread safe.
+    TF_API
+    void RemoveDelegate(Delegate* delegate);
+
+    /// Set whether errors, warnings and status messages should be printed out
+    /// to the terminal.
+    TF_API
     void SetQuiet(bool quiet) { _quiet = quiet; }
     
-    /*!
-     * \brief Return an iterator to the beginning of this thread's error list.
-     */
+    /// Return an iterator to the beginning of this thread's error list.
     ErrorIterator GetErrorBegin() { return _errorList.local().begin(); }
 
-    /*!
-     * \brief Return an iterator to the end of this thread's error list.
-     */
+    /// Return an iterator to the end of this thread's error list.
     ErrorIterator GetErrorEnd() { return _errorList.local().end(); }
 
-    /*
-     * Deprecated.  Do not use.  Use EraseRange() instead.
-     */
+    /// Remove error specified by iterator \p i.
+    /// \deprecated Use TfErrorMark insetad.
+    TF_API
     ErrorIterator EraseError(ErrorIterator i);
 
-    /*!
-     * \brief Remove all the errors in [first, last) from this thread's error
-     * stream.  This should generally not be invoked directly.  Use TfErrorMark
-     * instead.
-     */
+    /// Remove all the errors in [first, last) from this thread's error
+    /// stream. This should generally not be invoked directly. Use TfErrorMark
+    /// instead.
+    TF_API
     ErrorIterator EraseRange(ErrorIterator first, ErrorIterator last);
 
-    // Append an error to the list of active errors.  This is generally not
-    // meant to be called by user code.  It is public so that the system which
-    // translates tf errors to and from python exceptions can manage errors.
+    /// Append an error to the list of active errors.  This is generally not
+    /// meant to be called by user code.  It is public so that the system
+    /// which translates tf errors to and from python exceptions can manage
+    /// errors.
+    TF_API
     void AppendError(TfError const &e);
     
-    // If called in a main thread, this method will create a TfError,
-    // append it to the error list, and pass it to the delegate.
-    //
-    // If called in a non-main thread, this method will print the
-    // error to stderr and will not add it to the error list or pass
-    // it to the delegate.
+    /// If called in a main thread, this method will create a TfError, append
+    /// it to the error list, and pass it to the delegate.
+    ///
+    /// If called in a non-main thread, this method will print the error to
+    /// stderr and will not add it to the error list or pass it to the
+    /// delegate.
+    TF_API
     void PostError(TfEnum errorCode, const char* errorCodeString,
         TfCallContext const &context,  
         const std::string& commentary, TfDiagnosticInfo info,
         bool quiet);
     
-    // If called in a main thread, this method will create a TfError,
-    // append it to the error list, and pass it to the delegate.
-    //
-    // If called in a non-main thread, this method will print the
-    // error to stderr and will not add it to the error list or pass
-    // it to the delegate.
+    /// If called in a main thread, this method will create a TfError, append
+    /// it to the error list, and pass it to the delegate.
+    ///
+    /// If called in a non-main thread, this method will print the error to
+    /// stderr and will not add it to the error list or pass it to the
+    /// delegate.
+    TF_API
     void PostError(const TfDiagnosticBase& diagnostic);
 
-    // If called in a non-main thread, this method will print the warning msg
-    // rather than passing it to the delegate.
+    /// If called in a non-main thread, this method will print the warning msg
+    /// rather than passing it to the delegate.
+    TF_API
     void PostWarning(TfEnum warningCode, const char *warningCodeString,
         TfCallContext const &context, std::string const &commentary,
         TfDiagnosticInfo info, bool quiet) const;
 
-    // If called in a non-main thread, this method will print the warning msg
-    // rather than passing it to the delegate.
+    /// If called in a non-main thread, this method will print the warning msg
+    /// rather than passing it to the delegate.
+    TF_API
     void PostWarning(const TfDiagnosticBase& diagnostic) const;
 
-    // If called in a non-main thread, this method will print the status msg
-    // rather than passing it to the delegate.
+    /// If called in a non-main thread, this method will print the status msg
+    /// rather than passing it to the delegate.
+    TF_API
     void PostStatus(TfEnum statusCode, const char *statusCodeString,
         TfCallContext const &context, std::string const &commentary,
         TfDiagnosticInfo info, bool quiet) const;
 
-    // If called in a non-main thread, this method will print the status msg
-    // rather than passing it to the delegate.
+    /// If called in a non-main thread, this method will print the status msg
+    /// rather than passing it to the delegate.
+    TF_API
     void PostStatus(const TfDiagnosticBase& diagnostic) const;
 
-    // If called in a non-main thread, this method will print the error msg
-    // and handle the fatal error itself rather than passing it to the delegate.
+    /// If called in a non-main thread, this method will print the error msg
+    /// and handle the fatal error itself rather than passing it to the
+    /// delegate.
+    TF_API
     void PostFatal(TfCallContext const &context, TfEnum statusCode,
                    std::string const &msg) const;
 
-    // Return true if an instance of TfErrorMark exists in the curren thread of
-    // exection, false otherwise.
-    bool HasActiveErrorMark() { return _errorMarkCounts.local(); }
+    /// Return true if an instance of TfErrorMark exists in the curren thread
+    /// of exection, false otherwise.
+    bool HasActiveErrorMark() { return _errorMarkCounts.local() > 0; }
 
 #if !defined(doxygen)
-    /*
-     * Public, but *only* meant to be used by the TF_ERROR() macro.
-     */
+    //
+    // Public, but *only* meant to be used by the TF_ERROR() macro.
+    //
+    /// \private
     class ErrorHelper {
       public:
         ErrorHelper(TfCallContext const &context, TfEnum errorCode,
@@ -241,27 +264,31 @@ public:
         {
         }
 
-        ErrorIterator Post(const char* fmt, ...) const
+        TF_API
+        void Post(const char* fmt, ...) const
             ARCH_PRINTF_FUNCTION(2,3);
 
-        ErrorIterator PostQuietly(const char* fmt, ...) const
+        TF_API
+        void PostQuietly(const char* fmt, ...) const
             ARCH_PRINTF_FUNCTION(2,3);
 
-        ErrorIterator Post(const std::string& msg) const;
+        TF_API
+        void Post(const std::string& msg) const;
 
-        ErrorIterator PostWithInfo(
+        TF_API
+        void PostWithInfo(
                 const std::string& msg,
                 TfDiagnosticInfo info = TfDiagnosticInfo()) const;
 
-        ErrorIterator PostQuietly(const std::string& msg,
-                            TfDiagnosticInfo info = TfDiagnosticInfo()) const;
+        TF_API
+        void PostQuietly(const std::string& msg,
+                         TfDiagnosticInfo info = TfDiagnosticInfo()) const;
 
       private:
         TfCallContext _context;
         TfEnum _errorCode;
         const char *_errorCodeString;
     };
-
 
     struct WarningHelper {
         WarningHelper(TfCallContext const &context, TfEnum warningCode,
@@ -271,18 +298,23 @@ public:
         {
         }
 
+        TF_API
         void Post(const char* fmt, ...) const
             ARCH_PRINTF_FUNCTION(2,3);
 
+        TF_API
         void PostQuietly(const char* fmt, ...) const
             ARCH_PRINTF_FUNCTION(2,3);
 
+        TF_API
         void Post(const std::string &str) const;
 
+        TF_API
         void PostWithInfo(
                 const std::string& msg,
                 TfDiagnosticInfo info = TfDiagnosticInfo()) const;
 
+        TF_API
         void PostQuietly(const std::string& msg) const;
 
       private:
@@ -299,18 +331,23 @@ public:
         {
         }
 
+        TF_API
         void Post(const char* fmt, ...) const
             ARCH_PRINTF_FUNCTION(2,3);
 
+        TF_API
         void PostQuietly(const char* fmt, ...) const
             ARCH_PRINTF_FUNCTION(2,3);
 
+        TF_API
         void Post(const std::string &str) const;
 
+        TF_API
         void PostWithInfo(
                 const std::string& msg,
                 TfDiagnosticInfo info = TfDiagnosticInfo()) const;
 
+        TF_API
         void PostQuietly(const std::string& msg) const;
 
       private:
@@ -333,7 +370,6 @@ public:
         TfCallContext _context;
         TfEnum _statusCode;
     };
-
         
 #endif
     
@@ -345,6 +381,7 @@ private:
     
     // Return an iterator to the first error with serial number >= mark, or the
     // past-the-end iterator, if no such errors exist.
+    TF_API
     ErrorIterator _GetErrorMarkBegin(size_t mark, size_t *nErrors);
 
     // Invoked by ErrorMark ctor.
@@ -370,13 +407,16 @@ private:
     void _RebuildErrorLogText();
 
     // Helper to actually publish log text into the Arch crash handler.
-    void _SetLogInfoForErrors(const std::string &logText) const;
+    void _SetLogInfoForErrors(std::vector<std::string> const &logText) const;
 
-    // Helper to write error text from all errors in [i, end) to out.
-    void _AppendErrorTextToString(ErrorIterator i, std::string &out);
+    // A guard used to protect reentrency when adding/removing
+    // delegates as well as posting errors/warnings/statuses
+    mutable tbb::enumerable_thread_specific<bool> _reentrantGuard;
 
-    // The current diagnostic delegate.
-    DelegateWeakPtr _delegate;
+    // The registered delegates.
+    std::vector<Delegate*> _delegates;
+
+    mutable tbb::spin_rw_mutex _delegatesMutex;
 
     // Global serial number for sorting.
     tbb::atomic<size_t> _nextSerial;
@@ -385,8 +425,18 @@ private:
     tbb::enumerable_thread_specific<ErrorList> _errorList;
 
     // Thread-specific diagnostic log text for pending errors.
-    tbb::enumerable_thread_specific<
-        boost::scoped_ptr<std::string> > _logText;
+    struct _LogText {
+        void AppendAndPublish(ErrorIterator i, ErrorIterator end);
+        void RebuildAndPublish(ErrorIterator i, ErrorIterator end);
+        
+        std::pair<std::vector<std::string>,
+                  std::vector<std::string>> texts;
+        bool parity = false;
+    private:
+        void _AppendAndPublishImpl(bool clear,
+                                   ErrorIterator i, ErrorIterator end);
+    };
+    tbb::enumerable_thread_specific<_LogText> _logText;
 
     // Thread-specific error mark counts.  Use a native key for best performance
     // here.
@@ -400,5 +450,9 @@ private:
     friend class TfErrorTransport;
     friend class TfErrorMark;
 };
+
+TF_API_TEMPLATE_CLASS(TfSingleton<TfDiagnosticMgr>);
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_DIAGNOSTIC_MGR_H

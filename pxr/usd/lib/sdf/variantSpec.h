@@ -21,14 +21,19 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/variantSpec.h
-
 #ifndef SDF_VARIANTSPEC_H
 #define SDF_VARIANTSPEC_H
 
+/// \file sdf/variantSpec.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/usd/sdf/declareSpec.h"
+#include "pxr/usd/sdf/proxyTypes.h"
 #include "pxr/usd/sdf/spec.h"
 #include <string>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 SDF_DECLARE_HANDLES(SdfLayer);
 SDF_DECLARE_HANDLES(SdfPrimSpec);
@@ -37,9 +42,9 @@ SDF_DECLARE_HANDLES(SdfVariantSetSpec);
 
 class SdfPath;
 
-///
 /// \class SdfVariantSpec 
-/// \brief Represents a single variant in a variant set.
+///
+/// Represents a single variant in a variant set.
 ///
 /// A variant contains a prim.  This prim is the root prim of the variant.
 ///
@@ -57,7 +62,8 @@ public:
     /// \name Spec construction
     /// @{
 
-    /// \brief Constructs a new instance.
+    /// Constructs a new instance.
+    SDF_API
     static SdfVariantSpecHandle New(const SdfVariantSetSpecHandle& owner,
                                     const std::string& name);
 
@@ -66,21 +72,38 @@ public:
     /// \name Name
     /// @{
 
-    /// \brief Returns the name of this variant.
+    /// Returns the name of this variant.
+    SDF_API
     std::string GetName() const;
 
-    /// \brief Returns the name of this variant.
+    /// Returns the name of this variant.
+    SDF_API
     TfToken GetNameToken() const;
 
     /// @}
     /// \name Namespace hierarchy
     /// @{
 
-    /// \brief Return the SdfVariantSetSpec that owns this variant.
+    /// Return the SdfVariantSetSpec that owns this variant.
+    SDF_API
     SdfVariantSetSpecHandle GetOwner() const;
 
-    /// \brief Get the prim spec owned by this variant.
+    /// Get the prim spec owned by this variant.
+    SDF_API
     SdfPrimSpecHandle GetPrimSpec() const;
+
+    /// Returns the nested variant sets.
+    ///
+    /// The result maps variant set names to variant sets.  Variant sets
+    /// may be removed through the proxy.
+    SDF_API
+    SdfVariantSetsProxy GetVariantSets() const;
+
+    /// Returns list of variant names for the given varient set.
+    SDF_API
+    std::vector<std::string> GetVariantNames(const std::string& name) const;
+
+    /// @}
 };
 
 /// Convenience function to create a variant spec for a given variant set and
@@ -93,10 +116,12 @@ public:
 ///
 /// It creates a variant spec with the given name under the specified variant
 /// set if it doesn't already exist.
-SdfVariantSpecHandle SdfCreateVariantInLayer(
+SDF_API SdfVariantSpecHandle SdfCreateVariantInLayer(
     const SdfLayerHandle &layer,
     const SdfPath &primPath,
     const std::string &variantSetName,
     const std::string &variantName );
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif /* SDF_VARIANT_SPEC_H */

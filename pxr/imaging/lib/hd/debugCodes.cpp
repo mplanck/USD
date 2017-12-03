@@ -26,8 +26,14 @@
 #include "pxr/base/tf/debug.h"
 #include "pxr/base/tf/registryManager.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 TF_REGISTRY_FUNCTION(TfDebug)
 {
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_BPRIM_ADDED, "Report when bprims are added");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_BPRIM_REMOVED, "Report when bprims are removed")
+
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_BUFFER_ARRAY_INFO, "Report detail info of HdBufferArrays");
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_BUFFER_ARRAY_RANGE_CLEANED, "Report when bufferArrayRange is cleaned");
 
@@ -46,6 +52,8 @@ TF_REGISTRY_FUNCTION(TfDebug)
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_DISABLE_MULTITHREADED_RPRIM_SYNC,
                                 "Run RPrim sync on a single thread");
 
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_DISABLE_TINY_PRIM_CULLING, "Disable tiny prim culling");
+
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_DRAW_BATCH, "Reports diagnostics for draw batches");
 
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_DRAWITEM_DRAWN, "Report each draw item as it is drawn");
@@ -54,6 +62,10 @@ TF_REGISTRY_FUNCTION(TfDebug)
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_DUMP_GLSLFX_CONFIG, "Print composed GLSLFX configuration");
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_DUMP_SHADER_SOURCE, "Print generated shader code");
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_DUMP_SHADER_BINARY, "Write out compiled GLSL shader binary");
+
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_EXT_COMPUTATION_ADDED, "Report when ExtComputations are added");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_EXT_COMPUTATION_REMOVED, "Report when ExtComputations are removed");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_EXT_COMPUTATION_UPDATED, "Report when ExtComputations are updated");
 
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_FREEZE_CULL_FRUSTUM,
                                 "Freeze the frustum used for culling at it's current value");
@@ -75,12 +87,15 @@ TF_REGISTRY_FUNCTION(TfDebug)
 
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_SAFE_MODE, "Enable additional security checks");
 
-    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_SHADER_ADDED, "Report when shaders are added");
-    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_SHADER_REMOVED, "Report when shaders are removed");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_SPRIM_ADDED, "Report when sprims are added");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_SPRIM_REMOVED, "Report when sprims are removed")
+;
 
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_TASK_ADDED, "Report when tasks are added");
     TF_DEBUG_ENVIRONMENT_SYMBOL(HD_TASK_REMOVED, "Report when tasks are removed");
 
-    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_TEXTURE_ADDED, "Report when textures are added");
-    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_TEXTURE_REMOVED, "Report when textures are removed");
+    TF_DEBUG_ENVIRONMENT_SYMBOL(HD_VARYING_STATE, "Reports state tracking of varying state");
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

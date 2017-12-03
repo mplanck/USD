@@ -24,10 +24,16 @@
 #ifndef HDX_SELECTION_TRACKER_H
 #define HDX_SELECTION_TRACKER_H
 
+#include "pxr/pxr.h"
+#include "pxr/imaging/hdx/api.h"
 #include "pxr/imaging/hdx/version.h"
 #include "pxr/base/vt/array.h"
 #include "pxr/usd/sdf/path.h"
 #include <boost/smart_ptr.hpp>
+#include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 class HdRenderIndex;
 class TfToken;
@@ -38,79 +44,98 @@ typedef boost::shared_ptr<class HdxSelection> HdxSelectionSharedPtr;
 typedef boost::shared_ptr<class HdxSelectionTracker> HdxSelectionTrackerSharedPtr;
 typedef boost::weak_ptr<class HdxSelectionTracker> HdxSelectionTrackerWeakPtr;
 
+
+enum HdxSelectionHighlightMode {
+    HdxSelectionHighlightModeSelect = 0,
+    HdxSelectionHighlightModeLocate,
+    HdxSelectionHighlightModeMask,
+
+    HdxSelectionHighlightModeCount
+};
+
+/// \class HdxSelection
+///
 /// HdxSelection holds a collection of items which are rprims, instances of
 /// rprim, sub elements of rprim (such as faces, verts). HdxSelectionTracker
 /// takes HdxSelection and generates GPU buffer to be used for highlighting.
 ///
-class HdxSelection
-{
+class HdxSelection {
 public:
-    HdxSelection(HdRenderIndex * renderIndex)
-        : _renderIndex(renderIndex) { }
-
-    HdRenderIndex * GetRenderIndex() const {
-        return _renderIndex;
-    }
-
-    void AddRprim(SdfPath const &path) {
-        selectedPrims.push_back(path);
-    }
-
-    void AddInstance(
-        SdfPath const &path, VtIntArray const &instanceIndex=VtIntArray()) {
-        selectedPrims.push_back(path);
-        selectedInstances[path].push_back(instanceIndex);
-    }
-
-    void AddFaces(
-        SdfPath const &path, VtIntArray const &faceIndices) {
-        selectedPrims.push_back(path);
-        selectedFaces[path] = faceIndices;
-    }
-
-    // TODO: encapsulate members
-
     typedef TfHashMap<SdfPath, std::vector<VtIntArray>, SdfPath::Hash> InstanceMap;
     typedef TfHashMap<SdfPath, VtIntArray, SdfPath::Hash> ElementMap;
 
-    // The SdfPaths are expected to be resolved rprim paths,
-    // root paths will not be expanded.
-    // Duplicated entries are allowed.
-    SdfPathVector selectedPrims;
+    HdxSelection() = default;
 
-    /// This maps from prototype path to a vector of instance indices which is
-    /// also a vector (because of nested instancing).
-    InstanceMap selectedInstances;
+    HDX_API
+    void AddRprim(HdxSelectionHighlightMode const& mode,
+                  SdfPath const &path);
 
-    // The selected elements (faces, points, edges) , if any, for the selected
-    // objects. This maps from object path to a vector of element indices.
-    ElementMap selectedFaces;
+    HDX_API
+    void AddInstance(HdxSelectionHighlightMode const& mode,
+                     SdfPath const &path,
+                     VtIntArray const &instanceIndex=VtIntArray());
 
-private:
-    HdRenderIndex * _renderIndex;
+    HDX_API
+    void AddElements(HdxSelectionHighlightMode const& mode,
+                     SdfPath const &path,
+                     VtIntArray const &elementIndices);
+
+    SdfPathVector const&
+    GetSelectedPrims(HdxSelectionHighlightMode const& mode) const;
+
+    InstanceMap const&
+    GetSelectedInstances(HdxSelectionHighlightMode const& mode) const;
+
+    ElementMap const&
+    GetSelectedElements(HdxSelectionHighlightMode const& mode) const;
+
+protected:
+    struct _SelectedEntities {
+        // The SdfPaths are expected to be resolved rprim paths,
+        // root paths will not be expanded.
+        // Duplicated entries are allowed.
+        SdfPathVector prims;
+
+        /// This maps from prototype path to a vector of instance indices which is
+        /// also a vector (because of nested instancing).
+        InstanceMap instances;
+
+        // The selected elements (faces, points, edges) , if any, for the selected
+        // objects. This maps from object path to a vector of element indices.
+        ElementMap elements;
+    };
+
+    _SelectedEntities _selEntities[HdxSelectionHighlightModeCount];
 };
 
+/// \class HdxSelectionTracker
+///
 /// HdxSelectionTracker is a base class for observing selection state and
 /// providing selection highlighting details to interested clients.
-class HdxSelectionTracker
-{
+///
+class HdxSelectionTracker {
 public:
+    HDX_API
     HdxSelectionTracker();
     virtual ~HdxSelectionTracker() = default;
 
     /// Update dirty bits in the ChangeTracker and compute required primvars for
     /// later consumption.
+    HDX_API
     virtual void Sync(HdRenderIndex* index);
 
-    /// Populates an array of offsets required for selection highlighting.
+    /// Populates an array of offsets required for selection highlighting for
+    /// the given highlight mode.
     /// Returns true if offsets has anything selected.
-    virtual bool GetBuffers(HdRenderIndex const* index,
-                            VtIntArray* offsets) const;
+    HDX_API
+    virtual bool GetSelectionOffsetBuffer(HdRenderIndex const* index,
+                                          VtIntArray* offsets) const;
 
     /// Returns a monotonically increasing version number, which increments
     /// whenever the result of GetBuffers has changed. Note that this number may
     /// overflow and become negative, thus clients should use a not-equal
     /// comparison.
+    HDX_API
     int GetVersion() const;
 
     void SetSelection(HdxSelectionSharedPtr const &selection) {
@@ -125,12 +150,20 @@ public:
 protected:
     /// Increments the internal selection state version, used for invalidation
     /// via GetVersion().
+    HDX_API
     void _IncrementVersion();
+
+    HDX_API
+    virtual bool _GetSelectionOffsets(HdxSelectionHighlightMode const& mode,
+                                      HdRenderIndex const* index,
+                                      std::vector<int>* offsets) const;
 
 private:
     int _version;
     HdxSelectionSharedPtr _selection;
 };
 
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //HDX_SELECTION_TRACKER_H

@@ -24,19 +24,43 @@
 #ifndef TF_PYERRORINTERNAL_H
 #define TF_PYERRORINTERNAL_H
 
+#include "pxr/pxr.h"
+
+#include "pxr/base/tf/api.h"
 #include "pxr/base/tf/pyExceptionState.h"
 #include <boost/python/handle.hpp>
 #include <boost/python/object_fwd.hpp>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 enum Tf_PyExceptionErrorCode {
     TF_PYTHON_EXCEPTION
 };
 
-TfPyExceptionState Tf_PyFetchPythonExceptionState();
-void Tf_PyRestorePythonExceptionState(TfPyExceptionState state);
-boost::python::handle<> Tf_PyGetErrorExceptionClass();
-void Tf_PySetErrorExceptionClass(boost::python::object const &cls);
+TF_API TfPyExceptionState Tf_PyFetchPythonExceptionState();
+TF_API void Tf_PyRestorePythonExceptionState(TfPyExceptionState state);
+TF_API boost::python::handle<> Tf_PyGetErrorExceptionClass();
+TF_API void Tf_PySetErrorExceptionClass(boost::python::object const &cls);
 
+/// RAII class to save and restore the Python exception state.  The client
+/// must hold the GIL during all methods, including the c'tor and d'tor.
+class TfPyExceptionStateScope {
+public:
+    // Save the current exception state but don't unset it.
+    TfPyExceptionStateScope();
+    TfPyExceptionStateScope(const TfPyExceptionStateScope&) = delete;
+    TfPyExceptionStateScope& operator=(const TfPyExceptionStateScope&) = delete;
 
+    // Restore the exception state as it was in the c'tor.
+    ~TfPyExceptionStateScope();
+
+    // Restore the exception state as it was in the c'tor.
+    void Restore();
+
+private:
+    TfPyExceptionState _state;
+};
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_PYERRORINTERNAL_H

@@ -21,10 +21,12 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file alembicReader.h
 #ifndef USDABC_ALEMBICREADER_H
 #define USDABC_ALEMBICREADER_H
 
+/// \file usdAbc/alembicReader.h
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/abstractData.h"
 #include "pxr/base/tf/token.h"
 #include <boost/noncopyable.hpp>
@@ -33,11 +35,16 @@
 #include <string>
 #include <vector>
 
+PXR_NAMESPACE_OPEN_SCOPE
+
+
 // Note -- Even though this header is private we try to keep Alembic headers
 //         out of it anyway for simplicity's sake.
 
 /// \class UsdAbc_AlembicDataReader
-/// \brief An alembic reader suitable for an SdfAbstractData.
+///
+/// An alembic reader suitable for an SdfAbstractData.
+///
 class UsdAbc_AlembicDataReader : boost::noncopyable {
 public:
     typedef int64_t Index;
@@ -153,5 +160,8 @@ private:
     boost::scoped_ptr<class UsdAbc_AlembicDataReaderImpl> _impl;
     std::string _errorLog;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif

@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/gf/multiInterval.h"
 
 #include "pxr/base/tf/iterator.h"
@@ -36,11 +38,15 @@ using namespace boost::python;
 
 using std::string;
 
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
+
 static string
 _Repr(GfMultiInterval const &self)
 {
     string r = TF_PY_REPR_PREFIX + "MultiInterval(";
-    if (not self.IsEmpty()) {
+    if (!self.IsEmpty()) {
         r += "[";
         int count = 0;
         TF_FOR_ALL(i, self) {
@@ -54,6 +60,8 @@ _Repr(GfMultiInterval const &self)
     r += ")";
     return r;
 }
+
+} // anonymous namespace 
 
 void wrapMultiInterval()
 {    

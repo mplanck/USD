@@ -21,6 +21,7 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usdUtils/stitch.h"
 
 #include "pxr/base/vt/value.h"
@@ -35,11 +36,12 @@
 #include "pxr/base/tf/warning.h"
 #include "pxr/base/tf/token.h"
 
-#include <boost/foreach.hpp>
-
 #include <set>
 #include <string>
 #include <algorithm>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
  
 
 // utility functions, not to be exposed as public facing API
@@ -143,13 +145,13 @@ namespace {
     _StitchFrameRanges(const SdfLayerHandle& strongLayer,
                        const SdfLayerHandle& weakLayer) 
     {
-        if (weakLayer->HasStartTimeCode() or _HasStartFrame(weakLayer)) {
+        if (weakLayer->HasStartTimeCode() || _HasStartFrame(weakLayer)) {
             double startTimeCode = std::min(_GetStartTimeCode(weakLayer), 
                                             _GetStartTimeCode(strongLayer));
             strongLayer->SetStartTimeCode(startTimeCode);
         }
         
-        if (weakLayer->HasEndTimeCode() or _HasEndFrame(weakLayer)) {
+        if (weakLayer->HasEndTimeCode() || _HasEndFrame(weakLayer)) {
             double endTimeCode = std::max(_GetEndTimeCode(weakLayer),
                                           _GetEndTimeCode(strongLayer));
             strongLayer->SetEndTimeCode(endTimeCode);
@@ -195,15 +197,14 @@ namespace {
                  const SdfPrimSpecHandle& weakPrim,
                  bool ignoreTimeSamples)
     {
-        BOOST_FOREACH(SdfPrimSpecHandle const& weakPrimIter,
-                      weakPrim->GetNameChildren()) { 
+        for (const auto& weakPrimIter : weakPrim->GetNameChildren()) {
             // lookup prim in strong layer
             SdfPrimSpecHandle strongPrimHandle 
                 = strongPrim->GetPrimAtPath(weakPrimIter->GetPath()); 
 
             // if we don't have a matching prim in the strong layer
             // we can simply insert a copy of the weak's prim
-            if (not strongPrimHandle) {
+            if (!strongPrimHandle) {
                 _MakePrimCopy(strongPrim, weakPrimIter, ignoreTimeSamples); 
             } else {
                 // Passing corresponding prims through
@@ -232,14 +233,12 @@ namespace {
                       const SdfPrimSpecHandle& weakPrim,
                       bool ignoreTimeSamples) 
     {
-        BOOST_FOREACH(SdfAttributeSpecHandle const& childAttribute,
-                      weakPrim->GetAttributes()) {
-
+        for (const auto& childAttribute : weakPrim->GetAttributes()) {
             SdfPath pathToChildAttr = childAttribute->GetPath();
             SdfAttributeSpecHandle strongAttrHandle
                 = strongPrim->GetAttributeAtPath(pathToChildAttr);
 
-            if (not strongAttrHandle) {
+            if (!strongAttrHandle) {
                 _MakeAttributeCopy(strongPrim, childAttribute, 
                                    ignoreTimeSamples);
             } else {
@@ -257,12 +256,11 @@ namespace {
                 // time samples needs special attention, we can't simply
                 // call UsdUtilsStitchInfo(), because both attributes will
                 // have the key 'timeSamples', and we must do an inner compare
-                BOOST_FOREACH(const double timeSamplePoint, 
-                              weakParent
-                                ->ListTimeSamplesForPath(currAttrPath)) {
+                for (const double timeSamplePoint 
+                        : weakParent->ListTimeSamplesForPath(currAttrPath)) {
                     // if the parent doesn't contain the time
                     // sample point key in its dict
-                    if (not strongParent->QueryTimeSample(pathToChildAttr,
+                    if (!strongParent->QueryTimeSample(pathToChildAttr,
                                                           timeSamplePoint)) {
                         VtValue timeSampleValue; 
                         weakParent->QueryTimeSample(pathToChildAttr,
@@ -283,14 +281,12 @@ namespace {
                          const SdfPrimSpecHandle& weakPrim,
                          bool ignoreTimeSamples) 
     {
-        BOOST_FOREACH(SdfRelationshipSpecHandle const& childRelationship,
-                      weakPrim->GetRelationships()) {
-
+        for (const auto& childRelationship : weakPrim->GetRelationships()) {
             SdfPath pathToChildRel = childRelationship->GetPath();
             SdfRelationshipSpecHandle strongRelHandle
                 = strongPrim->GetRelationshipAtPath(pathToChildRel);
 
-            if (not strongRelHandle) {
+            if (!strongRelHandle) {
                 _MakeRelationshipCopy(strongPrim, childRelationship,
                                       ignoreTimeSamples);
             } else {
@@ -326,20 +322,17 @@ namespace {
         UsdUtilsStitchInfo(newPrim, primToCopy, ignoreTimeSamples);
 
         // copy child prims
-        BOOST_FOREACH(SdfPrimSpecHandle const& childPrim,
-                      primToCopy->GetNameChildren()) {
+        for (const auto& childPrim : primToCopy->GetNameChildren()) {
             _MakePrimCopy(newPrim, childPrim, ignoreTimeSamples); 
         }
 
         // copy child attributes
-        BOOST_FOREACH(SdfAttributeSpecHandle const& childAttribute,
-                      primToCopy->GetAttributes()) {
+        for (const auto& childAttribute : primToCopy->GetAttributes()) {
             _MakeAttributeCopy(newPrim, childAttribute, ignoreTimeSamples);
         }
 
         // copy child relationships
-        BOOST_FOREACH(SdfRelationshipSpecHandle const& childRelationship,
-                      primToCopy->GetRelationships()) {
+        for (const auto& childRelationship : primToCopy->GetRelationships()) {
             _MakeRelationshipCopy(newPrim, childRelationship,ignoreTimeSamples);
         }
     }
@@ -385,12 +378,12 @@ namespace {
         bool hasEndTimeCode = strongLayer->HasEndTimeCode();
         std::set<double> timeSamples = strongLayer->ListAllTimeSamples();
 
-        if (hasStartTimeCode and not hasEndTimeCode) {
+        if (hasStartTimeCode && !hasEndTimeCode) {
             TF_WARN("Missing endTimeCode in %s", strongFileName.c_str());
-        } else if (not hasStartTimeCode and hasEndTimeCode) {
+        } else if (!hasStartTimeCode && hasEndTimeCode) {
             TF_WARN("Missing startTimeCode in %s", strongFileName.c_str());
-        } else if (not timeSamples.empty() 
-                    and (hasStartTimeCode and hasEndTimeCode)) {
+        } else if (!timeSamples.empty() 
+                   && (hasStartTimeCode && hasEndTimeCode)) {
             if (*timeSamples.begin() < strongLayer->GetStartTimeCode()) {
                 TF_WARN("Result has time sample point before startTimeCode");
             }
@@ -402,7 +395,7 @@ namespace {
 
     // These keys represent data we wish to filter out of our token search
     // when stitching data in a SdfSpec.
-    TF_MAKE_STATIC_DATA((std::vector<TfToken>), _SortedChildrenTokens) {
+    TF_MAKE_STATIC_DATA(std::vector<TfToken>, _SortedChildrenTokens) {
         *_SortedChildrenTokens = SdfChildrenKeys->allTokens;
         std::sort(_SortedChildrenTokens->begin(), _SortedChildrenTokens->end());
     } 
@@ -435,7 +428,7 @@ UsdUtilsStitchInfo(const SdfSpecHandle& strongObj,
                    const SdfSpecHandle& weakObj,
                    bool ignoreTimeSamples)
 {
-    BOOST_FOREACH(TfToken const& key, _ObtainRelevantKeysToStitch(weakObj)) {
+    for (const auto& key : _ObtainRelevantKeysToStitch(weakObj)) {
         const VtValue strongValue = strongObj->GetSchema().GetFallback(key); 
             
         // if we have a dictionary type, we need to do a merge
@@ -454,14 +447,14 @@ UsdUtilsStitchInfo(const SdfSpecHandle& strongObj,
             strongObj->SetInfo(key, mergedDict);
 
         // XXX used by stitchmodelclips for ignoring time samples
-        } else if(ignoreTimeSamples and key == SdfFieldKeys->TimeSamples) {
+        } else if(ignoreTimeSamples && key == SdfFieldKeys->TimeSamples) {
            continue; 
 
         // if the info is a target path, we need to copy via the 
         // targetpath API as set-info would cause a read-only failure
         // by simply using SetInfo as we do below
         } else if (key == SdfFieldKeys->TargetPaths) { 
-            if (not strongObj->HasInfo(key)) {
+            if (!strongObj->HasInfo(key)) {
                 // we can safely create relationship handles here as we 
                 // know target paths will only pop up on relationships
                 SdfRelationshipSpecHandle strongRelHandle 
@@ -470,7 +463,7 @@ UsdUtilsStitchInfo(const SdfSpecHandle& strongObj,
                     = TfDynamic_cast<SdfRelationshipSpecHandle>(weakObj);
 
                 // ensure proper prim handles were obtained
-                if (not TF_VERIFY(strongRelHandle and weakRelHandle)) {
+                if (!TF_VERIFY(strongRelHandle && weakRelHandle)) {
                     // if they weren't skip this iteration
                     continue;
                 }
@@ -480,10 +473,27 @@ UsdUtilsStitchInfo(const SdfSpecHandle& strongObj,
                 strongRelHandle->GetTargetPathList().CopyItems( 
                         weakRelHandle->GetTargetPathList());
             }
+        // Connection lists need the same treatment as TargetPaths, but needs
+        // to maintain a connection instead of a relationship.  See comments
+        // about TargetPaths above as to why this is necessary.
+        } else if (key == SdfFieldKeys->ConnectionPaths) {
+            if (!strongObj->HasInfo(key)) {
+                SdfAttributeSpecHandle strongAttrHandle
+                    = TfDynamic_cast<SdfAttributeSpecHandle>(strongObj);
+                SdfAttributeSpecHandle weakAttrHandle
+                    = TfDynamic_cast<SdfAttributeSpecHandle>(weakObj);
+
+                if (!TF_VERIFY(strongAttrHandle && weakAttrHandle)) {
+                    continue;
+                }
+
+                strongAttrHandle->GetConnectionPathList().CopyItems(
+                        weakAttrHandle->GetConnectionPathList());
+            }
         } else {
             // if its not a dictionary type, insert as normal
             // so long as it isn't contained in the strong object 
-            if (not strongObj->HasInfo(key)) {
+            if (!strongObj->HasInfo(key)) {
                 strongObj->SetInfo(key, weakObj->GetInfo(key));
             }
         }
@@ -512,3 +522,6 @@ UsdUtilsStitchLayers(const SdfLayerHandle& strongLayer,
     // Send warnings if erroneous generation occurs
     _VerifyLayerIntegrity(strongLayer);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

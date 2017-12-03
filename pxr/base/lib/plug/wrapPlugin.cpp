@@ -21,8 +21,9 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/base/plug/plugin.h"
 
+#include "pxr/pxr.h"
+#include "pxr/base/plug/plugin.h"
 #include "pxr/base/js/converter.h"
 #include "pxr/base/tf/pyContainerConversions.h"
 #include "pxr/base/tf/pyPtrHelpers.h"
@@ -35,6 +36,10 @@
 using namespace boost::python;
 using std::string;
 using std::vector;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static dict
 _ConvertDict( const JsObject & dictionary )
@@ -61,6 +66,8 @@ _GetMetadataForType(PlugPluginPtr plugin, const TfType &type)
     return _ConvertDict(plugin->GetMetadataForType(type));
 }
 
+} // anonymous namespace 
+
 void wrapPlugin()
 {
     typedef PlugPlugin This;
@@ -74,7 +81,7 @@ void wrapPlugin()
         .add_property("isPythonModule", &This::IsPythonModule)
         .add_property("isResource", &This::IsResource)
 
-        .add_property("metadata", ::_GetMetadata)
+        .add_property("metadata", _GetMetadata)
 
         .add_property("name",
                       make_function(&This::GetName,
@@ -86,13 +93,13 @@ void wrapPlugin()
                       make_function(&This::GetResourcePath,
                                     return_value_policy<return_by_value>()))
 
-        .def("GetMetadataForType", ::_GetMetadataForType)
+        .def("GetMetadataForType", _GetMetadataForType)
         .def("DeclaresType", &This::DeclaresType,
              (arg("type"), 
               arg("includeSubclasses") = false))
 
         .def("MakeResourcePath", &This::MakeResourcePath)
-        .def("FindResource", &This::FindResource,
+        .def("FindPluginResource", &This::FindPluginResource,
              (arg("path"), 
               arg("verify") = true))
         ;
@@ -103,3 +110,5 @@ void wrapPlugin()
     boost::python::to_python_converter<std::vector<object>,
         TfPySequenceToPython<std::vector<object> > >();
 }
+
+TF_REFPTR_CONST_VOLATILE_GET(PlugPlugin)

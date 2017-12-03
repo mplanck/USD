@@ -21,11 +21,14 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/base/arch/attributes.h"
+#include "pxr/base/arch/stackTrace.h"
 #include "pxr/base/arch/vsnprintf.h"
 #include "pxr/base/tf/ostreamMethods.h"
 #include "pxr/base/tf/patternMatcher.h"
 #include "pxr/base/tf/stringUtils.h"
+#include "pxr/base/tf/scopeDescription.h"
 #include "pxr/usd/sdf/layer.h"
 
 #include <boost/program_options.hpp>
@@ -38,6 +41,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 using std::string;
 using std::vector;
@@ -76,7 +82,7 @@ void Print(char const *fmt, ...) {
 bool IsClose(double a, double b, double tol)
 {
     double absDiff = fabs(a-b);
-    return absDiff <= fabs(tol*a) or absDiff < fabs(tol*b);
+    return absDiff <= fabs(tol*a) || absDiff < fabs(tol*b);
 }
 
 struct SortKey {
@@ -91,7 +97,7 @@ void validate(boost::any& v, const vector<string> &values, SortKey*, int) {
     using namespace boost::program_options;
     validators::check_first_occurrence(v);
     string const &s = validators::get_single_string(values);
-    if (s == "path" or s == "field") {
+    if (s == "path" || s == "field") {
         v = SortKey(s);
     } else {
         throw validation_error(validation_error::invalid_option_value);
@@ -141,6 +147,7 @@ struct ReportParams
     vector<pair<double, double>> timeRanges;
     double timeTolerance;
     bool showSummary = false;
+    bool validate = false;
     bool showValues = true;
     bool fullArrays = false;
 };
@@ -188,7 +195,7 @@ CollectFields(SdfLayerHandle const &layer, SdfPath const &path,
     vector<TfToken> fields = layer->ListFields(path);
     fields.erase(remove_if(fields.begin(), fields.end(),
                            [&p](TfToken const &f) {
-                               return not p.fieldMatcher->Match(f.GetString());
+                               return !p.fieldMatcher->Match(f.GetString());
                            }),
                  fields.end());
     return fields;
@@ -197,7 +204,7 @@ CollectFields(SdfLayerHandle const &layer, SdfPath const &path,
 string
 GetValueString(VtValue const &value, ReportParams const &p)
 {
-    return (not p.fullArrays and value.IsArrayValued()) ?
+    return (!p.fullArrays && value.IsArrayValued()) ?
         TfStringPrintf("%s size %zu", value.GetTypeName().c_str(),
                        value.GetArraySize()) :
         TfStringPrintf("%s = %s", value.GetTypeName().c_str(),
@@ -211,7 +218,7 @@ GetTimeSamplesValueString(SdfLayerHandle const &layer,
     // Pull all the sample times for the given path, then collect up by p's
     // literalTimes and timeRanges, then if we're pulling values we'll do that
     // for each sample, and format.
-    bool takeAllTimes = p.literalTimes.empty() and p.timeRanges.empty();
+    bool takeAllTimes = p.literalTimes.empty() && p.timeRanges.empty();
     auto times = layer->ListTimeSamplesForPath(path);
     vector<double> selectedTimes;
     selectedTimes.reserve(times.size());
@@ -232,7 +239,7 @@ GetTimeSamplesValueString(SdfLayerHandle const &layer,
 
             // Check ranges.
             for (auto const &range: p.timeRanges) {
-                if (range.first <= time and time <= range.second)
+                if (range.first <= time && time <= range.second)
                     selectedTimes.push_back(time);
             }
         }
@@ -270,12 +277,11 @@ GetFieldValueString(SdfLayerHandle const &layer,
     return result;
 }
 
-vector<string>
-GetReportByPath(SdfLayerHandle const &layer, ReportParams const &p)
+void
+GetReportByPath(SdfLayerHandle const &layer, ReportParams const &p,
+                vector<string> &report)
 {
-    vector<string> report;
     vector<SdfPath> paths = CollectPaths(layer, p);
-    vector<TfToken> fields;
     sort(paths.begin(), paths.end());
     for (auto const &path: paths) {
         vector<TfToken> fields = CollectFields(layer, path, p);
@@ -294,13 +300,12 @@ GetReportByPath(SdfLayerHandle const &layer, ReportParams const &p)
             }
         }
     }
-    return report;
 }
 
-vector<string>
-GetReportByField(SdfLayerHandle const &layer, ReportParams const &p)
+void
+GetReportByField(SdfLayerHandle const &layer, ReportParams const &p,
+                 vector<string> &report)
 {
-    vector<string> report;
     vector<SdfPath> paths = CollectPaths(layer, p);
     unordered_map<string, vector<string>> pathsByFieldString;
     unordered_set<string> allFieldStrings;
@@ -331,39 +336,98 @@ GetReportByField(SdfLayerHandle const &layer, ReportParams const &p)
         auto const &ps = pathsByFieldString[fs];
         report.insert(report.end(), ps.begin(), ps.end());
     }
-    return report;
+}
+
+
+void
+Validate(SdfLayerHandle const &layer, ReportParams const &p,
+         vector<string> &report)
+{
+    TF_DESCRIBE_SCOPE("Collecting paths in @%s@",
+                      layer->GetIdentifier().c_str());
+    vector<SdfPath> paths;
+    layer->Traverse(SdfPath::AbsoluteRootPath(),
+                    [&paths, &p, layer](SdfPath const &path) {
+                        TF_DESCRIBE_SCOPE(
+                            "Collecting path <%s> in @%s@",
+                            path.GetText(), layer->GetIdentifier().c_str());
+                        paths.push_back(path);
+                    });
+    sort(paths.begin(), paths.end());
+    for (auto const &path: paths) {
+        TF_DESCRIBE_SCOPE("Collecting fields for <%s> in @%s@",
+                     path.GetText(), layer->GetIdentifier().c_str());
+        vector<TfToken> fields = layer->ListFields(path);
+        if (fields.empty())
+            continue;
+        for (auto const &field: fields) {
+            VtValue value;
+            if (field == SdfFieldKeys->TimeSamples) {
+                // Pull each sample value individually.
+                TF_DESCRIBE_SCOPE(
+                    "Getting sample times for '%s' on <%s> in @%s@",
+                    field.GetText(), path.GetText(),
+                    layer->GetIdentifier().c_str());
+                auto times = layer->ListTimeSamplesForPath(path);
+
+                for (auto time: times) {
+                    TF_DESCRIBE_SCOPE("Getting sample value at time "
+                                      "%f for '%s' on <%s> in @%s@",
+                                      time, field.GetText(), path.GetText(),
+                                      layer->GetIdentifier().c_str());
+                    layer->QueryTimeSample(path, time, &value);
+                }
+            } else {
+                // Just pull value.
+                TF_DESCRIBE_SCOPE("Getting value for '%s' on <%s> in @%s@",
+                                  field.GetText(), path.GetText(),
+                                  layer->GetIdentifier().c_str());
+                layer->HasField(path, field, &value);
+            }
+        }
+    }
+    report.back() += " - OK";
 }
 
 void Report(SdfLayerHandle layer, ReportParams const &p)
 {
-    Print("@%s@\n", layer->GetIdentifier().c_str());
+    vector<string> report = {
+        TfStringPrintf("@%s@", layer->GetIdentifier().c_str()) };
     if (p.showSummary) {
         auto stats = GetSummaryStats(layer);
-        Print("  %zu specs, %zu prim specs, %zu property specs, %zu fields, "
-              "%zu sample times\n",
-              stats.numSpecs, stats.numPrimSpecs, stats.numPropertySpecs,
-              stats.numFields, stats.numSampleTimes);
-        return;
+        report.push_back(
+            TfStringPrintf(
+                "  %zu specs, %zu prim specs, %zu property specs, %zu fields, "
+                "%zu sample times",
+                stats.numSpecs, stats.numPrimSpecs, stats.numPropertySpecs,
+                stats.numFields, stats.numSampleTimes));
+    } else if (p.validate) {
+        Validate(layer, p, report);
+    } else if (p.sortKey.key == "path") {
+        GetReportByPath(layer, p, report);
+    } else if (p.sortKey.key == "field") {
+        GetReportByField(layer, p, report);
     }
-
-    vector<string> report = p.sortKey.key == "path" ?
-        GetReportByPath(layer, p) : GetReportByField(layer, p);
 
     for (auto const &str: report) {
         Print("%s\n", str.c_str());
-    }        
+    }
 }
 
 } // anon
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 int
 main(int argc, char const *argv[])
 {
     namespace po = boost::program_options;
+    PXR_NAMESPACE_USING_DIRECTIVE
 
     progName = TfGetBaseName(argv[0]);
 
-    bool showSummary = false, fullArrays = false, noValues = false;
+    bool showSummary = false, validate = false,
+        fullArrays = false, noValues = false;
     SortKey sortKey("path");
     string pathRegex = ".*", fieldRegex = ".*";
     vector<string> timeSpecs, inputFiles;
@@ -376,6 +440,8 @@ main(int argc, char const *argv[])
         ("help,h", "Show help message.")
         ("summary,s", po::bool_switch(&showSummary),
          "Report a high-level summary.")
+        ("validate", po::bool_switch(&validate),
+         "Check validity by trying to read all data values.")
         ("path,p", po::value<string>(&pathRegex)->value_name("regex"),
          "Report only paths matching this regex.")
         ("field,f", po::value<string>(&fieldRegex)->value_name("regex"),
@@ -415,38 +481,40 @@ main(int argc, char const *argv[])
         ErrExit("%s", e.what());
     }
 
-    if (vm.count("help") or inputFiles.empty()) {
+    if (vm.count("help") || inputFiles.empty()) {
         fprintf(stderr, "Usage: %s [options] <input file>\n", progName.c_str());
         fprintf(stderr, "%s\n", TfStringify(argOpts).c_str());
         exit(1);
     }
 
     TfPatternMatcher pathMatcher(pathRegex);
-    if (not pathMatcher.IsValid()) {
+    if (!pathMatcher.IsValid()) {
         ErrExit("path regex '%s' : %s", pathRegex.c_str(),
                 pathMatcher.GetInvalidReason().c_str());
     }
 
     TfPatternMatcher fieldMatcher(fieldRegex);
-    if (not fieldMatcher.IsValid()) {
+    if (!fieldMatcher.IsValid()) {
         ErrExit("field regex '%s' : %s", fieldRegex.c_str(),
                 fieldMatcher.GetInvalidReason().c_str());
     }
                 
     ReportParams params;
     params.showSummary = showSummary;
+    params.validate = validate;
     params.pathMatcher = &pathMatcher;
     params.fieldMatcher = &fieldMatcher;
     params.sortKey = sortKey;
     params.literalTimes = literalTimes;
     params.timeRanges = timeRanges;
-    params.showValues = not noValues;
+    params.showValues = !noValues;
     params.fullArrays = fullArrays;
     params.timeTolerance = timeTolerance;
 
     for (auto const &file: inputFiles) {
+        TF_DESCRIBE_SCOPE("Opening layer @%s@", file.c_str());
         auto layer = SdfLayer::FindOrOpen(file);
-        if (not layer) {
+        if (!layer) {
             Err("failed to open layer <%s>", file.c_str());
             continue;
         }

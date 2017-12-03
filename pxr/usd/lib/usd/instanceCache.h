@@ -24,21 +24,27 @@
 #ifndef USD_INSTANCE_CACHE_H
 #define USD_INSTANCE_CACHE_H
 
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/instanceKey.h"
 
 #include "pxr/usd/sdf/path.h"
 #include "pxr/base/tf/hashmap.h"
 
 #include <tbb/mutex.h>
-#include <boost/noncopyable.hpp>
 #include <map>
 #include <vector>
 
-/// \struct Usd_InstanceChanges
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+/// \class Usd_InstanceChanges
+///
 /// List of changes to master prims due to the discovery of new
 /// or destroyed instanceable prim indexes.
-struct Usd_InstanceChanges
+///
+class Usd_InstanceChanges
 {
+public:
     void AppendChanges(const Usd_InstanceChanges& c)
     {
         newMasterPrims.insert(
@@ -102,8 +108,10 @@ struct Usd_InstanceChanges
 /// This object keeps track of the dependencies formed between 
 /// masters and prim indexes by this process.
 ///
-class Usd_InstanceCache : boost::noncopyable
+class Usd_InstanceCache
 {
+    Usd_InstanceCache(Usd_InstanceCache const &) = delete;
+    Usd_InstanceCache &operator=(Usd_InstanceCache const &) = delete;
 public:
     Usd_InstanceCache();
 
@@ -129,7 +137,7 @@ public:
     void ProcessChanges(Usd_InstanceChanges* changes);
 
     /// Returns true if an object at \p path is a master or in a
-    /// master.
+    /// master.  \p path must be either an absolute path or empty.
     static bool IsPathMasterOrInMaster(const SdfPath& path);
 
     /// Returns the paths of all master prims for instance prim 
@@ -177,6 +185,11 @@ public:
     /// Returns true if \p primIndexPath is a descendent of an instanceable
     /// prim index that has been assigned to a master prim.
     bool IsPrimInMasterForPrimIndexAtPath(const SdfPath& primIndexPath) const;
+
+    /// If the given \p primPath specifies a prim beneath an instance, 
+    /// returns the path of the corresponding prim in that instance's 
+    /// master.
+    SdfPath GetPrimInMasterForPath(const SdfPath& primPath) const;
 
 private:
     typedef std::vector<SdfPath> _PrimIndexPaths;
@@ -243,5 +256,8 @@ private:
     // master prim names.
     size_t _lastMasterIndex;
 };
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // USD_INSTANCE_CACHE_H

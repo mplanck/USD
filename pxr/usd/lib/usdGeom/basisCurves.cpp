@@ -28,15 +28,19 @@
 #include "pxr/usd/sdf/types.h"
 #include "pxr/usd/sdf/assetPath.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 // Register the schema with the TfType system.
 TF_REGISTRY_FUNCTION(TfType)
 {
     TfType::Define<UsdGeomBasisCurves,
         TfType::Bases< UsdGeomCurves > >();
     
-    // Register the usd prim typename to associate it with the TfType, under
-    // UsdSchemaBase. This enables one to call TfType::FindByName("BasisCurves") to find
-    // TfType<UsdGeomBasisCurves>, which is how IsA queries are answered.
+    // Register the usd prim typename as an alias under UsdSchemaBase. This
+    // enables one to call
+    // TfType::Find<UsdSchemaBase>().FindDerivedByName("BasisCurves")
+    // to find TfType<UsdGeomBasisCurves>, which is how IsA queries are
+    // answered.
     TfType::AddAlias<UsdSchemaBase, UsdGeomBasisCurves>("BasisCurves");
 }
 
@@ -49,7 +53,7 @@ UsdGeomBasisCurves::~UsdGeomBasisCurves()
 UsdGeomBasisCurves
 UsdGeomBasisCurves::Get(const UsdStagePtr &stage, const SdfPath &path)
 {
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomBasisCurves();
     }
@@ -62,7 +66,7 @@ UsdGeomBasisCurves::Define(
     const UsdStagePtr &stage, const SdfPath &path)
 {
     static TfToken usdPrimTypeName("BasisCurves");
-    if (not stage) {
+    if (!stage) {
         TF_CODING_ERROR("Invalid stage");
         return UsdGeomBasisCurves();
     }
@@ -176,12 +180,18 @@ UsdGeomBasisCurves::GetSchemaAttributeNames(bool includeInherited)
         return localNames;
 }
 
+PXR_NAMESPACE_CLOSE_SCOPE
+
 // ===================================================================== //
 // Feel free to add custom code below this line. It will be preserved by
 // the code generator.
+//
+// Just remember to wrap code in the appropriate delimiters:
+// 'PXR_NAMESPACE_OPEN_SCOPE', 'PXR_NAMESPACE_CLOSE_SCOPE'.
 // ===================================================================== //
 // --(BEGIN CUSTOM CODE)--
 
+PXR_NAMESPACE_OPEN_SCOPE
 
 static
 size_t
@@ -326,3 +336,5 @@ UsdGeomBasisCurves::ComputeVertexDataSize(
     GetCurveVertexCountsAttr().Get(&curveVertexCounts, timeCode);
     return _ComputeVertexDataSize(curveVertexCounts);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

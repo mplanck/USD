@@ -21,7 +21,11 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+#include "pxr/pxr.h"
 #include "pxr/usd/usd/schemaRegistry.h"
+
+#include "pxr/usd/usd/clip.h"
+#include "pxr/usd/usd/typed.h"
 #include "pxr/usd/usd/schemaBase.h"
 
 #include "pxr/base/plug/plugin.h"
@@ -31,19 +35,20 @@
 #include "pxr/usd/sdf/primSpec.h"
 #include "pxr/usd/sdf/propertySpec.h"
 #include "pxr/usd/sdf/relationshipSpec.h"
+#include "pxr/usd/sdf/schema.h"
 
 #include "pxr/base/tf/fileUtils.h"
 #include "pxr/base/tf/instantiateSingleton.h"
-#include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/registryManager.h"
 #include "pxr/base/tf/token.h"
 #include "pxr/base/tf/type.h"
-
-#include <boost/foreach.hpp>
+#include "pxr/base/work/loops.h"
 
 #include <set>
 #include <utility>
 #include <vector>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 using std::make_pair;
 using std::set;
@@ -56,56 +61,47 @@ TF_MAKE_STATIC_DATA(TfType, _schemaBaseType) {
     *_schemaBaseType = TfType::Find<UsdSchemaBase>();
 }
 
+template <class T>
 static void
-_AddSchema(SdfLayerRefPtr const &source, SdfLayerRefPtr const &target)
+_CopySpec(const T &srcSpec, const T &dstSpec, 
+          const std::vector<TfToken> &disallowedFields)
 {
-    // XXX: Seems like it might be better to copy everything from source into
-    // target (with possible exceptions) rather than cherry-picking certain
-    // data.
-    static TfToken allowedTokens("allowedTokens");
-    BOOST_FOREACH(SdfPrimSpecHandle const &prim, source->GetRootPrims()) {
-        if (not target->GetPrimAtPath(prim->GetPath())) {
+    for (const TfToken& key : srcSpec->ListInfoKeys()) {
+        const bool isDisallowed = std::binary_search(
+            disallowedFields.begin(), disallowedFields.end(), key,
+            TfTokenFastArbitraryLessThan());
+        if (!isDisallowed) {
+            dstSpec->SetInfo(key, srcSpec->GetInfo(key));
+        }
+    }
+}
 
-            SdfPrimSpecHandle targetPrim =
+static void
+_AddSchema(SdfLayerRefPtr const &source, SdfLayerRefPtr const &target,
+           std::vector<TfToken> const &disallowedFields)
+{
+    for (SdfPrimSpecHandle const &prim: source->GetRootPrims()) {
+        if (!target->GetPrimAtPath(prim->GetPath())) {
+
+            SdfPrimSpecHandle newPrim =
                 SdfPrimSpec::New(target, prim->GetName(), prim->GetSpecifier(),
                                  prim->GetTypeName());
+            _CopySpec(prim, newPrim, disallowedFields);
 
-            string doc = prim->GetDocumentation();
-            if (not doc.empty())
-                targetPrim->SetDocumentation(doc);
-
-            BOOST_FOREACH(SdfAttributeSpecHandle const &attr,
-                          prim->GetAttributes()) {
+            for (SdfAttributeSpecHandle const &attr: prim->GetAttributes()) {
                 SdfAttributeSpecHandle newAttr =
                     SdfAttributeSpec::New(
-                        targetPrim, attr->GetName(), attr->GetTypeName(),
+                        newPrim, attr->GetName(), attr->GetTypeName(),
                         attr->GetVariability(), attr->IsCustom());
-                if (attr->HasDefaultValue())
-                    newAttr->SetDefaultValue(attr->GetDefaultValue());
-                if (attr->HasInfo(allowedTokens))
-                    newAttr->SetInfo(allowedTokens,
-                                     attr->GetInfo(allowedTokens));
-                string doc = attr->GetDocumentation();
-                if (not doc.empty())
-                    newAttr->SetDocumentation(doc);
-                string displayName = attr->GetDisplayName();
-                if (not displayName.empty())
-                    newAttr->SetDisplayName(displayName);
-                string displayGroup = attr->GetDisplayGroup();
-                if (not displayGroup.empty())
-                    newAttr->SetDisplayGroup(displayGroup);
-                if (attr->GetHidden())
-                    newAttr->SetHidden(true);
+                _CopySpec(attr, newAttr, disallowedFields);
             }
 
-            BOOST_FOREACH(SdfRelationshipSpecHandle const &rel,
-                          prim->GetRelationships()) {
+            for (SdfRelationshipSpecHandle const &rel:
+                     prim->GetRelationships()) {
                 SdfRelationshipSpecHandle newRel =
                     SdfRelationshipSpec::New(
-                        targetPrim, rel->GetName(), rel->IsCustom());
-                string doc = rel->GetDocumentation();
-                if (not doc.empty())
-                    newRel->SetDocumentation(doc);
+                        newPrim, rel->GetName(), rel->IsCustom());
+                _CopySpec(rel, newRel, disallowedFields);
             }
         }
     }
@@ -128,13 +124,13 @@ UsdSchemaRegistry::_BuildPrimTypePropNameToSpecIdMap(
     // propertyName are intentionally leaked.  It's okay, since there's a fixed
     // set that we'd like to persist forever.
     SdfPrimSpecHandle prim = _schematics->GetPrimAtPath(primPath);
-    if (not prim or prim->GetTypeName().IsEmpty())
+    if (!prim || prim->GetTypeName().IsEmpty())
         return;
 
     _primTypePropNameToSpecIdMap[make_pair(typeName, TfToken())] = 
         new SdfAbstractDataSpecId(new SdfPath(prim->GetPath()));
 
-    BOOST_FOREACH(SdfPropertySpecHandle prop, prim->GetProperties()) {
+    for (SdfPropertySpecHandle prop: prim->GetProperties()) {
         _primTypePropNameToSpecIdMap[make_pair(typeName, prop->GetNameToken())] =
             new SdfAbstractDataSpecId(new SdfPath(prop->GetPath()));
     }
@@ -157,23 +153,51 @@ UsdSchemaRegistry::_FindAndAddPluginSchema()
     PlugRegistry::GetAllDerivedTypes(*_schemaBaseType, &types);
 
     // Get all the plugins that provide the types.
-    set<PlugPluginPtr> plugins;
-    BOOST_FOREACH(const TfType &type, types) {
+    std::vector<PlugPluginPtr> plugins;
+    for (const TfType &type: types) {
         if (PlugPluginPtr plugin =
-            PlugRegistry::GetInstance().GetPluginForType(type))
-            plugins.insert(plugin);
+            PlugRegistry::GetInstance().GetPluginForType(type)) {
+
+            auto insertIt = 
+                std::lower_bound(plugins.begin(), plugins.end(), plugin);
+            if (insertIt == plugins.end() || *insertIt != plugin) {
+                plugins.insert(insertIt, plugin);
+            }
+        }
+    }
+    
+    // For each plugin, if it has generated schema, add it to the schematics.
+    std::vector<SdfLayerRefPtr> generatedSchemas(plugins.size());
+    {
+        WorkArenaDispatcher dispatcher;
+        dispatcher.Run([&plugins, &generatedSchemas]() {
+            WorkParallelForN(
+                plugins.size(), 
+                [&plugins, &generatedSchemas](size_t begin, size_t end) {
+                    for (; begin != end; ++begin) {
+                        generatedSchemas[begin] = 
+                            _GetGeneratedSchema(plugins[begin]);
+                    }
+                });
+            });
     }
 
-    // For each plugin, if it has generated schema, add it to the schematics.
+    // Get list of disallowed fields in schemas and sort them so that
+    // helper functions in _AddSchema can binary search through them.
+    std::vector<TfToken> disallowedFields = GetDisallowedFields();
+    std::sort(disallowedFields.begin(), disallowedFields.end(),
+              TfTokenFastArbitraryLessThan());
+
     SdfChangeBlock block;
-    BOOST_FOREACH(const PlugPluginPtr &plugin, plugins) {
-        if (SdfLayerRefPtr generatedSchema = _GetGeneratedSchema(plugin))
-            _AddSchema(generatedSchema, _schematics);
+    for (const SdfLayerRefPtr& generatedSchema : generatedSchemas) {
+        if (generatedSchema) {
+            _AddSchema(generatedSchema, _schematics, disallowedFields);
+        }
     }
 
     // Add them to the type -> path and typeName -> path maps, and the type ->
     // SpecId and typeName -> SpecId maps.
-    BOOST_FOREACH(const TfType &type, types) {
+    for (const TfType &type: types) {
         // The path in the schema is the type's alias under UsdSchemaBase.
         vector<string> aliases = _schemaBaseType->GetAliases(type);
         if (aliases.size() == 1) {
@@ -290,3 +314,57 @@ UsdSchemaRegistry::_GetPrimDefinitionAtPath(const SdfPath &path)
 {
     return Usd_SchemaRegistryGetPrimDefinitionAtPath(path);
 }
+
+/*static*/
+std::vector<TfToken>
+UsdSchemaRegistry::GetDisallowedFields()
+{
+    std::vector<TfToken> result = {
+        // Disallow fallback values for composition arc fields, since they
+        // won't be used during composition.
+        SdfFieldKeys->InheritPaths,
+        SdfFieldKeys->Payload,
+        SdfFieldKeys->References,
+        SdfFieldKeys->Specializes,
+        SdfFieldKeys->VariantSelection,
+        SdfFieldKeys->VariantSetNames,
+
+        // Disallow customData, since it contains information used by
+        // usdGenSchema that isn't relevant to other consumers.
+        SdfFieldKeys->CustomData,
+
+        // Disallow fallback values for these fields, since they won't be
+        // used during scenegraph population or value resolution.
+        SdfFieldKeys->Active,
+        SdfFieldKeys->Instanceable,
+        SdfFieldKeys->TimeSamples,
+        SdfFieldKeys->ConnectionPaths,
+        SdfFieldKeys->TargetPaths
+    };
+
+    // Disallow fallback values for clip-related fields, since they won't
+    // be used during value resolution.
+    const std::vector<TfToken> clipFields = UsdGetClipRelatedFields();
+    result.insert(result.end(), clipFields.begin(), clipFields.end());
+
+    return result;
+}
+
+/*static*/
+bool 
+UsdSchemaRegistry::IsTyped(const TfType& primType)
+{
+    return primType.IsA<UsdTyped>();
+}
+
+/*static*/
+bool 
+UsdSchemaRegistry::IsConcrete(const TfType& primType)
+{
+    // XXX: Were relying on the face that schemagen does not
+    // write out prim definitions for non concrete types here (bug 153512)
+    return static_cast<bool>(GetPrimDefinition(primType));
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

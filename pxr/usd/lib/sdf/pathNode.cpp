@@ -21,9 +21,10 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/sdf/path.h"
 #include "pxr/usd/sdf/tokens.h"
-
 #include "pxr/base/tf/bitUtils.h"
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/hash.h"
@@ -41,13 +42,10 @@
 #include <utility>
 #include <vector>
 
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-#include <unordered_map>
-#include <tbb/spin_mutex.h>
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
-
 using std::string;
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 // Size of path nodes is important, so we want the compiler to tell us if it
 // changes.
@@ -82,16 +80,6 @@ struct _ParentAnd { const Sdf_PathNode *parent; T value; };
 // Allow void for 'expression' path case, which has no additional data.
 template <> struct _ParentAnd<void> { const Sdf_PathNode *parent; };
 
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-template <class T>
-bool operator==(_ParentAnd<T> const &l, _ParentAnd<T> const &r) {
-    return l.parent == r.parent && l.value == r.value;
-}
-bool operator==(_ParentAnd<void> const &l, _ParentAnd<void> const &r) {
-    return l.parent == r.parent;
-}
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
-
 template <class T>
 inline _ParentAnd<T>
 _MakeParentAnd(const Sdf_PathNode *parent, const T &value) {
@@ -118,7 +106,7 @@ template <class T>
 struct _HashParentAnd
 {
     inline bool equal(const T &l, const T &r) const {
-        return l.parent == r.parent and l.value == r.value;
+        return l.parent == r.parent && l.value == r.value;
     }
 
     inline size_t hash(const T &t) const {
@@ -126,13 +114,7 @@ struct _HashParentAnd
         boost::hash_combine(h, t.value);
         return h;
     }
- 
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    inline size_t operator()(const T &t) const {
-        return hash(t);
-    }
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
-};
+ };
 
 template <>
 struct _HashParentAnd<_ParentAnd<void> >
@@ -145,23 +127,13 @@ struct _HashParentAnd<_ParentAnd<void> >
     inline size_t hash(const _ParentAnd<void> &t) const {
         return hash_value(t.parent);
     }
-
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    inline size_t operator()(const _ParentAnd<void> &t) const {
-        return hash(t);
-    }
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 };
 
 template <class T>
 struct _Table {
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    typedef std::unordered_map<_ParentAnd<T>, const Sdf_PathNode *,
-                               _HashParentAnd<_ParentAnd<T> > > Type;
-#else
-    typedef tbb::concurrent_hash_map<_ParentAnd<T>, const Sdf_PathNode *,
-                                     _HashParentAnd<_ParentAnd<T> > > Type;
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
+    typedef tbb::concurrent_hash_map<
+        _ParentAnd<T>, const Sdf_PathNode *,
+        _HashParentAnd<_ParentAnd<T> > > Type;
 };
 
 typedef _Table<TfToken>::Type _TokenTable;
@@ -169,32 +141,14 @@ typedef _Table<Sdf_PathNode::VariantSelectionType>::Type _VarSelTable;
 typedef _Table<SdfPath>::Type _PathTable;
 typedef _Table<void>::Type _VoidTable;
 
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-static tbb::spin_mutex &_GetTableLock() {
-    static tbb::spin_mutex mutex;
-    return mutex;
-}
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
-
 template <class PathNode, class Table, class Arg>
 inline Sdf_PathNodeConstRefPtr
 _FindOrCreate(Table &table,
               const Sdf_PathNodeConstRefPtr &parent,
               const Arg &arg)
 {
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    tbb::spin_mutex::scoped_lock lock(_GetTableLock());
-    auto iresult = table.emplace(_MakeParentAnd(parent.get(), arg), nullptr);
-    if (iresult.second or
-        Access::GetRefCount(iresult.first->second).fetch_and_increment() == 0) {
-        Sdf_PathNodeConstRefPtr newNode = Access::New<PathNode>(parent, arg);
-        iresult.first->second = newNode.get();
-        return newNode;
-    }
-    return Sdf_PathNodeConstRefPtr(iresult.first->second, /* add_ref = */ false);
-#else // MAYA_TBB_HANG_WORKAROUND_HACK
     typename Table::accessor accessor;
-    if (table.insert(accessor, _MakeParentAnd(parent.get(), arg)) or
+    if (table.insert(accessor, _MakeParentAnd(parent.get(), arg)) ||
         Access::GetRefCount(accessor->second).fetch_and_increment() == 0) {
         // Either there was no entry in the table, or there was but it had begun
         // dying (another client dropped its refcount to 0).  We have to create
@@ -206,26 +160,14 @@ _FindOrCreate(Table &table,
         return newNode;
     }
     return Sdf_PathNodeConstRefPtr(accessor->second, /* add_ref = */ false);
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 }
 
 template <class PathNode, class Table>
 inline Sdf_PathNodeConstRefPtr
 _FindOrCreate(Table &table, const Sdf_PathNodeConstRefPtr &parent)
 {
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    tbb::spin_mutex::scoped_lock lock(_GetTableLock());
-    auto iresult = table.emplace(_MakeParentAnd(parent.get()), nullptr);
-    if (iresult.second or
-        Access::GetRefCount(iresult.first->second).fetch_and_increment() == 0) {
-        Sdf_PathNodeConstRefPtr newNode = Access::New<PathNode>(parent);
-        iresult.first->second = newNode.get();
-        return newNode;
-    }
-    return Sdf_PathNodeConstRefPtr(iresult.first->second, /* add_ref = */ false);
-#else // MAYA_TBB_HANG_WORKAROUND_HACK
     typename Table::accessor accessor;
-    if (table.insert(accessor, _MakeParentAnd(parent.get())) or
+    if (table.insert(accessor, _MakeParentAnd(parent.get())) ||
         Access::GetRefCount(accessor->second).fetch_and_increment() == 0) {
         // Either there was no entry in the table, or there was but it had begun
         // dying (another client dropped its refcount to 0).  We have to create
@@ -237,7 +179,6 @@ _FindOrCreate(Table &table, const Sdf_PathNodeConstRefPtr &parent)
         return newNode;
     }
     return Sdf_PathNodeConstRefPtr(accessor->second, /* add_ref = */ false);
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 }
 
 template <class Table, class Arg>
@@ -245,22 +186,15 @@ inline void
 _Remove(const Sdf_PathNode *pathNode,
         Table &table, const Sdf_PathNodeConstRefPtr &parent, const Arg &arg)
 {
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    tbb::spin_mutex::scoped_lock lock(_GetTableLock());
-    auto iter = table.find(_MakeParentAnd(parent.get(), arg));
-    if (iter != table.end() and iter->second == pathNode)
-        table.erase(iter);
-#else // MAYA_TBB_HANG_WORKAROUND_HACK
     // If there's an entry for this key that has pathNode, erase it.  Even if
     // there's an entry present it may not be pathNode, since another node may
     // have been created since we decremented our refcount and started being
     // destroyed.  If it is this node, we remove it.
     typename Table::accessor accessor;
-    if (table.find(accessor, _MakeParentAnd(parent.get(), arg)) and
+    if (table.find(accessor, _MakeParentAnd(parent.get(), arg)) &&
         accessor->second == pathNode) {
         table.erase(accessor);
     }
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 }
 
 template <class Table>
@@ -268,22 +202,15 @@ inline void
 _Remove(const Sdf_PathNode *pathNode,
         Table &table, const Sdf_PathNodeConstRefPtr &parent)
 {
-#if MAYA_TBB_HANG_WORKAROUND_HACK
-    tbb::spin_mutex::scoped_lock lock(_GetTableLock());
-    auto iter = table.find(_MakeParentAnd(parent.get()));
-    if (iter != table.end() and iter->second == pathNode)
-        table.erase(iter);
-#else // MAYA_TBB_HANG_WORKAROUND_HACK
     // If there's an entry for this key that has pathNode, erase it.  Even if
     // there's an entry present it may not be pathNode, since another node may
     // have been created since we decremented our refcount and started being
     // destroyed.  If it is this node, we remove it.
     typename Table::accessor accessor;
-    if (table.find(accessor, _MakeParentAnd(parent.get())) and
+    if (table.find(accessor, _MakeParentAnd(parent.get())) &&
         accessor->second == pathNode) {
         table.erase(accessor);
     }
-#endif // MAYA_TBB_HANG_WORKAROUND_HACK
 }
 
 } // anon
@@ -299,15 +226,6 @@ TF_MAKE_STATIC_DATA(_TokenTable, _primPropertyNodes) {
 TF_MAKE_STATIC_DATA(_TokenTable, _relAttrNodes) {}
 TF_MAKE_STATIC_DATA(_VarSelTable, _primVarSelNodes) {}
 TF_MAKE_STATIC_DATA(_VoidTable, _expressionNodes) {}
-
-struct Sdf_PathNodeCompareArbitrarily {
-    // Compare nodes with arbitrary ordering.
-    inline bool operator()(const Sdf_PathNode *node1,
-                           const Sdf_PathNode *node2) const
-    {
-        return node1->Compare<Sdf_PathNode::_FastLessThan>(*node2);
-    }
-};
 
 TF_MAKE_STATIC_DATA(Sdf_PathNodeConstRefPtr, _absoluteRootNode) {
     *_absoluteRootNode = Sdf_RootPathNode::New(true);
@@ -408,7 +326,7 @@ void Sdf_PathNode::GetPrefixes(SdfPathVector *prefixes, bool includeRoot) const
     size_t nElems = _elementCount + (includeRoot ? 1 : 0);
     prefixes->resize(nElems);
     Sdf_PathNodeConstRefPtr n(this);
-    for (int i = nElems-1; i >= 0; --i) {
+    for (int i = static_cast<int>(nElems)-1; i >= 0; --i) {
         (*prefixes)[i] = SdfPath(n); 
         n = n->_parent;
     }
@@ -420,7 +338,7 @@ Sdf_PathNode::RemoveCommonSuffix(
     const Sdf_PathNodeConstRefPtr& b,
     bool stopAtRootPrim)
 {
-    if (not a or not b) {
+    if (!a || !b) {
         return std::make_pair(a, b);
     }
 
@@ -433,8 +351,8 @@ Sdf_PathNode::RemoveCommonSuffix(
     // elements counts of 1.
     const Sdf_PathNode* aScan = boost::get_pointer(a);
     const Sdf_PathNode* bScan = boost::get_pointer(b);
-    while (aScan->GetElementCount() > 1 and bScan->GetElementCount() > 1) {
-        if (not aScan->Compare<_Equal>(*bScan)) {
+    while (aScan->GetElementCount() > 1 && bScan->GetElementCount() > 1) {
+        if (!aScan->Compare<_Equal>(*bScan)) {
             return std::make_pair(Sdf_PathNodeConstRefPtr(aScan),
                                   Sdf_PathNodeConstRefPtr(bScan));
         }
@@ -444,9 +362,9 @@ Sdf_PathNode::RemoveCommonSuffix(
 
     // If stopAtRootPrim is not true and neither path is a root then we
     // can scan upwards one more level.
-    if (not stopAtRootPrim and
-        aScan->GetElementCount() >= 1 and
-        bScan->GetElementCount() >= 1 and
+    if (!stopAtRootPrim &&
+        aScan->GetElementCount() >= 1 &&
+        bScan->GetElementCount() >= 1 &&
         aScan->Compare<_Equal>(*bScan)) {
         return std::make_pair(aScan->GetParentNode(), bScan->GetParentNode());
     }
@@ -502,7 +420,7 @@ Sdf_PathNode::_CreatePathToken() const
 
     std::vector<const Sdf_PathNode *> nodes;
     nodes.reserve(GetElementCount());
-    while (curNode and (curNode != root)) {
+    while (curNode && (curNode != root)) {
         nodes.push_back(curNode);
         curNode = boost::get_pointer(curNode->GetParentNode());
     }
@@ -518,8 +436,8 @@ Sdf_PathNode::_CreatePathToken() const
     TF_REVERSE_FOR_ALL(i, nodes) {
         const Sdf_PathNode * const node = *i;
         Sdf_PathNode::NodeType curNodeType = node->GetNodeType();
-        if (prevNodeType == Sdf_PathNode::PrimNode and
-            (curNodeType == Sdf_PathNode::PrimNode or
+        if (prevNodeType == Sdf_PathNode::PrimNode && 
+            (curNodeType == Sdf_PathNode::PrimNode ||
              // This covers cases like '../.property'
              prevElem == SdfPathTokens->parentPathElement)) {
             str.append(SdfPathTokens->childDelimiter.GetString());
@@ -732,7 +650,7 @@ void Sdf_DumpPathStats()
 
     printf("------------------------------------------------");
     printf("-- By Length\n");
-    int totalLen = 0;
+    size_t totalLen = 0;
     for (size_t i=0; i < stats.lengthTable.size();++i) {
         printf("\tnum nodes with %3zu components : %i\n",
                i, stats.lengthTable[i] );
@@ -748,7 +666,7 @@ void Sdf_DumpPathStats()
                i, stats.numChildrenTable[i] );
     }
 
-    int numChildren = 0;
+    size_t numChildren = 0;
     for (size_t i=1; i < stats.numChildrenTable.size(); ++i) {
         numChildren += i*stats.numChildrenTable[i];
     }
@@ -757,3 +675,5 @@ void Sdf_DumpPathStats()
 
     printf("\n");
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

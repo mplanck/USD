@@ -24,16 +24,31 @@
 #ifndef USD_SPECIALIZES_H
 #define USD_SPECIALIZES_H
 
+#include "pxr/pxr.h"
+#include "pxr/usd/usd/api.h"
 #include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/prim.h"
 
 #include "pxr/usd/sdf/declareHandles.h"
 #include "pxr/usd/sdf/path.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
+
 SDF_DECLARE_HANDLES(SdfPrimSpec);
 
+/// \class UsdSpecializes
+///
 /// A proxy class for applying listOp edits to the specializes list for a
 /// prim.
+///
+/// All paths passed to the UsdSpecializes API are expected to be in the 
+/// namespace of the owning prim's stage. Local specializes paths (i.e., 
+/// non-root prim paths) will be translated from this namespace to the
+/// namespace of the current edit target, if necessary. If a path cannot 
+/// be translated, a coding error will be issued and no changes will be
+/// made. Global specializes paths (i.e., root prim paths) will not be 
+/// translated.
+///
 class UsdSpecializes {
     friend class UsdPrim;
 
@@ -41,28 +56,33 @@ class UsdSpecializes {
 
 public:
 
-    /// Add a path to the specializes listOp at the current EditTarget.
-    bool Add(const SdfPath &primPath);
+    /// Adds a path to the specializes listOp at the current EditTarget,
+    /// in the position specified by \p position.
+    USD_API
+    bool AddSpecialize(const SdfPath &primPath,
+                       UsdListPosition position=UsdListPositionTempDefault);
 
     /// Removes the specified path from the specializes listOp at the
     /// current EditTarget.
-    bool Remove(const SdfPath &primPath);
+    USD_API
+    bool RemoveSpecialize(const SdfPath &primPath);
 
     /// Removes the authored specializes listOp edits at the current edit
     /// target.
-    bool Clear();
+    USD_API
+    bool ClearSpecializes();
 
     /// Explicitly set specializes paths, potentially blocking weaker opinions
     /// that add or remove items, returning true on success, false if the edit
     /// could not be performed.
-    bool SetItems(const SdfPathVector& items);
+    USD_API
+    bool SetSpecializes(const SdfPathVector& items);
 
     /// Return the prim this object is bound to.
     const UsdPrim &GetPrim() const { return _prim; }
     UsdPrim GetPrim() { return _prim; }
 
-    // TODO: use safe bool idiom
-    operator bool() { return bool(_prim); }
+    explicit operator bool() { return bool(_prim); }
 
     // ---------------------------------------------------------------------- //
     // Private Methods and Members
@@ -72,5 +92,7 @@ private:
     SdfPrimSpecHandle _CreatePrimSpecForEditing();
     UsdPrim _prim;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif //USD_SPECIALIZES_H

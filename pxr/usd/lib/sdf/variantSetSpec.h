@@ -21,11 +21,13 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-/// \file sdf/variantSetSpec.h
-
 #ifndef SDF_VARIANTSETSPEC_H
 #define SDF_VARIANTSETSPEC_H
 
+/// \file sdf/variantSetSpec.h
+
+#include "pxr/pxr.h"
+#include "pxr/usd/sdf/api.h"
 #include "pxr/usd/sdf/declareSpec.h"
 #include "pxr/usd/sdf/spec.h"
 #include "pxr/usd/sdf/proxyTypes.h"
@@ -36,16 +38,19 @@
 #include <string>
 #include <vector>
 
-///
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \class SdfVariantSetSpec 
-/// \brief Represents a coherent set of alternate representations for part of 
-/// a scene.
 ///
-/// An SdfPrimSpec object may contain one or more named SdfVariantSetSpec objects
-/// that define variations on the prim.
+/// Represents a coherent set of alternate representations for part of a
+/// scene.
 ///
-/// An SdfVariantSetSpec object contains one or more named SdfVariantSpec objects.
-/// It may also define the name of one of its variants to be used by default. 
+/// An SdfPrimSpec object may contain one or more named SdfVariantSetSpec
+/// objects that define variations on the prim.
+///
+/// An SdfVariantSetSpec object contains one or more named SdfVariantSpec
+/// objects. It may also define the name of one of its variants to be used by
+/// default. 
 ///
 /// When a prim references another prim, the referencing prim may specify
 /// one of the variants from each of the variant sets of the target prim.
@@ -64,9 +69,15 @@ public:
     /// \name Spec construction
     /// @{
 
-    /// \brief Constructs a new instance.
+    /// Constructs a new instance.
+    SDF_API
     static SdfVariantSetSpecHandle
     New(const SdfPrimSpecHandle& prim, const std::string& name);
+
+    /// Constructs a new instance.
+    SDF_API
+    static SdfVariantSetSpecHandle
+    New(const SdfVariantSpecHandle& prim, const std::string& name);
 
     /// @}
 
@@ -74,35 +85,43 @@ public:
     /// @{
 
     /// Returns the name of this variant set.
+    SDF_API
     std::string GetName() const;
 
     /// Returns the name of this variant set.
+    SDF_API
     TfToken GetNameToken() const;
 
     /// @}
     /// \name Namespace hierarchy
     /// @{
 
-    /// Returns the prim that this variant set belongs to.
-    SdfPrimSpecHandle GetOwner() const;
+    /// Returns the prim or variant that this variant set belongs to.
+    SDF_API
+    SdfSpecHandle GetOwner() const;
 
     /// @}
     /// \name Variants
     /// @{
 
     /// Returns the variants as a map.
+    SDF_API
     SdfVariantView GetVariants() const;
 
     /// Returns the variants as a vector.
+    SDF_API
     SdfVariantSpecHandleVector GetVariantList() const;
 
-    /// \brief Removes \p variant from the list of variants.
+    /// Removes \p variant from the list of variants.
     ///
     /// If the variant set does not currently own \p variant, no action
     /// is taken.
+    SDF_API
     void RemoveVariant(const SdfVariantSpecHandle& variant);
 
     /// @}
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // SD_VARIANTSETSPEC_H

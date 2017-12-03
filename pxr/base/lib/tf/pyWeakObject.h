@@ -24,6 +24,9 @@
 #ifndef TF_PYWEAKOBJECT_H
 #define TF_PYWEAKOBJECT_H
 
+#include "pxr/pxr.h"
+
+#include "pxr/base/tf/api.h"
 #include "pxr/base/tf/pyIdentity.h"
 
 #include "pxr/base/tf/hash.h"
@@ -37,15 +40,16 @@
 
 #include "pxr/base/tf/hashmap.h"
 
+PXR_NAMESPACE_OPEN_SCOPE
 
-typedef TfWeakPtr<class Tf_PyWeakObject> Tf_PyWeakObjectPtr;
+typedef TfWeakPtr<struct Tf_PyWeakObject> Tf_PyWeakObjectPtr;
 
 struct Tf_PyWeakObjectRegistry
 {
     typedef Tf_PyWeakObjectRegistry This;
     
-    //! \brief Return the singleton instance.
-    static This &GetInstance() {
+    /// Return the singleton instance.
+    TF_API static This &GetInstance() {
         return TfSingleton<This>::GetInstance();
     } 
 
@@ -73,10 +77,12 @@ struct Tf_PyWeakObjectRegistry
 
 };
 
+TF_API_TEMPLATE_CLASS(TfSingleton<Tf_PyWeakObjectRegistry>);
 
 // A weak pointable weak reference to a python object.
 struct Tf_PyWeakObject : public TfWeakBase
 {
+public:
     typedef Tf_PyWeakObject This;
 
     // A deleter instance is passed to PyWeakref_NewRef as the callback object
@@ -145,5 +151,7 @@ struct Tf_PyWeakObject : public TfWeakBase
     boost::python::handle<> _weakRef;
     
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_PYWEAKOBJECT_H

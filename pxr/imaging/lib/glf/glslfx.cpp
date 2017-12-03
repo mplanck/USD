@@ -34,13 +34,15 @@
 #include "pxr/base/tf/stl.h"
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/pathUtils.h"
-#include "pxr/base/tf/iterator.h"
 
 #include <boost/functional/hash.hpp>
 #include <boost/unordered_map.hpp>
 #include <iostream>
 #include <istream>
 #include <fstream>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 #define CURRENT_VERSION 0.1
 
@@ -101,15 +103,13 @@ ShaderResourceRegistry::ShaderResourceRegistry()
     PlugRegistry& plugReg = PlugRegistry::GetInstance();
     PlugPluginPtrVector plugins = plugReg.GetAllPlugins();
 
-    TF_FOR_ALL(plugIt, plugins) {
-        PlugPluginPtr const & plugin = *plugIt;
-
+    for (PlugPluginPtr const& plugin : plugins) {
         std::string packageName = plugin->GetName();
         JsObject metadata = plugin->GetMetadata();
 
         JsValue value;
         if (TfMapLookup(metadata, _tokens->shaderResources, &value)
-                and value.Is<std::string>()) {
+               && value.Is<std::string>()) {
 
             string shaderPath =
                 TfStringCatPaths(plugin->GetResourcePath(),
@@ -125,7 +125,7 @@ ShaderResourceRegistry::GetShaderResourcePath(
         std::string const & shaderAssetPath) const
 {
     string resourcePath;
-    if (not TfMapLookup(_resourceMap, packageName, &resourcePath)) {
+    if (!TfMapLookup(_resourceMap, packageName, &resourcePath)) {
         return std::string();
     }
 
@@ -145,7 +145,7 @@ _ComputeResolvedPath(
     string importFile = filename;
     
     // if not an absolute path, make relative to the path of the current context
-    if (not TfStringStartsWith(importFile, "/")) {
+    if (!TfStringStartsWith(importFile, "/")) {
 
         // look for the special tools token, in which case we will try to
         // resolve the path in the tools tree
@@ -162,34 +162,6 @@ _ComputeResolvedPath(
                 return "";
             }
 
-            // XXX shared_code glos->amber migration hack!
-            //
-            // While we have two trees, we can't update global assets
-            // used by tests. Use this until shared_code lands, then we
-            // can update the test assets and rip this out.
-            if (pathTokens.size() == 4 and
-                pathTokens[1] == "Glos" and
-                pathTokens[2] == "shaders" and
-                pathTokens[3] == "SimpleLightingShader.glslfx") {
-                TF_WARN("Replacing old SimpleLightingShader.glslfx path.");
-                pathTokens[1] = "glos";
-                pathTokens[3] = "simpleLightingShader.glslfx";
-            }
-
-            // XXX oss glop->pxr migration hack!
-            //
-            // While we have two trees, we can't update global assets
-            // used by tests. Use this until shared_code lands, then we
-            // can update the test assets and rip this out.
-            if (pathTokens.size() == 4 and
-                pathTokens[1] == "glop" and
-                pathTokens[2] == "shaders" and
-                pathTokens[3] == "ptexTexture.glslfx") {
-                //TF_WARN("Replacing old SimpleLightingShader.glslfx path.");
-                pathTokens[1] = "glf";
-                pathTokens[3] = "ptexTexture.glslfx";
-            }
-
             string packageName = pathTokens[1];
 
             string assetPath = TfStringJoin(
@@ -198,7 +170,7 @@ _ComputeResolvedPath(
             string importFile =
                 _shaderResourceRegistry->GetShaderResourcePath(packageName,
                                                                assetPath);
-            if (importFile.empty() and errorStr) {
+            if (importFile.empty() && errorStr) {
                 *errorStr = TfStringPrintf( "Can't find "
                              "resource dir to resolve tools path "
                              "substitution on %s",
@@ -253,7 +225,7 @@ GlfGLSLFX::GlfGLSLFX(istream &is) :
 bool
 GlfGLSLFX::IsValid(std::string *reason) const
 {
-    if (reason and not _valid) {
+    if (reason && !_valid) {
         *reason = _invalidReason;
     }
     return _valid;
@@ -262,8 +234,9 @@ GlfGLSLFX::IsValid(std::string *reason) const
 bool
 GlfGLSLFX::_ProcessFile(string const & filePath, _ParseContext & context)
 {
-    if (not TfPathExists(filePath)) {
-        TF_RUNTIME_ERROR("GlfGLSLFX::_ProcessFile. File doesn't exist: \"%s\"\n", filePath.c_str());
+    if (!TfPathExists(filePath)) {
+        // XXX:validation
+        TF_WARN("File doesn't exist: \"%s\"\n", filePath.c_str());
         return false;
     }
 
@@ -284,13 +257,16 @@ GlfGLSLFX::_ProcessInput(std::istream * input,
                          _ParseContext & context)
 {
     while (getline(*input, context.currentLine)) {
+        // trim to avoid issues with cross-platform line endings
+        context.currentLine = TfStringTrimRight(context.currentLine);
+
         // increment the line number
         ++context.lineNo;
 
         // update hash
         boost::hash_combine(_hash, context.currentLine);
 
-        if (context.lineNo > 1 and context.version < 0) {
+        if (context.lineNo > 1 && context.version < 0) {
             TF_RUNTIME_ERROR("Syntax Error on line 1 of %s. First line in file "
                              "must be version info.", context.filename.c_str());
             return false;
@@ -304,7 +280,7 @@ GlfGLSLFX::_ProcessInput(std::istream * input,
         // we found a section delimiter
         if (context.currentLine.find(
                 _tokens->sectionDelimiter.GetText()) == 0) {
-            if (not _ParseSectionLine(context)) {
+            if (!_ParseSectionLine(context)) {
                 return false;
             }
 
@@ -313,9 +289,9 @@ GlfGLSLFX::_ProcessInput(std::istream * input,
                 context.currentLine.c_str());
 
         } else
-        if (context.currentSectionType == _tokens->glslfx and
+        if (context.currentSectionType == _tokens->glslfx && 
                 context.currentLine.find(_tokens->import.GetText()) == 0) {
-            if (not _ProcessImport(context)) {
+            if (!_ProcessImport(context)) {
                 return false;
             }
         } else
@@ -332,13 +308,12 @@ GlfGLSLFX::_ProcessInput(std::istream * input,
         }
     }
 
-    TF_FOR_ALL(it, context.imports) {
-        string importFile = *it;
+    for (std::string const& importFile : context.imports) {
         TF_DEBUG(GLF_DEBUG_GLSLFX).Msg(" Importing File : %s\n",
                                         importFile.c_str());
 
         _ParseContext localContext(importFile);
-        if (not _ProcessFile(importFile, localContext)) {
+        if (!_ProcessFile(importFile, localContext)) {
             return false;
         }
     }
@@ -359,7 +334,7 @@ GlfGLSLFX::_ProcessImport(_ParseContext & context)
     }
 
     string errorStr;
-    string importFile = ::_ComputeResolvedPath(TfGetPathName(context.filename),
+    string importFile = _ComputeResolvedPath(TfGetPathName(context.filename),
 					       tokens[1], &errorStr );
     
     if( importFile.empty() ) {
@@ -450,7 +425,7 @@ GlfGLSLFX::_ParseVersionLine(vector<string> const & tokens,
     }
 
     // verify that the version spec is what we expect
-    if (tokens.size() != 4 or tokens[2] != _tokens->version.GetText()) {
+    if (tokens.size() != 4 || tokens[2] != _tokens->version.GetText()) {
         TF_RUNTIME_ERROR("Syntax Error on line %d of %s. Invalid "
                          "version specifier.", context.lineNo, context.filename.c_str());
         return false;
@@ -514,19 +489,18 @@ GlfGLSLFX::_ComposeConfiguration(std::string *reason)
     // there is an opportunity to do more powerful dictionary composition here
 
 
-    TF_FOR_ALL(it, _configOrder) {
-
-        TF_AXIOM(_configMap.find(*it) != _configMap.end());
+    for (std::string const& item : _configOrder) {
+        TF_AXIOM(_configMap.find(item) != _configMap.end());
         TF_DEBUG(GLF_DEBUG_GLSLFX).Msg("    Parsing config for %s\n",
-                                        TfGetBaseName(*it).c_str());
+                                        TfGetBaseName(item).c_str());
 
         string errorStr;
-        _config.reset(GlfGLSLFXConfig::Read(_configMap[*it], *it, &errorStr));
+        _config.reset(GlfGLSLFXConfig::Read(_configMap[item], item, &errorStr));
 
-        if (not errorStr.empty()) {
+        if (!errorStr.empty()) {
             *reason = 
                 TfStringPrintf("Error parsing configuration section of %s: %s.",
-                             it->c_str(), errorStr.c_str());
+                               item.c_str(), errorStr.c_str());
             return false;
         }
     }
@@ -564,10 +538,20 @@ GlfGLSLFX::GetAttributes() const
     return GlfGLSLFXConfig::Attributes();
 }
 
+GlfGLSLFXConfig::MetadataDictionary
+GlfGLSLFX::GetMetadata() const
+{
+    if (_config) {
+        return _config->GetMetadata();
+    }
+
+    return GlfGLSLFXConfig::MetadataDictionary();
+}
+
 string
 GlfGLSLFX::_GetSource(const TfToken &shaderStageKey) const
 {
-    if (not _config) {
+    if (!_config) {
         return "";
     }
 
@@ -576,16 +560,15 @@ GlfGLSLFX::_GetSource(const TfToken &shaderStageKey) const
 
     string ret;
 
-    TF_FOR_ALL(it, sourceKeys) {
-
+    for (std::string const& key : sourceKeys) {
         // now look up the keys and concatenate them together..
-        _SourceMap::const_iterator cit = _sourceMap.find(*it);
+        _SourceMap::const_iterator cit = _sourceMap.find(key);
 
         if (cit == _sourceMap.end()) {
             TF_RUNTIME_ERROR("Can't find shader source for <%s> with the key "
                              "<%s>",
                              shaderStageKey.GetText(),
-                             it->c_str());
+                             key.c_str());
             return string();
         }
 
@@ -664,3 +647,6 @@ GlfGLSLFX::GetSource(const TfToken &shaderStageKey) const
 {
     return _GetSource(shaderStageKey);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

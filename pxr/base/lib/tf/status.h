@@ -24,20 +24,23 @@
 #ifndef TF_STATUS_H
 #define TF_STATUS_H
 
+#include "pxr/pxr.h"
+
 #include "pxr/base/tf/diagnosticBase.h"
 
-/*!
- *  \class TfStatus Status.h pxr/base/tf/status.h
- *  \brief Represents an object that contains information about a status message.
- *  \ingroup group_tf_Diagnostic
- * 
- *  See \ref page_tf_Diagnostic in the C++ API reference for a detailed
- *  description of the status message issuing API.  For a example of how to
- *  post a status message, see \c TF_STATUS(), also in the C++ API reference.
- *
- *  In the Python API, you can issue a status message with Tf.Status().
- *
- */
+PXR_NAMESPACE_OPEN_SCOPE
+
+/// \class TfStatus
+/// \ingroup group_tf_Diagnostic
+///
+/// Represents an object that contains information about a status message.
+/// 
+/// See \ref page_tf_Diagnostic in the C++ API reference for a detailed
+/// description of the status message issuing API.  For a example of how to
+/// post a status message, see \c TF_STATUS(), also in the C++ API reference.
+///
+/// In the Python API, you can issue a status message with Tf.Status().
+///
 class TfStatus: public TfDiagnosticBase
 {
 private:
@@ -50,5 +53,7 @@ private:
 
     friend class TfDiagnosticMgr;
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // TF_STATUS_H

@@ -26,8 +26,12 @@
 #include "pxr/base/arch/defines.h"
 #include <mutex>
 
-void GlfGlewInit()
+PXR_NAMESPACE_OPEN_SCOPE
+
+
+bool GlfGlewInit()
 {
+    static bool result = false;
     static std::once_flag once;
     std::call_once(once, [](){
         GlfSharedGLContextScopeHolder sharedGLContext;
@@ -37,6 +41,11 @@ void GlfGlewInit()
         glewExperimental = true;
 #endif
 
-        glewInit();
+        result = glewInit() == GLEW_OK;
     });
+
+    return result;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE
+

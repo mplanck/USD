@@ -21,6 +21,8 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/base/tf/stackTrace.h"
 
 #include "pxr/base/arch/fileSystem.h"
@@ -28,16 +30,20 @@
 #include "pxr/base/arch/vsnprintf.h"
 #include "pxr/base/tf/callContext.h"
 #include "pxr/base/tf/iterator.h"
-#include "pxr/base/tf/pyUtils.h"
+#include "pxr/base/tf/scopeDescriptionPrivate.h"
 #include "pxr/base/tf/stringUtils.h"
+
+#ifdef PXR_PYTHON_SUPPORT_ENABLED
+#include "pxr/base/tf/pyUtils.h"
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 
 #include <cstdio>
 #include <iostream>
-#include <unistd.h>
-#include <sys/param.h>
 
 using std::string;
 using std::vector;
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 void
 TfPrintStackTrace(FILE *file, const string &reason)
@@ -57,11 +63,12 @@ void
 TfPrintStackTrace(std::ostream &out, const string &reason)
 {
     ArchPrintStackTrace(out, reason);
-    
+#ifdef PXR_PYTHON_SUPPORT_ENABLED 
     vector<string> trace = TfPyGetTraceback();
     TF_REVERSE_FOR_ALL(line, trace)
         out << *line;
     out << "=============================================================\n";
+#endif // PXR_PYTHON_SUPPORT_ENABLED
 }
 
 string
@@ -95,7 +102,7 @@ TfLogStackTrace(const std::string &reason, bool logtodb)
     int fd = _MakeStackFile(&tmpFile);
 
     if (fd != -1) {
-        FILE* fout = fdopen(fd, "w");
+        FILE* fout = ArchFdOpen(fd, "w");
         fprintf(stderr, "Writing stack for %s to %s because of %s.\n",
             ArchGetProgramNameForErrors(),
             tmpFile.c_str(), reason.c_str());
@@ -130,11 +137,13 @@ TfLogCrash(
         ArchGetProgramNameForErrors(), reason.c_str(), message.c_str(),
         context.GetFunction(), context.GetLine(), context.GetFile());
 
-    if (not additionalInfo.empty()) {
+    if (!additionalInfo.empty()) {
         fullMessage += additionalInfo + "\n";
     }
 
-    ArchLogPostMortem(nullptr, fullMessage.c_str());
+    Tf_ScopeDescriptionStackReportLock descStackReport;
+    ArchLogPostMortem(
+        nullptr, fullMessage.c_str(), descStackReport.GetMessage());
 }
 
 time_t
@@ -145,3 +154,5 @@ TfGetAppLaunchTime()
         TF_RUNTIME_ERROR("Could not determine application launch time.");
     return launchTime;
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

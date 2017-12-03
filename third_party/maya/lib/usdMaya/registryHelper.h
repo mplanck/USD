@@ -24,7 +24,11 @@
 #ifndef PXRUSDMAYA_REGISTRYHELPER_H
 #define PXRUSDMAYA_REGISTRYHELPER_H
 
+#include "pxr/pxr.h"
 #include "pxr/base/tf/token.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 /// private helper so that both reader/writer registries can share the same
 /// plugin discovery/load mechanism.
@@ -53,5 +57,20 @@ struct PxrUsdMaya_RegistryHelper
                 const std::vector<TfToken>& scope,
                 const std::string& value);
 
+    /// Searches the plugInfos and looks for ShadingModePlugin.
+    /// 
+    /// "UsdMaya" : {
+    ///     "ShadingModeExport" : {
+    ///         "mayaPlugin" : "arnoldShaderExporter"
+    ///     }
+    /// }
+    ///
+    /// At that scope, it expects a dictionary with one key: "mayaPlugin".
+    /// usdMaya will try to load the "mayaPlugin" when shading modes are first accessed.
+    static void
+        LoadShadingModePlugins();
 };
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
 #endif // PXRUSDMAYA_REGISTRYHELPER_H

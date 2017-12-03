@@ -24,9 +24,13 @@
 #ifndef ARCH_DEFINES_H
 #define ARCH_DEFINES_H
 
-/*
- * OS
- */
+#include "pxr/pxr.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
+//
+// OS
+//
 
 #if defined(__linux__)
 #define ARCH_OS_LINUX
@@ -42,9 +46,9 @@
 #define ARCH_OS_WINDOWS
 #endif
 
-/*
- * Processor
- */
+//
+// Processor
+//
 
 #if defined(i386) || defined(__i386__) || defined(__x86_64__) || \
     defined(_M_IX86) || defined(_M_X64)
@@ -53,11 +57,9 @@
 #define ARCH_CPU_ARM
 #endif
 
-
-
-/*
- * Bits
- */
+//
+// Bits
+//
 
 #if defined(__x86_64__) || defined(__aarch64__) || defined(_M_X64)
 #define ARCH_BITS_64
@@ -65,11 +67,9 @@
 #error "Unsupported architecture.  x86_64 or ARM64 required."
 #endif
 
-
-
-/*
- * Compiler
- */
+//
+// Compiler
+//
 
 #if defined(__clang__)
 #define ARCH_COMPILER_CLANG
@@ -88,33 +88,13 @@
 #define ARCH_COMPILER_MSVC_VERSION _MSC_VER
 #endif
 
-
-
-/*
- * Features
- */
-// XXX -- This is an interim solution during the port to C++11.  We want to
-//        use pure C++11 so we don't want to use the __typeof__ extension.
-//        Once we don't require backward compatibility we can find and fix
-//        anyplace using this macro.
 //
-//        __typeof__ drops references while decltype preserves them and
-//        __typeof__ returns the type of the given expression, not its
-//        declared type.  We emulate that behavior by converting the
-//        expression to an lvalue by adding a pair of parentheses around
-//        it then stripping any reference.  Arch_TypeOfRemoveReference is
-//        just std::remove_reference but without adding a #include.  Note
-//        that typename outside of a template is valid C++11.
+// Features
 //
-//        Note that this is a macro taking an argument:  you can't pass
-//        an expression with a comma in it!  However, since we're going
-//        to add parentheses around the expression anyway, it's okay for
-//        clients to do that too to get past the preprocessor.
 
-#ifdef __cplusplus
-template <typename T> struct Arch_TypeOfRemoveReference { typedef T type; };
-template <typename T> struct Arch_TypeOfRemoveReference<T&> { typedef T type; };
-#define ARCH_TYPEOF(x) typename Arch_TypeOfRemoveReference<decltype((x))>::type
+// Only use the GNU STL extensions on Linux when using gcc.
+#if defined(ARCH_OS_LINUX) && defined(ARCH_COMPILER_GCC)
+#define ARCH_HAS_GNU_STL_EXTENSIONS
 #endif
 
 // The current version of Apple clang does not support the thread_local
@@ -127,5 +107,7 @@ template <typename T> struct Arch_TypeOfRemoveReference<T&> { typedef T type; };
 #if defined(ARCH_OS_LINUX)
 #define ARCH_HAS_MMAP_MAP_POPULATE
 #endif
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // ARCH_DEFINES_H 

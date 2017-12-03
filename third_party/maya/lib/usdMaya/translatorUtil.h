@@ -24,6 +24,8 @@
 #ifndef PXRUSDMAYA_TRANSLATOR_UTIL_H
 #define PXRUSDMAYA_TRANSLATOR_UTIL_H
 
+#include "pxr/pxr.h"
+#include "usdMaya/api.h"
 #include "usdMaya/primReaderArgs.h"
 #include "usdMaya/primReaderContext.h"
 
@@ -31,6 +33,9 @@
 
 #include <maya/MObject.h>
 #include <maya/MString.h>
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 
 /// \brief Provides helper functions for other readers to use.
@@ -42,6 +47,7 @@ struct PxrUsdMayaTranslatorUtil
     /// the prim is transferred onto the Maya transform node. If \p context is
     /// non-NULL, the new Maya node will be registered to the path of
     /// \p usdPrim.
+    PXRUSDMAYA_API
     static bool
     CreateTransformNode(
             const UsdPrim& usdPrim,
@@ -54,6 +60,7 @@ struct PxrUsdMayaTranslatorUtil
     /// \brief Helper to create a node for \p usdPrim of type \p
     /// nodeTypeName under \p parentNode. If \p context is non-NULL,
     /// the new Maya node will be registered to the path of \p usdPrim.
+    PXRUSDMAYA_API
     static bool
     CreateNode(
             const UsdPrim& usdPrim,
@@ -67,6 +74,7 @@ struct PxrUsdMayaTranslatorUtil
     /// nodeTypeName under \p parentNode. Note that this version does
     /// NOT take a context and cannot register the newly created Maya node
     /// since it does not know the SdfPath to an originating object.
+    PXRUSDMAYA_API
     static bool
     CreateNode(
             const MString& nodeName,
@@ -74,7 +82,33 @@ struct PxrUsdMayaTranslatorUtil
             MObject& parentNode,
             MStatus* status,
             MObject* mayaNodeObj);
+
+    template<typename T>
+    static bool
+    GetTimeSamples(
+            const T& source,
+            const PxrUsdMayaPrimReaderArgs& args,
+            std::vector<double>* outSamples)
+    {
+        if (args.HasCustomFrameRange()) {
+            std::vector<double> tempSamples;
+            source.GetTimeSamples(&tempSamples);
+            bool didPushSample = false;
+            for (double t : tempSamples) {
+                if (t >= args.GetStartTime() && t <= args.GetEndTime()) {
+                    outSamples->push_back(t);
+                    didPushSample = true;
+                }
+            }
+            return didPushSample;
+        } else {
+            return source.GetTimeSamples(outSamples);
+        }
+    }
 };
 
+
+
+PXR_NAMESPACE_CLOSE_SCOPE
 
 #endif // PXRUSDMAYA_TRANSLATOR_UTIL_H

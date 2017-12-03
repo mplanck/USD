@@ -24,19 +24,16 @@
 #ifndef GF_DECLARE_H
 #define GF_DECLARE_H
 
+#include "pxr/pxr.h"
 
+/// \file gf/declare.h
+/// Declares Gf types.
+///
+/// This file provides forward declarations for Gf types.
 
-/*!
- * \file declare.h
- * \brief Declares Gf types.
- *
- * This file provides typedefs for Gf types.
- *
- */
+PXR_NAMESPACE_OPEN_SCOPE
 
-class half;
 class GfBBox3d;
-class GfColorRamp;
 class GfFrustum;
 class GfInterval;
 class GfMultiInterval;
@@ -47,17 +44,12 @@ class GfQuatd;
 class GfQuatf;
 class GfQuath;
 class GfQuaternion;
-template<class T > class GfRandom;
 class GfRay;
 class GfRect2i;
-class GfRGBA;
-class GfRGB;
 class GfRect2i;
 class GfRotation;
 class GfSize2;
 class GfSize3;
-template<class T > class GfSpline;
-
 class GfMatrix2d;
 class GfMatrix2f;
 class GfMatrix3d;
@@ -83,7 +75,6 @@ class GfVec4f;
 class GfVec4h;
 class GfVec4i;
 
+PXR_NAMESPACE_CLOSE_SCOPE
 
-
-
-#endif
+#endif // GF_DECLARE_H

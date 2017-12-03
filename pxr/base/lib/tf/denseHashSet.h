@@ -24,8 +24,10 @@
 #ifndef TF_DENSE_HASH_SET_H
 #define TF_DENSE_HASH_SET_H
 
-///
-/// \file Tf/DenseHashSet.h
+/// \file tf/denseHashSet.h
+
+#include "pxr/pxr.h"
+#include "pxr/base/tf/hashmap.h"
 
 #include <vector>
 
@@ -33,13 +35,12 @@
 #include <boost/operators.hpp>
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/scoped_ptr.hpp>
-#include "pxr/base/tf/hashmap.h"
 #include <boost/utility.hpp>
 
 #include <cstdio>
 
-///////////////////////////////////////////////////////////////////////////////
-///
+PXR_NAMESPACE_OPEN_SCOPE
+
 /// \class TfDenseHashSet
 ///
 /// This is a space efficent container that mimics the TfHashSet API that
@@ -48,9 +49,7 @@
 /// When the set gets bigger than \p Threshold a TfHashMap is allocated
 /// that is used to accelerate lookup in the vector.
 ///
-/// WARNING:
-///
-/// Note that this differs from a TfHashSet in so far that inserting and
+/// \warning This differs from a TfHashSet in so far that inserting and
 /// removing elements invalidate all iterators of the container.
 ///
 template <
@@ -138,7 +137,7 @@ public:
         const_iterator tend = end();
 
         for(const_iterator iter = begin(); iter != tend; ++iter) {
-            if (not rhs.count(*iter))
+            if (!rhs.count(*iter))
                 return false;
         }
 
@@ -223,7 +222,7 @@ public:
             std::pair<typename _HashMap::iterator, bool> res =
                 _h->insert(std::make_pair(v, size()));
     
-            if (not res.second)
+            if (!res.second)
                 return insert_result(_vec().begin() + res.first->second, false);
     
         } else {
@@ -238,7 +237,7 @@ public:
         _vec().push_back(v);
         _CreateTableIfNeeded();
 
-        return insert_result(boost::prior(end()), true);
+        return insert_result(std::prev(end()), true);
     }
 
     /// Insert a range into the hash set.  Note that \p i0 and \p i1 can't 
@@ -273,13 +272,16 @@ public:
         }
     }
 
-    /// Erase element with key \p k.
+    /// Erase element with key \p k.  Returns the number of elements erased.
     ///
-    void erase(const Element &k) {
+    size_t erase(const Element &k) {
 
         const_iterator iter = find(k);
-        if (iter != end())
+        if (iter != end()) {
             erase(iter);
+            return 1;
+        }
+        return 0;
     }
 
     /// Erases element pointed to by \p iter.
@@ -291,7 +293,7 @@ public:
             _h->erase(*iter);
     
         // If we are not removing that last element...
-        if (iter != boost::prior(end())) {
+        if (iter != std::prev(end())) {
     
             // ... move the last element into the erased placed.
             // Note that we can cast constness away because we explicitly update
@@ -331,7 +333,7 @@ public:
         //XXX: When switching to c++0x we should call _vec().shrink_to_fit().
         _Vector(_vec()).swap(_vec());
 
-        if (not _h)
+        if (!_h)
             return;
 
         size_t sz = size();
@@ -401,7 +403,7 @@ private:
     // Unconditionally create the acceleration table if it doesn't already
     // exist.
     inline void _CreateTable() {
-        if (not _h) {
+        if (!_h) {
             _h.reset(new _HashMap(Threshold, _hash(), _equ()));
             for(size_t i=0; i < size(); ++i)
                 (*_h)[_vec()[i]] = i;
@@ -424,5 +426,6 @@ private:
     boost::scoped_ptr<_HashMap> _h;
 };
 
-#endif
+PXR_NAMESPACE_CLOSE_SCOPE
 
+#endif // TF_DENSE_HASH_SET_H

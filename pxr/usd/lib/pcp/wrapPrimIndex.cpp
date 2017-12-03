@@ -21,12 +21,18 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
+
+#include "pxr/pxr.h"
 #include "pxr/usd/pcp/primIndex.h"
 #include "pxr/usd/sdf/siteUtils.h"
 #include "pxr/base/tf/pyResultConversions.h"
 #include <boost/python.hpp>
 
 using namespace boost::python;
+
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace {
 
 static SdfPrimSpecHandleVector
 _GetPrimStack(const PcpPrimIndex& self)
@@ -61,6 +67,8 @@ _ComputePrimPropertyNames( PcpPrimIndex &index )
     return result;
 }
 
+} // anonymous namespace 
+
 void wrapPrimIndex()
 {
     typedef PcpPrimIndex This;
@@ -75,6 +83,7 @@ void wrapPrimIndex()
                       make_function(&This::GetLocalErrors,
                                     return_value_policy<TfPySequenceToList>()))
 
+        .def("IsValid", &This::IsValid)
         .def("IsInstanceable", &This::IsInstanceable)
 
         .def("ComputePrimChildNames", &_ComputePrimChildNames)
@@ -88,7 +97,6 @@ void wrapPrimIndex()
             &This::GetSelectionAppliedForVariantSet)
 
         .def("PrintStatistics", &This::PrintStatistics)
-        .def("Validate", &This::Validate)
         .def("DumpToString", &This::DumpToString,
              (args("includeInheritOriginInfo") = true,
               args("includeMaps") = true))

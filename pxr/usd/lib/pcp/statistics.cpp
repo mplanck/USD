@@ -21,15 +21,19 @@
 // KIND, either express or implied. See the Apache License for the specific
 // language governing permissions and limitations under the Apache License.
 //
-#include "pxr/usd/pcp/statistics.h"
 
+#include "pxr/pxr.h"
+#include "pxr/usd/pcp/statistics.h"
 #include "pxr/usd/pcp/cache.h"
+#include "pxr/usd/pcp/layerStackRegistry.h"
 #include "pxr/usd/pcp/primIndex.h"
 #include "pxr/usd/pcp/primIndex_Graph.h"
 
 #include "pxr/base/arch/defines.h"
 
-#include <boost/static_assert.hpp>
+#include <memory>
+
+PXR_NAMESPACE_OPEN_SCOPE
 
 struct Pcp_GraphStats
 {
@@ -65,29 +69,31 @@ public:
     Pcp_GraphStats sharedAllGraphStats;
     Pcp_GraphStats sharedCulledGraphStats;
     std::map<size_t, size_t> mapFunctionSizeDistribution;
+    std::map<size_t, size_t> layerStackRelocationsSizeDistribution;
 };
 
-struct Pcp_Statistics
+class Pcp_Statistics
 {
+public:
     static void AccumulateGraphStats(
         const PcpPrimIndex& primIndex, 
         Pcp_GraphStats* stats,
         bool culledNodesOnly)
     {
-        TF_FOR_ALL(nodeIt, primIndex.GetNodeRange()) {
-            if (culledNodesOnly and not nodeIt->IsCulled()) {
+        for (const PcpNodeRef &node: primIndex.GetNodeRange()) {
+            if (culledNodesOnly && !node.IsCulled()) {
                 continue;
             }
 
             ++(stats->numNodes);
-            ++(stats->typeToNumNodes[nodeIt->GetArcType()]);
+            ++(stats->typeToNumNodes[node.GetArcType()]);
             
             const bool nodeIsImpliedInherit = 
-                nodeIt->GetOriginNode() != nodeIt->GetParentNode();
+                node.GetOriginNode() != node.GetParentNode();
             if (nodeIsImpliedInherit) {
-                if (nodeIt->GetArcType() == PcpArcTypeLocalInherit)
+                if (node.GetArcType() == PcpArcTypeLocalInherit)
                     ++(stats->numImpliedLocalInherits);
-                else if (nodeIt->GetArcType() == PcpArcTypeGlobalInherit)
+                else if (node.GetArcType() == PcpArcTypeGlobalInherit)
                     ++(stats->numImpliedGlobalInherits);
             }
         }
@@ -102,15 +108,16 @@ struct Pcp_Statistics
     static void AccumulateCacheStats(
         const PcpCache* cache, Pcp_CacheStats* stats)
     {
-        typedef boost::shared_ptr<PcpPrimIndex_Graph::_SharedData> 
+        typedef std::shared_ptr<PcpPrimIndex_Graph::_SharedData> 
             _SharedNodePool;
         std::set<_SharedNodePool> seenNodePools;
         TfHashSet<PcpMapFunction, MapFuncHash> allMapFuncs;
 
         TF_FOR_ALL(it, cache->_primIndexCache) {
             const PcpPrimIndex& primIndex = it->second;
-            if (not primIndex.GetRootNode())
+            if (!primIndex.IsValid()) {
                 continue;
+            }
 
             ++(stats->numPrimIndexes);
 
@@ -133,9 +140,9 @@ struct Pcp_Statistics
             }
 
             // Gather map functions
-            TF_FOR_ALL(nodeIt, primIndex.GetNodeRange()) {
-                allMapFuncs.insert(nodeIt->GetMapToParent().Evaluate());
-                allMapFuncs.insert(nodeIt->GetMapToRoot().Evaluate());
+            for (const PcpNodeRef &node: primIndex.GetNodeRange()) {
+                allMapFuncs.insert(node.GetMapToParent().Evaluate());
+                allMapFuncs.insert(node.GetMapToRoot().Evaluate());
             }
         }
 
@@ -152,6 +159,13 @@ struct Pcp_Statistics
         TF_FOR_ALL(i, allMapFuncs) {
             size_t size = i->GetSourceToTargetMap().size();
             stats->mapFunctionSizeDistribution[size] += 1;
+        }
+
+        // PcpLayerStack _relocatesPrimPaths size distribution
+        for(const PcpLayerStackPtr &layerStack:
+            cache->_layerStackCache->GetAllLayerStacks()) {
+            size_t size = layerStack->GetPathsToPrimsWithRelocates().size();
+            stats->layerStackRelocationsSizeDistribution[size] += 1;
         }
     }
 
@@ -308,27 +322,11 @@ struct Pcp_Statistics
             printf("%zu   %zu\n", i->first, i->second);
         }
 
-        // Assert sizes of structs we want to keep a close eye on.
-        BOOST_STATIC_ASSERT(sizeof(PcpMapFunction) == 8);
-        BOOST_STATIC_ASSERT(sizeof(PcpMapExpression) == 8);
-
-        // This object is 120 bytes when building against libstdc++
-        // and 96 for libc++ because std::set is 48 bytes in the
-        // former case and 24 bytes in the latter.
-        BOOST_STATIC_ASSERT(sizeof(PcpMapExpression::_Node) == 120 or
-                            sizeof(PcpMapExpression::_Node) == 96);
-
-        BOOST_STATIC_ASSERT(sizeof(PcpLayerStackPtr) == 16);
-        BOOST_STATIC_ASSERT(sizeof(PcpLayerStackSite) == 24);
-
-        // This object is 104 bytes when building against libstdc++
-        // and 88 for libc++ because std::vector<bool> is 40 bytes
-        // in the former case and 24 bytes in the latter.
-        BOOST_STATIC_ASSERT(sizeof(PcpPrimIndex_Graph) == 104 or
-                            sizeof(PcpPrimIndex_Graph) == 88);
-
-        BOOST_STATIC_ASSERT(sizeof(PcpPrimIndex_Graph::_Node) == 48);
-        BOOST_STATIC_ASSERT(sizeof(PcpPrimIndex_Graph::_SharedData) == 32);
+        out << "PcpLayerStack pathsWithRelocates size histogram: " << endl;
+        out << "SIZE    COUNT" << endl;
+        TF_FOR_ALL(i, stats.layerStackRelocationsSizeDistribution) {
+            printf("%zu   %zu\n", i->first, i->second);
+        }
     }
 
     static void PrintPrimIndexStats(
@@ -364,3 +362,5 @@ Pcp_PrintPrimIndexStatistics(
 {
     Pcp_Statistics::PrintPrimIndexStats(primIndex, out);
 }
+
+PXR_NAMESPACE_CLOSE_SCOPE

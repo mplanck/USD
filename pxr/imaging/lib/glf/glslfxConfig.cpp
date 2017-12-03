@@ -24,10 +24,12 @@
 #include "pxr/imaging/glf/glslfxConfig.h"
 #include "pxr/imaging/glf/debugCodes.h"
 
-#include "pxr/base/tf/iterator.h"
 #include "pxr/base/tf/staticTokens.h"
 #include "pxr/base/tf/stl.h"
 #include "pxr/base/tf/type.h"
+
+PXR_NAMESPACE_OPEN_SCOPE
+
 
 using std::string;
 using std::vector;
@@ -36,6 +38,7 @@ TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
     (attributes)
     (techniques)
+    (metadata)
     (parameters)
     (parameterOrder)
     (textures)
@@ -66,6 +69,7 @@ GlfGLSLFXConfig::_Init(VtDictionary const & dict, string * errors)
     _params = _GetParameters(dict, errors);
     _textures = _GetTextures(dict, errors);
     _attributes = _GetAttributes(dict, errors);
+    _metadata = _GetMetadata(dict, errors);
     _sourceKeyMap = _GetSourceKeyMap(dict, errors);
 }
 
@@ -89,14 +93,14 @@ GlfGLSLFXConfig::_GetSourceKeyMap(VtDictionary const & dict,
     VtValue techniques;
 
     // verify that techiniques is specified
-    if (not TfMapLookup(dict, _tokens->techniques, &techniques)) {
+    if (!TfMapLookup(dict, _tokens->techniques, &techniques)) {
         *errorStr = TfStringPrintf("Configuration does not specify %s",
                                    _tokens->techniques.GetText());
         return ret;
     }
 
     // verify that it holds a VtDictionary
-    if (not techniques.IsHolding<VtDictionary>()) {
+    if (!techniques.IsHolding<VtDictionary>()) {
         *errorStr = TfStringPrintf("%s declaration expects a dictionary value",
                                    _tokens->techniques.GetText());
         return ret;
@@ -124,7 +128,7 @@ GlfGLSLFXConfig::_GetSourceKeyMap(VtDictionary const & dict,
     VtValue techniqueSpec = entry->second;
     
     // verify that it also holds a VtDictionary
-    if (not techniqueSpec.IsHolding<VtDictionary>()) {
+    if (!techniqueSpec.IsHolding<VtDictionary>()) {
         *errorStr = TfStringPrintf("%s spec for %s expects a dictionary value",
                                    _tokens->techniques.GetText(),
                                    entry->first.c_str());
@@ -133,12 +137,12 @@ GlfGLSLFXConfig::_GetSourceKeyMap(VtDictionary const & dict,
 
     const VtDictionary& specDict = techniqueSpec.UncheckedGet<VtDictionary>();
     // get all of the shader stages specified in the spec
-    TF_FOR_ALL(it, specDict) {
-        const string& shaderStageKey = it->first;
-        const VtValue& shaderStageSpec = it->second;
+    for (const std::pair<std::string, VtValue>& p : specDict) {
+        const string& shaderStageKey = p.first;
+        const VtValue& shaderStageSpec = p.second;
 
         // verify that the shaderStageSpec also holds a VtDictionary
-        if (not shaderStageSpec.IsHolding<VtDictionary>()) {
+        if (!shaderStageSpec.IsHolding<VtDictionary>()) {
             *errorStr = TfStringPrintf("%s spec for %s expects a dictionary "
                                        "value",
                                        entry->first.c_str(),
@@ -150,7 +154,7 @@ GlfGLSLFXConfig::_GetSourceKeyMap(VtDictionary const & dict,
         const VtDictionary& shaderStageDict =
             shaderStageSpec.UncheckedGet<VtDictionary>();
         VtValue source;
-        if (not TfMapLookup(shaderStageDict, _tokens->source, &source)) {
+        if (!TfMapLookup(shaderStageDict, _tokens->source, &source)) {
             *errorStr = TfStringPrintf("%s spec doesn't define %s for %s",
                                        entry->first.c_str(),
                                        _tokens->source.GetText(),
@@ -159,7 +163,7 @@ GlfGLSLFXConfig::_GetSourceKeyMap(VtDictionary const & dict,
         }
 
         // verify that source holds a list
-        if (not source.IsHolding<vector<VtValue> >()) {
+        if (!source.IsHolding<vector<VtValue> >()) {
             *errorStr = TfStringPrintf("%s of %s for spec %s expects a list",
                                        _tokens->source.GetText(),
                                        shaderStageKey.c_str(),
@@ -167,11 +171,10 @@ GlfGLSLFXConfig::_GetSourceKeyMap(VtDictionary const & dict,
             return ret;
         }
 
-        vector<VtValue>  sourceList = source.UncheckedGet<vector<VtValue> >();
-        TF_FOR_ALL(sourceIt, sourceList) {
-            const VtValue& val = *sourceIt;
+        vector<VtValue> sourceList = source.UncheckedGet<vector<VtValue>>();
+        for (VtValue const& val : sourceList) {
             // verify that this value is a string
-            if (not val.IsHolding<string>()) {
+            if (!val.IsHolding<string>()) {
                 *errorStr = TfStringPrintf("%s of %s for spec %s expects a "
                                            "list of strings",
                                            _tokens->source.GetText(),
@@ -215,12 +218,12 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
     VtValue params;
 
     // look for the params section
-    if (not TfMapLookup(dict, _tokens->parameters, &params)) {
+    if (!TfMapLookup(dict, _tokens->parameters, &params)) {
         return ret;
     }
 
     // verify that it holds a VtDictionary
-    if (not params.IsHolding<VtDictionary>()) {
+    if (!params.IsHolding<VtDictionary>()) {
         *errorStr = TfStringPrintf("%s declaration expects a dictionary value",
                                    _tokens->parameters.GetText());
         return ret;
@@ -231,9 +234,9 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
     VtValue paramOrderAny;
     TfMapLookup(dict, _tokens->parameterOrder, &paramOrderAny);
 
-    if (not paramOrderAny.IsEmpty()) {
+    if (!paramOrderAny.IsEmpty()) {
         // verify the type
-        if (not paramOrderAny.IsHolding<vector<VtValue> >()) {
+        if (!paramOrderAny.IsHolding<vector<VtValue> >()) {
             *errorStr =
                 TfStringPrintf("%s declaration expects a list of strings",
                                _tokens->parameterOrder.GetText());
@@ -242,10 +245,9 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
 
         const vector<VtValue>& paramOrderList =
             paramOrderAny.UncheckedGet<vector<VtValue> >();
-        TF_FOR_ALL(paramIt, paramOrderList) {
-            const VtValue& val = *paramIt;
+        for (VtValue const& val : paramOrderList) {
             // verify that this value is a string
-            if (not val.IsHolding<string>()) {
+            if (!val.IsHolding<string>()) {
                 *errorStr = TfStringPrintf("%s declaration expects a list of "
                                            "strings",
                                            _tokens->parameterOrder.GetText());
@@ -263,8 +265,8 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
 
     const VtDictionary& paramsDict = params.UncheckedGet<VtDictionary>();
     // pre-process the paramsDict in order to get the merged ordering
-    TF_FOR_ALL(it, paramsDict) {
-        string paramName = it->first;
+    for (const std::pair<std::string, VtValue>& p : paramsDict) {
+        string paramName = p.first;
         if (std::find(paramOrder.begin(), paramOrder.end(), paramName) ==
                 paramOrder.end()) {
             paramOrder.push_back(paramName);
@@ -272,18 +274,16 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
     }
 
     // now go through the params in the specified order
-    TF_FOR_ALL(it, paramOrder) {
-        string paramName = *it;
-
+    for (std::string const& paramName : paramOrder) {
         // ignore anything specified in the order that isn't in the actual dict
-        VtDictionary::const_iterator dictIt = paramsDict.find(*it);
+        VtDictionary::const_iterator dictIt = paramsDict.find(paramName);
         if (dictIt == paramsDict.end()) {
             continue;
         }
 
         const VtValue& paramData = dictIt->second;
 
-        if (not paramData.IsHolding<VtDictionary>()) {
+        if (!paramData.IsHolding<VtDictionary>()) {
             *errorStr = TfStringPrintf("%s declaration for %s expects a "
                                        "dictionary value",
                                        _tokens->parameters.GetText(),
@@ -295,7 +295,7 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
         const VtDictionary& paramDataDict =
             paramData.UncheckedGet<VtDictionary>();
         VtValue defVal;
-        if (not TfMapLookup(paramDataDict, _tokens->defVal, &defVal)) {
+        if (!TfMapLookup(paramDataDict, _tokens->defVal, &defVal)) {
             *errorStr = TfStringPrintf("%s declaration for %s must specify "
                                        "a default value",
                                        _tokens->parameters.GetText(),
@@ -307,7 +307,7 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
         VtValue docVal;
         string docString;
         if (TfMapLookup(paramDataDict, _tokens->documentation, &docVal)) {
-            if (not docVal.IsHolding<string>()) {
+            if (!docVal.IsHolding<string>()) {
                 *errorStr = TfStringPrintf("Value for %s for %s is not a "
                                            "string",
                                            _tokens->documentation.GetText(),
@@ -321,7 +321,7 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
         VtValue roleVal;
         Role role = RoleNone;
         if (TfMapLookup(paramDataDict, _tokens->role, &roleVal)) {
-            if (not roleVal.IsHolding<string>()) {
+            if (!roleVal.IsHolding<string>()) {
                 *errorStr = TfStringPrintf("Value for %s for %s is not a "
                                            "string",
                                            _tokens->role.GetText(),
@@ -331,7 +331,7 @@ GlfGLSLFXConfig::_GetParameters(VtDictionary const & dict,
 
             const string& roleString = roleVal.UncheckedGet<string>();
             role = _GetRoleFromString(roleString, errorStr);
-            if (not errorStr->empty()) {
+            if (!errorStr->empty()) {
                 return ret;
             }
         }
@@ -361,22 +361,22 @@ GlfGLSLFXConfig::_GetTextures(VtDictionary const & dict,
     VtValue textures;
 
     // look for the params section
-    if (not TfMapLookup(dict, _tokens->textures, &textures)) {
+    if (!TfMapLookup(dict, _tokens->textures, &textures)) {
         return ret;
     }
 
     // verify that it holds a VtDictionary
-    if (not textures.IsHolding<VtDictionary>()) {
+    if (!textures.IsHolding<VtDictionary>()) {
         *errorStr = TfStringPrintf("%s declaration expects a dictionary value",
                                    _tokens->textures.GetText());
         return ret;
     }
 
     const VtDictionary& texturesDict = textures.UncheckedGet<VtDictionary>();
-    TF_FOR_ALL(it, texturesDict) {
-        const string& textureName = it->first;
-        const VtValue& textureData = it->second;
-        if (not textureData.IsHolding<VtDictionary>()) {
+    for (const std::pair<std::string, VtValue>& p : texturesDict) {
+        const string& textureName = p.first;
+        const VtValue& textureData = p.second;
+        if (!textureData.IsHolding<VtDictionary>()) {
             *errorStr = TfStringPrintf("%s declaration for %s expects a "
                                        "dictionary value",
                                        _tokens->textures.GetText(),
@@ -396,7 +396,7 @@ GlfGLSLFXConfig::_GetTextures(VtDictionary const & dict,
         VtValue docVal;
         string docString;
         if (TfMapLookup(textureDataDict, _tokens->documentation, &docVal)) {
-            if (not docVal.IsHolding<string>()) {
+            if (!docVal.IsHolding<string>()) {
                 *errorStr = TfStringPrintf("Value for %s for %s is not a "
                                            "string",
                                            _tokens->documentation.GetText(),
@@ -431,12 +431,12 @@ GlfGLSLFXConfig::_GetAttributes(VtDictionary const & dict,
     VtValue attributes;
 
     // look for the attribute section
-    if (not TfMapLookup(dict, _tokens->attributes, &attributes)) {
+    if (!TfMapLookup(dict, _tokens->attributes, &attributes)) {
         return ret;
     }
 
     // verify that it holds a VtDictionary
-    if (not attributes.IsHolding<VtDictionary>()) {
+    if (!attributes.IsHolding<VtDictionary>()) {
         *errorStr = TfStringPrintf("%s declaration expects a dictionary value",
                                    _tokens->attributes.GetText());
         return ret;
@@ -444,10 +444,10 @@ GlfGLSLFXConfig::_GetAttributes(VtDictionary const & dict,
 
     const VtDictionary& attributesDict =
         attributes.UncheckedGet<VtDictionary>();
-    TF_FOR_ALL(it, attributesDict) {
-        const string& attributeName = it->first;
-        const VtValue& attributeData = it->second;
-        if (not attributeData.IsHolding<VtDictionary>()) {
+    for (const std::pair<std::string, VtValue>& p : attributesDict) {
+        const string& attributeName = p.first;
+        const VtValue& attributeData = p.second;
+        if (!attributeData.IsHolding<VtDictionary>()) {
             *errorStr = TfStringPrintf("%s declaration for %s expects a "
                                        "dictionary value",
                                        _tokens->attributes.GetText(),
@@ -462,7 +462,7 @@ GlfGLSLFXConfig::_GetAttributes(VtDictionary const & dict,
         VtValue docVal;
         string docString;
         if (TfMapLookup(attributeDataDict, _tokens->documentation, &docVal)) {
-            if (not docVal.IsHolding<string>()) {
+            if (!docVal.IsHolding<string>()) {
                 *errorStr = TfStringPrintf("Value for %s for %s is not a "
                                            "string",
                                            _tokens->documentation.GetText(),
@@ -481,3 +481,35 @@ GlfGLSLFXConfig::_GetAttributes(VtDictionary const & dict,
 
     return ret;
 }
+
+GlfGLSLFXConfig::MetadataDictionary
+GlfGLSLFXConfig::GetMetadata() const
+{
+    return _metadata;
+}
+
+GlfGLSLFXConfig::MetadataDictionary
+GlfGLSLFXConfig::_GetMetadata(VtDictionary const & dict,
+                              string *errorStr) const
+{
+    MetadataDictionary ret;
+
+    VtValue metadata;
+
+    // look for the metadata section
+    if (!TfMapLookup(dict, _tokens->metadata, &metadata)) {
+        return ret;
+    }
+
+    // verify that it holds a VtDictionary
+    if (!metadata.IsHolding<VtDictionary>()) {
+        *errorStr = TfStringPrintf("%s declaration expects a dictionary value",
+                                   _tokens->metadata.GetText());
+        return ret;
+    }
+
+    return metadata.UncheckedGet<VtDictionary>();
+}
+
+PXR_NAMESPACE_CLOSE_SCOPE
+
