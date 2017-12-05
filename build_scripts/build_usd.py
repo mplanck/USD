@@ -184,9 +184,9 @@ def RunCMake(context, force, extraArgs = None):
         if msvcCompilerAndVersion:
             _, version = msvcCompilerAndVersion
             if version >= MSVC_2017_COMPILER_VERSION:
-                generator = '-G "Visual Studio 15 2017 Win64"'
+                generator = 'Visual Studio 15 2017 Win64'
             else:
-                generator = '-G "Visual Studio 14 2015 Win64"'
+                generator = 'Visual Studio 14 2015 Win64'
                 
     # On MacOS, enable the use of @rpath for  relocatable builds.
     osx_rpath = None
@@ -198,7 +198,7 @@ def RunCMake(context, force, extraArgs = None):
             '-DCMAKE_INSTALL_PREFIX="{instDir}" '
             '-DCMAKE_PREFIX_PATH="{depsInstDir}" '
             '{osx_rpath} '
-            '{generator} '
+            '-G "{generator}" '
             '{extraArgs} '
             '"{srcDir}"'
             .format(instDir=instDir,
@@ -646,7 +646,10 @@ def InstallOpenImageIO(context, force):
     with CurrentWorkingDirectory(DownloadURL(OIIO_URL, context, force)):
         extraArgs = ['-DOIIO_BUILD_TOOLS=OFF',
                      '-DOIIO_BUILD_TESTS=OFF',
-                     '-DSTOP_ON_WARNING=OFF']
+                     '-DSTOP_ON_WARNING=OFF',   
+                     '-DBoost_ADDITIONAL_VERSIONS="1.61"',                  
+                     '-DBOOST_ROOT='+context.instDir,
+                     '']
 
         # If Ptex support is disabled in USD, disable support in OpenImageIO
         # as well. This ensures OIIO doesn't accidentally pick up a Ptex
@@ -789,7 +792,8 @@ ALEMBIC = Dependency("Alembic", InstallAlembic, "include/Alembic/Abc/Base.h")
 def InstallUSD(context):
     with CurrentWorkingDirectory(context.usdSrcDir):
         extraArgs = []
-
+        if Windows() or MacOS():
+            extraArgs.append('-DBoost_ADDITIONAL_VERSIONS="1.61"')
         if context.buildPython:
             extraArgs.append('-DPXR_ENABLE_PYTHON_SUPPORT=ON')
         else:
